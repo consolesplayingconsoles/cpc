@@ -1,0 +1,82 @@
+# System Architecture & Operational Rules
+
+### 1. Control Plane & Monitoring
+The network is monitored and administered from **Pluto**, a web dashboard that channels a highly functional, dense, and hyper-reliable router console aesthetic — optimized for pure engineering utility rather than flashy corporate web design.
+
+### 2. Unified Environment Configuration (.env)
+Environment configuration files live inside each console's own directory (e.g. `wii/.env`, `wii/dev.env`). They act as the single source of truth for branding, networking, and security credentials across both the web and terminal interfaces. Never create a flat `console/` directory for env files — each console owns its own.
+
+* **Sandboxing**: Variables must remain strictly sandboxed to their specific deployment runtime contexts.
+* **Unified Template (`.env.sample`)**: Each console directory includes a `.env.sample` template file containing zero real data. This file is the strict structural blueprint. Never commit `*.env` files — only `*.env.sample`.
+* **Strict Validation (Fail Fast)**: At boot time, the system validates all required environment parameters. If a required field is missing or empty, the application must immediately terminate execution and output a clean, highly scannable terminal error detailing exactly what is missing. It will never proceed with silent fallback values.
+* **Shared Network & Access Variables**:
+  * `NODE_NAME`: The unique host identity string used as the header/title across all user interfaces (e.g., `Pluto - Dev Node`).
+  * `HOST_IP`: The dedicated IP address of the console environment.
+  * `SSH_USER`: The administrative username for console access.
+  * `SSH_KEY_PATH`: Path to the local private key file.
+* **Shared UI Branding Variables**:
+  * `UI_PRIMARY_COLOR`: Controls the dominant UI accent (e.g., active cursor in terminal, main accent lines in Pluto).
+  * `UI_SECONDARY_COLOR`: Controls background accents, borders, and metadata states.
+
+### 3. External File Systems
+Data synchronization relies on an integrated **commercial cloud storage provider**, abstracting the external file system from the core application. Do not use provider-specific brand names in the codebase or system documentation.
+
+### 4. Repository Tidy Rules & Dynamic Scaffolding
+To prevent platform collisions, all assets, firmware, and executables are encapsulated into console-specific root application directories. 
+
+* **On-Demand Initialization**: The development pipeline monitors the repository root for empty directories matching the designated console codenames listed in the parent README. When a matched empty directory is created, the system must automatically initialize its internal structure using these strict folder naming conventions:
+  * **`/bin`**: Platform-locked native binaries, executables, and external code managed via console sites (aligns with standard Linux binary paths).
+  * **`/share`**: Shared media, document templates, and static external resources that are architecture-independent (aligns with the Linux `/usr/share` convention).
+  * **`/roms`**: Read-only gaming files, firmware images, and system baselines.
+
+### 5. Interface Design Guidelines
+
+#### 5.1 Pluto Web Dashboard (Remote Monitoring)
+Pluto is a web-based management dashboard. 
+* **Web Stack**: Built using **TypeScript** and **Vue.js**, adhering to a safe, highly conservative linting configuration to guarantee rock-solid runtime stability.
+* **Aesthetic**: Channels the vibe of a premium, enthusiast-grade hardware router page. It skips corporate SaaS web trends in favor of an aesthetic that feels like a physical piece of engineered hardware.
+* **Node Icons**: Console icons are sourced from `libretro/retroarch-assets` xmb/systematic/png (CC BY 4.0). Attribution lives in `pluto/src/assets/consoles/NOTICES`. Current set: `wii.png`, `dc.png`, `ps3.png`, `gba.png`, `ws.png` (consoles), `host.png` (Apple Macintosh = local machine), `gateway.svg` (original). Do not fetch additional icons without updating NOTICES.
+* **Flagship Feature (Dynamic Network Diagram)**: The core of the interface is an interactive, real-time topological diagram mapping the network structure, live connection data, and device availability directly onto a visual map.
+* **Dynamic Node Discovery Model**: The system relies on zero static configuration JSON files. Pluto dynamically renders the map by compiling defined `.env` targets and executing live runtime ICMP checks:
+  * **Not Present**: If a device IP or configuration parameter is missing from the environment file, the system flags the entity as not present and dynamically strips it from the map viewport entirely.
+  * **System Up**: If the environment variable exists and a live runtime network ping to the target IP succeeds, the system marks the node active, drawing the active connection arrows and loading its custom console asset icon.
+  * **System Down**: If the environment variable exists but a live network ping fails to resolve, the node remains on the grid but falls back into a visual offline/down state.
+* **UI/UX Balance (Premium Simplicity)**: The diagram balances high utility with a sharp, premium finish. It features crisp custom console icons, clean directional connection vectors, and a clear grid layout. It behaves like Mac utility software—stripping away visual clutter and heavy animations, while using beautiful asset design, deliberate typography, and absolute pixel-precision to look incredibly cool and professional.
+* **Environment Branding**: Reads `NODE_NAME`, `UI_PRIMARY_COLOR`, and `UI_SECONDARY_COLOR` from the environment `.env` to brand and skin the web page dynamically.
+
+#### 5.2 Python Console Interface (Local Administration)
+The Python application features a terminal-based administrative interface for direct host interaction.
+* **Navigation**: Uses an ASCII-rendered, keyboard and hardware D-pad navigable menu system.
+* **Environment Branding**: Dynamically skins its ANSI terminal borders and title bars using the exact same `NODE_NAME` and `UI_PRIMARY_COLOR` properties utilized by Pluto.
+* **Input Model**: Displays interactive text input fields dynamically at the exact time and place user configuration is required.
+* **Config Printing**: Capable of reading and printing raw configuration files (such as controller mappings) directly into the terminal window for instant inspection.
+* **Title format**: ASCII header always renders as `CPC MANUFACTURER CONSOLENAME` using pyfiglet. CPC + manufacturer on one line (secondary color), console name large below (primary color).
+* **Dependencies**: managed via `requirements.txt`, vendored with `pip install -r requirements.txt --target=vendor/`, deployed via `deploy.sh <console>/.env`.
+
+### 6. Cross-Platform Topology & Dynamic Availability
+The core Python interface executes natively on a **master** Linux console. However, its management scope extends beyond the host machine to coordinate specialized **client** devices directly from the master interface.
+
+#### 6.1 Input & Controller Navigation
+* **Dual Control Schemes**: The interface is fully navigable using both standard keyboard inputs and physical hardware controller D-pads.
+
+#### 6.2 Master/Client Relationship & Dynamic UI Visibility
+* **Master/Client Architecture**: The Linux machine acts as the central master console, driving administrative actions for connected client hardware.
+* **Context-Aware Menu Visibility**: Client-specific submenus and management features are completely dynamic. Mirroring Pluto's discovery logic, they only become visible and usable within the UI if the master console actively detects that the client configuration exists and the live device responds to network pinging. Disabled, missing, or disconnected clients are automatically stripped from the active menu options to keep the terminal view clean.
+
+### 7. Application Layer & Byproduct Services (Webapps & Servers)
+Beyond the administrative control plane, the platform hosts an ecosystem of localized web applications, custom test pages, and Proof of Concept (POC) servers. These byproducts (e.g., experimental servers, diagnostic test views, or localized online/LAN game rooms for any given title) represent the creative and functional outputs of the system rather than the core infrastructure tools themselves.
+
+#### 7.1 Web Stack & Coding Standards
+* **Core Technologies**: Built using **TypeScript** and **Vue.js**, utilizing the same safe, conservative linting profile used by Pluto.
+
+#### 7.2 Console Browser Optimization & Real-Time Fallbacks
+Pluto itself is never loaded on a console browser. However, consumer-facing byproduct applications, test views, and game lobbies are optimized to scale down cleanly for embedded or legacy console web engines:
+* **Legacy Transpilation Target**: The build pipeline compiles these specific webapps down to a backward-compatible JavaScript baseline (e.g., ES5/ES6) to avoid execution errors on primitive console browsers.
+* **Graceful Degradation ("Strip Rather Than Break")**: If a console browser breaks on modern CSS layout rules or advanced properties, the system strips those layers entirely, gracefully dropping back to a functional, unstyled text-and-grid layout.
+* **Real-Time Fallback Workflow**: Because console rendering behaviors must be verified interactively in real-time, the architecture permits writing explicit, lightweight fallback templates or alternative stylesheets. If real-time physical device testing reveals visual or structural breakage, the engine will explicitly serve the simplified fallback view to that legacy target.
+
+### 8. Local Development & Interface Testing
+To keep production application logic perfectly clean and free of testing conditionals, the platform utilizes separate execution scripts for live deployments versus local development environments.
+
+* **Production Entrypoint (`main.py`)**: Runs the strict live logic. It parses the namespace-targeted `.env` file, evaluates real host infrastructure, executes live pings, and dynamically hides/strips UI menus based on physical hardware availability.
+* **Development Entrypoint (`dev.py`)**: A dedicated wrapper script used solely for local interface testing (the python equivalent to running `yarn dev`). It completely bypasses the live infrastructure pipeline and force-feeds a complete layout matrix directly into the UI engine. This ensures all menus and text inputs remain visible and editable locally without requiring a production host context or physical devices attached.

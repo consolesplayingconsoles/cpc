@@ -216,3 +216,23 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+.idea
+.vscode
+.claude/settings.local.json
+
+# Vendored dependencies (built locally, shipped via deploy.sh)
+vendor/
+
+# Runtime logs
+logs/
+
+# Env files with real data — never commit these
+.env
+*.env
+!*.env.sample
+
+# Pluto (Vue/Vite)
+pluto/node_modules/
+pluto/dist/
+pluto/.vite/
