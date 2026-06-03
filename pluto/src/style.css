@@ -1,0 +1,30 @@
+/* ── Global tokens ─────────────────────────────────────────── */
+:root {
+  --color-bg:        #ffffff;
+  --color-primary:   #1a1a1a;
+  --color-secondary: #888884;
+  --color-bubble:    #e8e8e6;
+  --color-up:        #1a7a3a;
+  --color-down:      #cc2222;
+  --color-border:    #c8c8c4;
+  --font-mono:       'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;
+}
+
+/* ── Reset ─────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-primary);
+  font-family: var(--font-mono);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100%;
+}
