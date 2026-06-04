@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { NodeData } from '../composables/useNodes'
-
-const BUBBLE_R    = 32
-const BUBBLE_HOV  = 36
-const BUBBLE_OPEN = 78
+import { BUBBLE_R, BUBBLE_HOV, BUBBLE_OPEN } from '../composables/bubbleConstants'
 
 const props = defineProps<{
   id:          string
@@ -68,7 +65,7 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
     <image
       v-else
       :href="icon"
-      x="-22" y="-22" width="44" height="44"
+      x="-20" y="-20" width="40" height="40"
       :opacity="node.status === 'up' ? 0.92 : 0.25"
       @click.stop="emit('toggle')"
     />

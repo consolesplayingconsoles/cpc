@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { NodeMap } from '../composables/useNodes'
 import { useDeploy } from '../composables/useDeploy'
+import { BUBBLE_R, BUBBLE_OPEN } from '../composables/bubbleConstants'
 import NodeBubble from './NodeBubble.vue'
 import DeployTerminal from './DeployTerminal.vue'
 import AchievementToast from './AchievementToast.vue'
@@ -26,12 +27,10 @@ const LAYOUT: Record<string, { x: number; y: number }> = {
   dc:      { x: 390, y:  80 },
   ps3:     { x: 700, y: 130 },
   gba:     { x:  80, y: 230 },
-  ws:      { x: 800, y: 430 },
+  ws:      { x: 310, y: 280 },
   host:    { x: 660, y: 460 },
 }
 
-const BUBBLE_R    = 32
-const BUBBLE_OPEN = 78
 
 const {
   deploying, deployOutput,
