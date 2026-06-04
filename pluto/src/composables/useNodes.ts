@@ -8,6 +8,7 @@ export interface NodeData {
   ip:     string
   color:  string | null
   status: NodeStatus
+  parent: string
 }
 
 export type NodeMap = Record<string, NodeData>

@@ -200,6 +200,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "ip": "127.0.0.1",
             "color": cfg.get("UI_PRIMARY_COLOR") or None,
             "status": "up",
+            "parent": "gateway",
         }
 
         for node_id, (ip_key, env_key) in node_defs.items():
@@ -209,6 +210,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             name = node_id
             color = None
+            parent = "gateway"
             if env_key:
                 env_path = cfg.get(env_key, "").strip()
                 if env_path:
@@ -216,6 +218,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     console_cfg = load_env(full_path)
                     name = console_cfg.get("NODE_NAME", node_id)
                     color = console_cfg.get("UI_PRIMARY_COLOR") or None
+                    parent = console_cfg.get("PARENT", "gateway") or "gateway"
 
             nodes[node_id] = {
                 "id": node_id,
@@ -223,6 +226,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "ip": ip,
                 "color": color,
                 "status": "up" if ping(ip) else "down",
+                "parent": parent,
             }
 
         return nodes
