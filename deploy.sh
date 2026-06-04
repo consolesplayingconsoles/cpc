@@ -28,7 +28,7 @@ fi
 
 # ── Parse env file ────────────────────────────────────────────
 _env_get() {
-  grep -E "^$1=" "$ENV_FILE" | cut -d= -f2- | tr -d '[:space:]'
+  grep -E "^$1=" "$ENV_FILE" | cut -d= -f2- | sed 's/^[[:space:]"'"'"']*//;s/[[:space:]"'"'"']*$//'
 }
 
 HOST_IP="$(_env_get HOST_IP)"

@@ -27,10 +27,9 @@ def open_path(path: str):
 
 
 PORT = 7700
-ALLOWED_ORIGINS = {
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-}
+def _is_allowed_origin(origin: str) -> bool:
+    import re
+    return bool(re.match(r'^https?://(localhost|127\.0\.0\.1)(:\d+)?$', origin))
 
 # The explicit checklist of variables required for your environment infrastructure
 REQUIRED_VARS = [
@@ -66,7 +65,10 @@ def load_env(path: str) -> dict:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             k, _, v = line.partition("=")
-            config[k.strip()] = v.strip()
+            v = v.strip()
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+                v = v[1:-1]
+            config[k.strip()] = v
     return config
 
 
@@ -84,7 +86,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         origin = self.headers.get("Origin", "")
-        if origin in ALLOWED_ORIGINS:
+        if _is_allowed_origin(origin):
             self.send_header("Access-Control-Allow-Origin", origin)
         self.end_headers()
         self.wfile.write(data)
@@ -92,7 +94,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         origin = self.headers.get("Origin", "")
-        if origin in ALLOWED_ORIGINS:
+        if _is_allowed_origin(origin):
             self.send_header("Access-Control-Allow-Origin", origin)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
@@ -128,6 +130,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         path = os.path.expanduser(path)
+        if action == "open" and target_node != "host":
+            path = os.path.join(path, target_node)
         print(f"  [OPEN:{action}] Targeted Node: {target_node} → {path}")
         open_path(path)
         self._send(200, {"status": "opened", "path": path, "target": target_node})
@@ -144,8 +148,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         full_env = os.path.join(base_dir, env_path)
-        deploy_sh = os.path.join(base_dir, "deploy.sh")
-        repo_root = base_dir
+        repo_root = os.path.dirname(base_dir)
+        deploy_sh = os.path.join(repo_root, "deploy.sh")
 
         if not os.path.exists(deploy_sh):
             self._send(500, {"error": f"deploy.sh not found at {deploy_sh}"})

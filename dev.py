@@ -5,6 +5,10 @@ dev.py — local development entrypoint.
 Bypasses all live infrastructure checks and force-feeds a complete
 layout into the UI engine so every menu and feature is testable
 without physical hardware or a production host context.
+
+Usage: python3 dev.py <console>
+       python3 dev.py wii
+       python3 dev.py ps3
 """
 import os
 import sys
@@ -14,30 +18,40 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.ui import renderer, menu as menu_mod, input as input_mod, actions
 
-DEV_ENV = os.path.join(os.path.dirname(__file__), "wii", "dev.env")
+
+def _resolve_console() -> str:
+    if len(sys.argv) < 2:
+        print("Usage: python3 dev.py <console>  (e.g. wii, ps3, dc)")
+        sys.exit(1)
+    return sys.argv[1].lower()
 
 
-def _load_dev_config() -> dict:
-    config = {}
-    if os.path.exists(DEV_ENV):
-        with open(DEV_ENV) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                k, _, v = line.partition("=")
-                config[k.strip()] = v.strip()
-    config.setdefault("NODE_NAME",          "Wii")
-    config.setdefault("SHORT_NAME",         "wii")
-    config.setdefault("MANUFACTURER",       "Nintendo")
-    config.setdefault("BUTTON_CONFIRM",     "A")
-    config.setdefault("BUTTON_CANCEL",      "Q")
-    config.setdefault("BUTTON_BACK",        "◀")
-    config.setdefault("BUTTON_UP",          "UP")
-    config.setdefault("BUTTON_DOWN",        "DOWN")
-    config.setdefault("UI_PRIMARY_COLOR",   "#75B2DD")
-    config.setdefault("UI_SECONDARY_COLOR", "#4A6878")
-    return config
+def _load_dev_config(console: str) -> dict:
+    root = os.path.dirname(os.path.abspath(__file__))
+    for filename in (".env",):
+        path = os.path.join(root, console, filename)
+        if os.path.exists(path):
+            config = {}
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, _, v = line.partition("=")
+                    v = v.strip()
+                    if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+                        v = v[1:-1]
+                    config[k.strip()] = v
+            config.setdefault("SHORT_NAME", console)
+            config.setdefault("BUTTON_CONFIRM",     "A")
+            config.setdefault("BUTTON_CANCEL",      "Q")
+            config.setdefault("BUTTON_BACK",        "◀")
+            config.setdefault("BUTTON_UP",          "UP")
+            config.setdefault("BUTTON_DOWN",        "DOWN")
+            return config
+
+    print(f"Error: no env file found for '{console}' (checked {console}/.env)")
+    sys.exit(1)
 
 
 MENU_ITEMS = [
@@ -52,13 +66,13 @@ ACTION_MAP = {
 
 
 def run():
-    config = _load_dev_config()
+    console = _resolve_console()
+    config  = _load_dev_config(console)
     sys.stdout.write(renderer.ALT_ENTER)
     sys.stdout.flush()
     atexit.register(lambda: sys.stdout.write(renderer.ALT_EXIT + renderer.SHOW_CUR) or sys.stdout.flush())
     menu   = menu_mod.Menu(MENU_ITEMS)
 
-    # Stack of (title, items) — when non-empty we're in a list view.
     stack  = []
 
     while True:
