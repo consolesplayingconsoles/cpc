@@ -8,7 +8,13 @@ const { nodes, loading, error } = useNodes()
 <template>
   <div class="shell">
     <header class="header">
-      <span class="header-title">CPC PLUTO</span>
+      <span class="header-title">
+        <svg width="12" height="12" viewBox="0 0 12 12" style="vertical-align:middle; margin-right:8px;">
+          <circle cx="6" cy="6" r="5" fill="#F5A623" opacity="0.2"/>
+          <circle cx="6" cy="6" r="3.5" fill="#F5A623"/>
+          <circle cx="4.5" cy="4.5" r="1.5" fill="white" opacity="0.45"/>
+        </svg><span>CPC PLUTO</span>
+      </span>
       <span class="header-status">
         <span>{{ loading ? 'SCANNING' : error ? 'OFFLINE' : 'LIVE' }}</span>
         <svg width="10" height="10" viewBox="0 0 14 14" style="vertical-align: middle; margin-left: 6px;">
@@ -52,7 +58,7 @@ const { nodes, loading, error } = useNodes()
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.15em;
-  color: var(--color-primary);
+  color: #9a6c1a;
 }
 
 .header-status {
