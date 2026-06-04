@@ -44,8 +44,8 @@ def _load_dev_config(console: str) -> dict:
                     config[k.strip()] = v
             config.setdefault("SHORT_NAME", console)
             config.setdefault("BUTTON_CONFIRM",     "A")
-            config.setdefault("BUTTON_CANCEL",      "Q")
-            config.setdefault("BUTTON_BACK",        "◀")
+            config.setdefault("BUTTON_CANCEL",      "B")
+            config.setdefault("BUTTON_BACK",        "<")
             config.setdefault("BUTTON_UP",          "UP")
             config.setdefault("BUTTON_DOWN",        "DOWN")
             return config

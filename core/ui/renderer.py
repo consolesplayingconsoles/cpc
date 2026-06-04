@@ -127,10 +127,10 @@ def render_menu(config: dict, items: list, cursor: int):
         else:
             out.append(f"{pad}{secondary}   {item}{RESET}")
 
-    btn_up      = config.get("BUTTON_UP",      "↑")
-    btn_down    = config.get("BUTTON_DOWN",    "↓")
+    btn_up      = config.get("BUTTON_UP",      "UP")
+    btn_down    = config.get("BUTTON_DOWN",    "DOWN")
     btn_confirm = config.get("BUTTON_CONFIRM", "enter")
-    btn_cancel  = config.get("BUTTON_CANCEL",  "q")
+    btn_cancel  = config.get("BUTTON_CANCEL",  "B")
     hint = f"{btn_up}/{btn_down} navigate   {btn_confirm} select   {btn_cancel} quit"
     out.append("")
     out.append(_center(f"{secondary}{hint}{RESET}", term_width))
@@ -171,9 +171,9 @@ def render_list(config: dict, title: str, items: list, cursor: int):
         else:
             out.append(f"{pad}{secondary}   {item}{RESET}")
 
-    btn_up   = config.get("BUTTON_UP",   "↑")
-    btn_down = config.get("BUTTON_DOWN", "↓")
-    btn_back = config.get("BUTTON_BACK", "◀")
+    btn_up   = config.get("BUTTON_UP",   "UP")
+    btn_down = config.get("BUTTON_DOWN", "DOWN")
+    btn_back = config.get("BUTTON_BACK", "<")
     hint = f"{btn_up}/{btn_down} scroll   {btn_back} back"
     out.append("")
     out.append(_center(f"{secondary}{hint}{RESET}", term_width))
