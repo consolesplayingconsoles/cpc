@@ -68,7 +68,7 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
     <image
       v-else
       :href="icon"
-      x="-24" y="-24" width="48" height="48"
+      x="-22" y="-22" width="44" height="44"
       :opacity="node.status === 'up' ? 0.92 : 0.25"
       @click.stop="emit('toggle')"
     />
@@ -79,7 +79,7 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
 
     <text :y="ipY" text-anchor="middle" class="node-ip" @click.stop="emit('toggle')">{{ node.ip }}</text>
 
-    <g v-if="isActive" @click.stop>
+    <g v-if="isActive" @click.stop :transform="nameLines.length > 1 ? 'translate(0,5)' : ''">
       <g
         class="action-btn"
         transform="translate(-14, 0)"
