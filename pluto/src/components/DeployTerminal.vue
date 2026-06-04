@@ -56,7 +56,7 @@ async function copyOutput() {
 <style scoped>
 .term {
   position: absolute;
-  z-index: 1;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   overflow: hidden;
