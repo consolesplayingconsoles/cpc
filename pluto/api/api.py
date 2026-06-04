@@ -4,14 +4,26 @@ api.py — local API server for Pluto.
 Handles network pings and deploy triggers.
 Listens on localhost only. Never exposed externally.
 
-Usage: python3 server/api.py <env-file>
+Usage: python3 server/api.py
 """
 import os
 import sys
 import json
+import platform
 import subprocess
 import http.server
 import urllib.parse
+
+
+def open_path(path: str):
+    """Open a file or directory in the system file manager, cross-platform."""
+    system = platform.system()
+    if system == "Darwin":
+        subprocess.Popen(["open", path])
+    elif system == "Linux":
+        subprocess.Popen(["xdg-open", path])
+    elif system == "Windows":
+        subprocess.Popen(["explorer", path])
 
 
 PORT = 7700
@@ -51,6 +63,7 @@ def load_env(path: str) -> dict:
 
 class Handler(http.server.BaseHTTPRequestHandler):
     config: dict = {}
+    base_dir: str = ""
 
     def log_message(self, format, *args):
         if self.path.startswith('/deploy'):
@@ -85,21 +98,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
-        origin = self.headers.get("Origin", "")
-        if origin in ALLOWED_ORIGINS:
-            pass  # CORS handled in _send
-
         parts = parsed.path.strip("/").split("/")
         if len(parts) == 2 and parts[0] == "deploy":
-            node_id = parts[1]
-            self._handle_deploy(node_id)
+            self._handle_deploy(parts[1])
+        elif len(parts) == 2 and parts[0] in ("open", "workspace"):
+            self._handle_open(parts[0])
         else:
             self._send(404, {"error": "not found"})
+
+    def _handle_open(self, action: str):
+        key = {"open": "LOCAL_PATH", "workspace": "WORKSPACE_PATH"}.get(action)
+        if not key:
+            self._send(404, {"error": "unknown action"})
+            return
+        path = self.__class__.config.get(key, "").strip()
+        if not path:
+            self._send(400, {"error": f"{key} not configured"})
+            return
+        path = os.path.expanduser(path)
+        print(f"  [OPEN:{action}] {path}")
+        open_path(path)
+        self._send(200, {"status": "opened", "path": path})
 
     def _handle_deploy(self, node_id: str):
         cfg      = self.__class__.config
         base_dir = self.__class__.base_dir
 
+        # Using your single config to read node deployment profiles directly
         env_key  = f"{node_id.upper()}_ENV"
         env_path = cfg.get(env_key, "").strip()
 
@@ -110,25 +135,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
         full_env  = os.path.join(base_dir, env_path)
         deploy_sh = os.path.join(base_dir, "..", "deploy.sh")
         deploy_sh = os.path.normpath(deploy_sh)
+        repo_root = os.path.dirname(deploy_sh)
 
         if not os.path.exists(deploy_sh):
             self._send(500, {"error": "deploy.sh not found"})
             return
 
         print(f"  [DEPLOY] {node_id} → {full_env}")
-        proc = subprocess.Popen(
-            ["bash", deploy_sh, full_env],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        # Stream output in background thread
-        import threading
-        def _stream(p):
-            for line in p.stdout:
-                print(f"  [DEPLOY:{node_id}] {line}", end="")
-        threading.Thread(target=_stream, args=(proc,), daemon=True).start()
-        self._send(200, {"status": "deploying", "node": node_id})
+        try:
+            result = subprocess.run(
+                ["bash", deploy_sh, full_env],
+                cwd=repo_root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            self._send(504, {"status": "error", "node": node_id, "output": "timed out after 120s"})
+            return
+
+        output = result.stdout.strip() if result.stdout else ""
+        ok     = result.returncode == 0
+        for line in output.splitlines():
+            print(f"  [DEPLOY:{node_id}] {line}")
+        self._send(200 if ok else 500, {
+            "status":     "ok" if ok else "error",
+            "node":       node_id,
+            "output":     output,
+            "returncode": result.returncode,
+        })
 
     def _build_nodes(self):
         cfg      = self.__class__.config
@@ -144,11 +180,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "ws":      ("WS_IP",      "WS_ENV"),
         }
 
-        # Host is always present and always up — it's the machine running Pluto
         nodes["host"] = {
             "id":     "host",
             "name":   cfg.get("NODE_NAME", "Host"),
             "ip":     "127.0.0.1",
+            "color":  cfg.get("UI_PRIMARY_COLOR") or None,
             "status": "up",
         }
 
@@ -157,28 +193,39 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not ip:
                 continue
 
-            name = node_id
+            name  = node_id
+            color = None
             if env_key:
                 env_path = cfg.get(env_key, "").strip()
                 if env_path:
-                    full_path = os.path.join(base_dir, env_path)
-                    console_cfg = load_env(full_path)
-                    name = console_cfg.get("NODE_NAME", node_id)
+                    full_path    = os.path.join(base_dir, env_path)
+                    console_cfg  = load_env(full_path)
+                    name         = console_cfg.get("NODE_NAME",       node_id)
+                    color        = console_cfg.get("UI_PRIMARY_COLOR") or None
 
             nodes[node_id] = {
                 "id":     node_id,
                 "name":   name,
                 "ip":     ip,
+                "color":  color,
                 "status": "up" if ping(ip) else "down",
             }
 
         return nodes
 
 
-def run(env_path: str):
+def run():
+    # Automatically locate '.env' relative to this script file
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    env_path = os.path.join(script_dir, ".env")
+
+    if not os.path.exists(env_path):
+        print(f"Error: Single target configuration file '{env_path}' not found.")
+        sys.exit(1)
+
     config = load_env(env_path)
     Handler.config   = config
-    Handler.base_dir = os.path.dirname(os.path.abspath(env_path))
+    Handler.base_dir = script_dir
 
     http.server.HTTPServer.allow_reuse_address = True
     server = http.server.HTTPServer(("127.0.0.1", PORT), Handler)
@@ -188,9 +235,9 @@ def run(env_path: str):
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        pass
+        print("\n  Stopping server...")
+        server.server_close()
 
 
 if __name__ == "__main__":
-    env = sys.argv[1] if len(sys.argv) > 1 else "dev.env"
-    run(env)
+    run()

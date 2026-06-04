@@ -6,6 +6,7 @@ export interface NodeData {
   id:     string
   name:   string
   ip:     string
+  color:  string | null
   status: NodeStatus
 }
 
