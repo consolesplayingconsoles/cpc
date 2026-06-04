@@ -15,6 +15,7 @@ ALT_EXIT   = "\033[?1049l"   # restore original screen buffer
 _TIERS = [
     (120, "doom",  "roman"),
     ( 60, "small", "small"),
+    ( 40, "mini",  "mini"),
     (  0,  None,    None),
 ]
 
@@ -26,12 +27,12 @@ def hex_fg(hex_color: str) -> str:
 
 
 _figlet_cache: dict = {}
-_title_cache:  dict = {}
+_title_cache: dict = {}
 
 def _figlet(text: str, font: str) -> list:
     key = (text, font)
     if key not in _figlet_cache:
-        raw = pyfiglet.figlet_format(text, font=font)
+        raw = pyfiglet.figlet_format(text, font=font, width=10000)
         lines = raw.splitlines()
         while lines and not lines[-1].strip():
             lines.pop()
@@ -73,8 +74,8 @@ def _pick_fonts(term_width: int, mfr: str, node: str):
             continue
         if f_header is None:
             return None, None
-        if max(_rendered_width(f"CPC  {mfr}", f_header),
-               _rendered_width(node, f_console)) <= term_width:
+        widest_node = max(_rendered_width(w, f_console) for w in node.split())
+        if max(_rendered_width(f"CPC  {mfr}", f_header), widest_node) <= term_width:
             return f_header, f_console
     return None, None
 
@@ -93,8 +94,9 @@ def _render_title(config: dict, primary: str, secondary: str,
         for line in _figlet(f"CPC  {mfr}", f_header):
             out.append(_center(f"{secondary}{line}{RESET}", term_width))
         out.append("")
-        for line in _figlet(node, f_console):
-            out.append(_center(f"{primary}{BOLD}{line}{RESET}", term_width))
+        for word in node.split():
+            for line in _figlet(word, f_console):
+                out.append(_center(f"{primary}{BOLD}{line}{RESET}", term_width))
     else:
         header = f"CPC {mfr.upper()} {node.upper()}"
         out.append(_center(f"{primary}{BOLD}{header}{RESET}", term_width))

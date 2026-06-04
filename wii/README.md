@@ -42,7 +42,7 @@ cd /opt/cpc && PYTHONPATH=vendor python3 main.py wii/.env
 Run the UI locally without a connected Wii using the dev entrypoint:
 
 ```bash
-python3 dev.py
+python3 dev.py wii
 ```
 
-Uses `wii/dev.env` — no live pings or hardware required.
+Uses `wii/.env`

@@ -93,9 +93,16 @@ function onLeave(id: string) {
 }
 function toggleMenu(id: string) {
   if (!isClickable(id)) return
-  activeMenu.value = activeMenu.value === id ? null : id
+  if (activeMenu.value === id) {
+    closeMenu()
+  } else {
+    activeMenu.value = id
+  }
 }
-function closeMenu() { activeMenu.value = null }
+function closeMenu() {
+  if (activeMenu.value) deployOutput.value = { ...deployOutput.value, [activeMenu.value]: null }
+  activeMenu.value = null
+}
 
 function dismissToast() { showToast.value = false }
 
