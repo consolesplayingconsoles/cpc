@@ -4,7 +4,7 @@ api.py — local API server for Pluto.
 Handles network pings and deploy triggers.
 Listens on localhost only. Never exposed externally.
 
-Usage: python3 server/api.py
+Usage: python3 api/api.py
 """
 import os
 import sys
@@ -31,6 +31,15 @@ ALLOWED_ORIGINS = {
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 }
+
+# The explicit checklist of variables required for your environment infrastructure
+REQUIRED_VARS = [
+    "LOCAL_PATH",
+    "WORKSPACE_PATH",
+    "GATEWAY_IP",
+    "WII_IP",
+    "WII_ENV"
+]
 
 
 def ping(ip: str) -> bool:
@@ -99,46 +108,47 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         parts = parsed.path.strip("/").split("/")
+
         if len(parts) == 2 and parts[0] == "deploy":
             self._handle_deploy(parts[1])
         elif len(parts) == 2 and parts[0] in ("open", "workspace"):
-            self._handle_open(parts[0])
+            self._handle_open(action=parts[0], target_node=parts[1])
         else:
             self._send(404, {"error": "not found"})
 
-    def _handle_open(self, action: str):
+    def _handle_open(self, action: str, target_node: str):
         key = {"open": "LOCAL_PATH", "workspace": "WORKSPACE_PATH"}.get(action)
         if not key:
             self._send(404, {"error": "unknown action"})
             return
+
         path = self.__class__.config.get(key, "").strip()
         if not path:
             self._send(400, {"error": f"{key} not configured"})
             return
+
         path = os.path.expanduser(path)
-        print(f"  [OPEN:{action}] {path}")
+        print(f"  [OPEN:{action}] Targeted Node: {target_node} → {path}")
         open_path(path)
-        self._send(200, {"status": "opened", "path": path})
+        self._send(200, {"status": "opened", "path": path, "target": target_node})
 
     def _handle_deploy(self, node_id: str):
-        cfg      = self.__class__.config
+        cfg = self.__class__.config
         base_dir = self.__class__.base_dir
 
-        # Using your single config to read node deployment profiles directly
-        env_key  = f"{node_id.upper()}_ENV"
+        env_key = f"{node_id.upper()}_ENV"
         env_path = cfg.get(env_key, "").strip()
 
         if not env_path:
             self._send(400, {"error": f"no env path configured for {node_id}"})
             return
 
-        full_env  = os.path.join(base_dir, env_path)
-        deploy_sh = os.path.join(base_dir, "..", "deploy.sh")
-        deploy_sh = os.path.normpath(deploy_sh)
-        repo_root = os.path.dirname(deploy_sh)
+        full_env = os.path.join(base_dir, env_path)
+        deploy_sh = os.path.join(base_dir, "deploy.sh")
+        repo_root = base_dir
 
         if not os.path.exists(deploy_sh):
-            self._send(500, {"error": "deploy.sh not found"})
+            self._send(500, {"error": f"deploy.sh not found at {deploy_sh}"})
             return
 
         print(f"  [DEPLOY] {node_id} → {full_env}")
@@ -156,35 +166,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         output = result.stdout.strip() if result.stdout else ""
-        ok     = result.returncode == 0
+        ok = result.returncode == 0
         for line in output.splitlines():
             print(f"  [DEPLOY:{node_id}] {line}")
         self._send(200 if ok else 500, {
-            "status":     "ok" if ok else "error",
-            "node":       node_id,
-            "output":     output,
+            "status": "ok" if ok else "error",
+            "node": node_id,
+            "output": output,
             "returncode": result.returncode,
         })
 
     def _build_nodes(self):
-        cfg      = self.__class__.config
+        cfg = self.__class__.config
         base_dir = self.__class__.base_dir
-        nodes    = {}
+        nodes = {}
 
         node_defs = {
             "gateway": ("GATEWAY_IP", None),
-            "wii":     ("WII_IP",     "WII_ENV"),
-            "dc":      ("DC_IP",      "DC_ENV"),
-            "ps3":     ("PS3_IP",     "PS3_ENV"),
-            "gba":     ("GBA_IP",     "GBA_ENV"),
-            "ws":      ("WS_IP",      "WS_ENV"),
+            "wii": ("WII_IP", "WII_ENV"),
+            "dc": ("DC_IP", "DC_ENV"),
+            "ps3": ("PS3_IP", "PS3_ENV"),
+            "gba": ("GBA_IP", "GBA_ENV"),
+            "ws": ("WS_IP", "WS_ENV"),
         }
 
         nodes["host"] = {
-            "id":     "host",
-            "name":   cfg.get("NODE_NAME", "Host"),
-            "ip":     "127.0.0.1",
-            "color":  cfg.get("UI_PRIMARY_COLOR") or None,
+            "id": "host",
+            "name": cfg.get("NODE_NAME", "Host"),
+            "ip": "127.0.0.1",
+            "color": cfg.get("UI_PRIMARY_COLOR") or None,
             "status": "up",
         }
 
@@ -193,21 +203,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not ip:
                 continue
 
-            name  = node_id
+            name = node_id
             color = None
             if env_key:
                 env_path = cfg.get(env_key, "").strip()
                 if env_path:
-                    full_path    = os.path.join(base_dir, env_path)
-                    console_cfg  = load_env(full_path)
-                    name         = console_cfg.get("NODE_NAME",       node_id)
-                    color        = console_cfg.get("UI_PRIMARY_COLOR") or None
+                    full_path = os.path.join(base_dir, env_path)
+                    console_cfg = load_env(full_path)
+                    name = console_cfg.get("NODE_NAME", node_id)
+                    color = console_cfg.get("UI_PRIMARY_COLOR") or None
 
             nodes[node_id] = {
-                "id":     node_id,
-                "name":   name,
-                "ip":     ip,
-                "color":  color,
+                "id": node_id,
+                "name": name,
+                "ip": ip,
+                "color": color,
                 "status": "up" if ping(ip) else "down",
             }
 
@@ -215,17 +225,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 def run():
-    # Automatically locate '.env' relative to this script file
+    # Find the parent directory relative to where api.py physically sits
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    env_path = os.path.join(script_dir, ".env")
+    parent_dir = os.path.dirname(script_dir)
+    env_path = os.path.join(parent_dir, ".env")
 
     if not os.path.exists(env_path):
-        print(f"Error: Single target configuration file '{env_path}' not found.")
+        print(f"\n❌ Error: Configuration file not found at: {env_path}")
+        print("Please ensure your .env file is placed in the project root directory.\n")
         sys.exit(1)
 
     config = load_env(env_path)
-    Handler.config   = config
-    Handler.base_dir = script_dir
+
+    # Validation block checks if required variables exist
+    missing_keys = [var for var in REQUIRED_VARS if not config.get(var, "").strip()]
+    if missing_keys:
+        print("\n❌ CRITICAL: Configuration values are empty or completely missing!")
+        print(f"Target Configuration Location: {env_path}\n")
+        print("Please configure the following missing variables immediately:")
+        for missing in missing_keys:
+            print(f"  ➡️  {missing}=")
+        print()
+        sys.exit(1)
+
+    Handler.config = config
+    Handler.base_dir = parent_dir  # Aligns relative paths straight out of project root
 
     http.server.HTTPServer.allow_reuse_address = True
     server = http.server.HTTPServer(("127.0.0.1", PORT), Handler)
