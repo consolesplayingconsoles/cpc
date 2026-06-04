@@ -5,9 +5,9 @@ import type { NodeMap } from './useNodes'
 export interface DeployResult { raw: string; ok: boolean }
 
 const SUCCESS_BANNER = `
-================───────────────────────────────────
+──────────────────────────────────────────────────
   ✔ DEPLOYMENT SUCCESSFUL
-================───────────────────────────────────`
+──────────────────────────────────────────────────`
 
 export function useDeploy(getNodes: () => NodeMap) {
   const deploying        = ref<string | null>(null)
