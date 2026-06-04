@@ -1,8 +1,18 @@
 <script setup lang="ts">
+import { ref, computed } from 'vue'
 import { useNodes } from './composables/useNodes'
 import NetworkDiagram from './components/NetworkDiagram.vue'
 
 const { nodes, loading, error } = useNodes()
+
+const hideLocalhost = ref(false)
+
+const displayNodes = computed(() => {
+  if (!hideLocalhost.value) return nodes.value
+  return Object.fromEntries(
+    Object.entries(nodes.value).filter(([, n]) => n.ip !== '127.0.0.1' && n.ip !== 'localhost')
+  )
+})
 </script>
 
 <template>
@@ -15,18 +25,24 @@ const { nodes, loading, error } = useNodes()
           <circle cx="4.5" cy="4.5" r="1.5" fill="white" opacity="0.45"/>
         </svg><span>CPC PLUTO</span>
       </span>
-      <span class="header-status">
-        <span>{{ loading ? 'SCANNING' : error ? 'OFFLINE' : 'LIVE' }}</span>
-        <svg width="10" height="10" viewBox="0 0 14 14" style="vertical-align: middle; margin-left: 6px;">
-          <circle cx="7" cy="7" r="5" :fill="loading ? '#999999' : error ? '#cc1111' : '#00aa44'"/>
-          <circle cx="5" cy="5" r="2.5" fill="white" opacity="0.5"/>
-        </svg>
+      <span class="header-controls">
+        <label class="toggle-label">
+          <input type="checkbox" v-model="hideLocalhost" class="toggle-checkbox" />
+          <span>hide localhost</span>
+        </label>
+        <span class="header-status">
+          <span>{{ loading ? 'SCANNING' : error ? 'OFFLINE' : 'LIVE' }}</span>
+          <svg width="10" height="10" viewBox="0 0 14 14" style="vertical-align: middle; margin-left: 6px;">
+            <circle cx="7" cy="7" r="5" :fill="loading ? '#999999' : error ? '#cc1111' : '#00aa44'"/>
+            <circle cx="5" cy="5" r="2.5" fill="white" opacity="0.5"/>
+          </svg>
+        </span>
       </span>
     </header>
 
     <main class="main">
       <div v-if="loading" class="state-msg">SCANNING NETWORK...</div>
-      <NetworkDiagram v-else :nodes="nodes" />
+      <NetworkDiagram v-else :nodes="displayNodes" />
     </main>
 
     <footer class="footer">
@@ -59,6 +75,53 @@ const { nodes, loading, error } = useNodes()
   font-weight: 700;
   letter-spacing: 0.15em;
   color: #9a6c1a;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--color-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-checkbox {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--color-secondary);
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.toggle-checkbox:checked {
+  background: var(--color-secondary);
+}
+
+.toggle-checkbox:checked::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: -1px;
+  width: 5px;
+  height: 8px;
+  border: 1.5px solid #ebebea;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
 }
 
 .header-status {
