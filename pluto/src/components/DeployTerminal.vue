@@ -118,25 +118,15 @@ async function copyOutput() {
 .term--err .term__title { color: #a8856a; }
 .term--err .term__body  { color: #ff6b6b; text-shadow: 0 0 4px rgba(255,80,80,0.35); }
 .term--success { animation: borderPulse 0.6s ease-out forwards; }
-.term--success .term__body::after {
-  content: " ";
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(rgba(18,16,16,0) 50%, rgba(0,255,0,0.15) 50%),
-    linear-gradient(90deg, rgba(255,0,0,0.06), rgba(0,255,0,0.02), rgba(0,0,255,0.06));
-  background-size: 100% 4px, 6px 100%;
-  background-color: rgba(61,235,118,0.03);
-  z-index: 10;
-  pointer-events: none;
-  animation: scanReveal 0.4s ease-out forwards;
+.term--success .term__body {
+  background-image:
+    repeating-linear-gradient(to bottom, transparent 0, transparent 2px, rgba(0,0,0,0.16) 3px),
+    linear-gradient(rgba(18,16,16,0) 50%, rgba(0,255,0,0.08) 50%),
+    linear-gradient(90deg, rgba(255,0,0,0.03), rgba(0,255,0,0.01), rgba(0,0,255,0.03));
+  background-size: 100% 3px, 100% 4px, 6px 100%;
 }
 @keyframes borderPulse {
   0%   { border-color: #3deb76; box-shadow: 0 0 40px rgba(61,235,118,0.7); }
   100% { border-color: #1a3d22; box-shadow: 0 8px 30px rgba(0,0,0,0.45), 0 0 22px rgba(10,51,32,0.55); }
-}
-@keyframes scanReveal {
-  0%   { clip-path: inset(0 0 100% 0); }
-  100% { clip-path: inset(0 0 0 0); }
 }
 </style>

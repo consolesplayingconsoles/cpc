@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { NodeMap } from '../composables/useNodes'
+import type { Connection } from '../composables/useConnections'
 import { useDeploy } from '../composables/useDeploy'
+import { API_BASE } from '../composables/useNodes'
 import { BUBBLE_R, BUBBLE_OPEN } from '../composables/bubbleConstants'
 import NodeBubble from './NodeBubble.vue'
 import DeployTerminal from './DeployTerminal.vue'
@@ -14,21 +16,23 @@ import imgGba  from '../assets/consoles/gba.png'
 import imgWs   from '../assets/consoles/ws.png'
 import imgHost from '../assets/consoles/host.png'
 
-const props = defineProps<{ nodes: NodeMap }>()
+const props = defineProps<{ nodes: NodeMap; connections: Connection[] }>()
 
 const ICONS: Record<string, string> = {
   wii: imgWii, dc: imgDc, ps3: imgPs3,
   gba: imgGba, ws: imgWs, host: imgHost,
+  // batocera: add batocera.png to assets/consoles/ and import here
 }
 
 const LAYOUT: Record<string, { x: number; y: number }> = {
-  gateway: { x: 500, y: 280 },
-  wii:     { x: 220, y: 130 },
-  dc:      { x: 390, y:  80 },
-  ps3:     { x: 700, y: 130 },
-  gba:     { x:  80, y: 230 },
-  ws:      { x: 310, y: 280 },
-  host:    { x: 660, y: 460 },
+  gateway:  { x: 500, y: 280 },
+  wii:      { x: 230, y: 180 },
+  dc:       { x: 430, y:  90 },
+  ps3:      { x: 720, y: 130 },
+  gba:      { x:  70, y: 125 },
+  ws:       { x:  70, y: 280 },
+  host:     { x: 660, y: 460 },
+  batocera: { x: 820, y: 350 },
 }
 
 
@@ -43,31 +47,38 @@ const hoveredNode = ref<string | null>(null)
 
 const presentNodes = computed(() => Object.keys(props.nodes).filter(id => LAYOUT[id]))
 
-const visibleEdges = computed(() => {
-  const pairs: Array<[string, string]> = []
-  for (const [id, node] of Object.entries(props.nodes)) {
-    if (id === 'gateway') continue
-    pairs.push([node.parent ?? 'gateway', id])
-  }
-  return pairs
-    .filter(([a, b]) => props.nodes[a] && props.nodes[b] && LAYOUT[a] && LAYOUT[b])
-    .map(([a, b]) => {
-      const ax = LAYOUT[a].x, ay = LAYOUT[a].y
-      const bx = LAYOUT[b].x, by = LAYOUT[b].y
+const visibleEdges = computed(() =>
+  props.connections
+    .filter(c => props.nodes[c.from] && props.nodes[c.to] && LAYOUT[c.from] && LAYOUT[c.to])
+    .map(c => {
+      const ax = LAYOUT[c.from].x, ay = LAYOUT[c.from].y
+      const bx = LAYOUT[c.to].x,   by = LAYOUT[c.to].y
       const dx = bx - ax, dy = by - ay
       const len = Math.sqrt(dx * dx + dy * dy)
       const ux = dx / len, uy = dy / len
+      const flowing = (activeMenu.value === c.from || activeMenu.value === c.to)
+        && (deployOutput.value[c.from]?.ok || deployOutput.value[c.to]?.ok)
       return {
-        key: `${a}-${b}`,
+        key:   `${c.from}-${c.to}`,
+        label: c.label,
+        pillW: c.label.length * 5.5 + 12,
+        mx:    (ax + bx) / 2 - uy * 14,
+        my:    (ay + by) / 2 + ux * 14,
         x1: ax + ux * BUBBLE_R, y1: ay + uy * BUBBLE_R,
         x2: bx - ux * BUBBLE_R, y2: by - uy * BUBBLE_R,
-        up: props.nodes[a]?.status === 'up' && props.nodes[b]?.status === 'up',
+        up:           props.nodes[c.from]?.status === 'up' && props.nodes[c.to]?.status === 'up',
+        unconfigured: props.nodes[c.from]?.status === 'unconfigured' || props.nodes[c.to]?.status === 'unconfigured',
+        flowing: !!flowing,
       }
     })
-})
+)
 
-function isUp(id: string)        { return props.nodes[id]?.status === 'up' }
-function isClickable(id: string) { return isUp(id) && id !== 'gateway' }
+function isUnconfigured(id: string) { return props.nodes[id]?.status === 'unconfigured' }
+function isClickable(id: string)    { return !isUnconfigured(id) && id !== 'gateway' }
+
+async function openSmb(id: string) {
+  await fetch(`${API_BASE}/smb/${id}`, { method: 'POST' })
+}
 
 function closeMenu() {
   if (activeMenu.value) clearOutput(activeMenu.value)
@@ -148,10 +159,24 @@ onUnmounted(() => window.removeEventListener('resize', updateCardPos))
           :x1="e.x1" :y1="e.y1" :x2="e.x2" :y2="e.y2"
           :stroke="e.up ? 'var(--color-up)' : 'var(--color-down)'"
           stroke-width="1.5"
-          :stroke-dasharray="activeMenu && e.key.includes(activeMenu) && deployOutput[activeMenu]?.ok ? '4 4' : '6 4'"
-          :class="{ 'edge-flowing': activeMenu && e.key.includes(activeMenu) && deployOutput[activeMenu]?.ok }"
-          :opacity="e.up ? 0.8 : 0.2"
+          :stroke-dasharray="e.flowing ? '4 4' : '6 4'"
+          :class="{ 'edge-flowing': e.flowing }"
+          :opacity="e.unconfigured ? 0.08 : e.up ? 0.8 : 0.2"
         />
+        <g
+          v-for="e in visibleEdges" :key="'lbl-' + e.key"
+          :transform="`translate(${e.mx}, ${e.my})`"
+          :opacity="e.up ? 1 : 0.4"
+        >
+          <rect
+            :x="-e.pillW / 2" y="-8"
+            :width="e.pillW" height="13"
+            rx="6"
+            fill="#1a1a1a"
+            opacity="0.82"
+          />
+          <text y="2" text-anchor="middle" class="edge-label">{{ e.label }}</text>
+        </g>
       </g>
       <g
         v-for="id in presentNodes" :key="id"
@@ -168,9 +193,11 @@ onUnmounted(() => window.removeEventListener('resize', updateCardPos))
           :is-active="false"
           :is-hovered="hoveredNode === id"
           :is-deploying="deploying === id"
+          :is-unconfigured="isUnconfigured(id)"
           @toggle="toggleMenu(id)"
           @deploy="deploy(id)"
           @open-local="openLocal(id)"
+          @open-smb="openSmb(id)"
         />
       </g>
     </svg>
@@ -204,9 +231,11 @@ onUnmounted(() => window.removeEventListener('resize', updateCardPos))
           :is-active="true"
           :is-hovered="false"
           :is-deploying="deploying === activeMenu"
+          :is-unconfigured="isUnconfigured(activeMenu)"
           @toggle="toggleMenu(activeMenu)"
           @deploy="deploy(activeMenu)"
           @open-local="openLocal(activeMenu)"
+          @open-smb="openSmb(activeMenu)"
         />
       </g>
     </svg>
@@ -235,6 +264,14 @@ onUnmounted(() => window.removeEventListener('resize', updateCardPos))
 .diagram .node   { pointer-events: auto; }
 .node            { cursor: default; }
 .node--clickable { cursor: pointer; }
+.edge-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  fill: #ccccca;
+  pointer-events: none;
+  letter-spacing: 0.04em;
+}
 .edge-flowing {
   stroke: #3deb76 !important;
   stroke-width: 2px;

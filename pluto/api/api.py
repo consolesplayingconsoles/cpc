@@ -36,8 +36,6 @@ REQUIRED_VARS = [
     "LOCAL_PATH",
     "WORKSPACE_PATH",
     "GATEWAY_IP",
-    "WII_IP",
-    "WII_ENV"
 ]
 
 
@@ -104,6 +102,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/nodes":
             self._send(200, self._build_nodes())
+        elif parsed.path == "/connections":
+            self._send(200, self._build_connections())
         else:
             self._send(404, {"error": "not found"})
 
@@ -113,6 +113,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if len(parts) == 2 and parts[0] == "deploy":
             self._handle_deploy(parts[1])
+        elif len(parts) == 2 and parts[0] == "smb":
+            self._handle_smb(parts[1])
         elif len(parts) == 2 and parts[0] in ("open", "workspace"):
             self._handle_open(action=parts[0], target_node=parts[1])
         else:
@@ -136,6 +138,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         open_path(path)
         self._send(200, {"status": "opened", "path": path, "target": target_node})
 
+    def _handle_smb(self, node_id: str):
+        cfg      = self.__class__.config
+        base_dir = self.__class__.base_dir
+        env_key  = f"{node_id.upper()}_ENV"
+        env_path = cfg.get(env_key, "").strip()
+        if not env_path:
+            self._send(400, {"error": f"no env path for {node_id}"})
+            return
+        console_cfg = load_env(os.path.normpath(os.path.join(base_dir, env_path)))
+        smb_url = console_cfg.get("SMB_PATH", "").strip()
+        if not smb_url:
+            self._send(400, {"error": f"SMB_PATH not configured for {node_id}"})
+            return
+        print(f"  [SMB] {node_id} → {smb_url}")
+        open_path(smb_url)
+        self._send(200, {"status": "opened", "smb": smb_url})
+
     def _handle_deploy(self, node_id: str):
         cfg = self.__class__.config
         base_dir = self.__class__.base_dir
@@ -147,7 +166,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(400, {"error": f"no env path configured for {node_id}"})
             return
 
-        full_env = os.path.join(base_dir, env_path)
+        full_env = os.path.normpath(os.path.join(base_dir, env_path))
         repo_root = os.path.dirname(base_dir)
         deploy_sh = os.path.join(repo_root, "deploy.sh")
 
@@ -155,11 +174,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(500, {"error": f"deploy.sh not found at {deploy_sh}"})
             return
 
+        # Read the console env in Python (already works) and inject into subprocess
+        # so deploy.sh doesn't have to re-parse the file under a potentially tricky path.
+        console_cfg = load_env(full_env)
+        deploy_env = os.environ.copy()
+        for key in ("CUSTOM_SSH_ALIAS", "SSH_USER", "SSH_KEY_PATH"):
+            val = console_cfg.get(key, "")
+            if val:
+                deploy_env[key] = val
+
         print(f"  [DEPLOY] {node_id} → {full_env}")
         try:
             result = subprocess.run(
                 ["bash", deploy_sh, full_env],
                 cwd=repo_root,
+                env=deploy_env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -185,13 +214,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         base_dir = self.__class__.base_dir
         nodes = {}
 
-        node_defs = {
-            "gateway": ("GATEWAY_IP", None),
-            "wii": ("WII_IP", "WII_ENV"),
-            "dc": ("DC_IP", "DC_ENV"),
-            "ps3": ("PS3_IP", "PS3_ENV"),
-            "gba": ("GBA_IP", "GBA_ENV"),
-            "ws": ("WS_IP", "WS_ENV"),
+        console_envs = {
+            "wii":      "WII_ENV",
+            "dc":       "DC_ENV",
+            "ps3":      "PS3_ENV",
+            "gba":      "GBA_ENV",
+            "ws":       "WS_ENV",
+            "batocera": "BATOCERA_ENV",
         }
 
         nodes["host"] = {
@@ -203,33 +232,52 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "parent": "gateway",
         }
 
-        for node_id, (ip_key, env_key) in node_defs.items():
-            ip = cfg.get(ip_key, "").strip()
-            if not ip:
-                continue
+        gateway_ip = cfg.get("GATEWAY_IP", "").strip()
+        if gateway_ip:
+            nodes["gateway"] = {
+                "id": "gateway",
+                "name": "gateway",
+                "ip": gateway_ip,
+                "color": None,
+                "status": "up" if ping(gateway_ip) else "down",
+                "parent": "gateway",
+            }
 
-            name = node_id
-            color = None
-            parent = "gateway"
-            if env_key:
-                env_path = cfg.get(env_key, "").strip()
-                if env_path:
-                    full_path = os.path.join(base_dir, env_path)
-                    console_cfg = load_env(full_path)
-                    name = console_cfg.get("NODE_NAME", node_id)
-                    color = console_cfg.get("UI_PRIMARY_COLOR") or None
-                    parent = console_cfg.get("PARENT", "gateway") or "gateway"
+        for node_id, env_key in console_envs.items():
+            env_path = cfg.get(env_key, "").strip()
+            if not env_path:
+                continue
+            full_path = os.path.join(base_dir, env_path)
+            console_cfg = load_env(full_path)
+            ip    = console_cfg.get("HOST_IP", "").strip()
+            name  = console_cfg.get("NODE_NAME", node_id)
+            color = console_cfg.get("UI_PRIMARY_COLOR") or None
+            smb   = console_cfg.get("SMB_PATH", "").strip() or None
+
+            if ip:
+                status = "up" if ping(ip) else "down"
+            else:
+                status = "unconfigured"
 
             nodes[node_id] = {
-                "id": node_id,
-                "name": name,
-                "ip": ip,
-                "color": color,
-                "status": "up" if ping(ip) else "down",
-                "parent": parent,
+                "id":     node_id,
+                "name":   name,
+                "ip":     ip,
+                "color":  color,
+                "status": status,
+                "smb":    smb,
             }
 
         return nodes
+
+    def _build_connections(self):
+        base_dir = self.__class__.base_dir
+        connections_path = os.path.join(base_dir, "connections.json")
+        if not os.path.exists(connections_path):
+            return []
+        with open(connections_path) as f:
+            import json as _json
+            return _json.load(f)
 
 
 def run():

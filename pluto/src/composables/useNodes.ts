@@ -1,6 +1,6 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 
-export type NodeStatus = 'up' | 'down'
+export type NodeStatus = 'up' | 'down' | 'unconfigured'
 
 export interface NodeData {
   id:     string
@@ -8,7 +8,7 @@ export interface NodeData {
   ip:     string
   color:  string | null
   status: NodeStatus
-  parent: string
+  smb:    string | null
 }
 
 export type NodeMap = Record<string, NodeData>
