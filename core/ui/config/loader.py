@@ -1,13 +1,14 @@
 import os
 import sys
 
+# Keys the local console interface needs to render and brand itself.
+# Networking / SSH fields (HOST_IP, SSH_USER, SSH_KEY_PATH, CUSTOM_SSH_ALIAS)
+# are deploy-time concerns validated by deploy.sh — not required to run the
+# TUI on the console itself, so they are intentionally not listed here.
 REQUIRED_KEYS = [
     "NODE_NAME",
     "SHORT_NAME",
     "MANUFACTURER",
-    "HOST_IP",
-    "SSH_USER",
-    "SSH_KEY_PATH",
     "UI_PRIMARY_COLOR",
     "UI_SECONDARY_COLOR",
     "BUTTON_CONFIRM",

@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useNodes } from './composables/useNodes'
+import { useConnections } from './composables/useConnections'
 import NetworkDiagram from './components/NetworkDiagram.vue'
 
 const { nodes, loading, error } = useNodes()
+const { connections } = useConnections()
 
-const hideLocalhost = ref(false)
+const showOffline = ref(false)
 
 const displayNodes = computed(() => {
-  if (!hideLocalhost.value) return nodes.value
+  if (showOffline.value) return nodes.value
   return Object.fromEntries(
-    Object.entries(nodes.value).filter(([, n]) => n.ip !== '127.0.0.1' && n.ip !== 'localhost')
+    Object.entries(nodes.value).filter(([, n]) => n.status !== 'unconfigured')
   )
 })
 </script>
@@ -27,8 +29,8 @@ const displayNodes = computed(() => {
       </span>
       <span class="header-controls">
         <label class="toggle-label">
-          <input type="checkbox" v-model="hideLocalhost" class="toggle-checkbox" />
-          <span>hide localhost</span>
+          <input type="checkbox" v-model="showOffline" class="toggle-checkbox" />
+          <span>show offline</span>
         </label>
         <span class="header-status">
           <span>{{ loading ? 'SCANNING' : error ? 'OFFLINE' : 'LIVE' }}</span>
@@ -42,7 +44,7 @@ const displayNodes = computed(() => {
 
     <main class="main">
       <div v-if="loading" class="state-msg">SCANNING NETWORK...</div>
-      <NetworkDiagram v-else :nodes="displayNodes" />
+      <NetworkDiagram v-else :nodes="displayNodes" :connections="connections" />
     </main>
 
     <footer class="footer">

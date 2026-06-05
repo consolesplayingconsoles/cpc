@@ -4,24 +4,59 @@ import type { NodeData } from '../composables/useNodes'
 import { BUBBLE_R, BUBBLE_HOV, BUBBLE_OPEN } from '../composables/bubbleConstants'
 
 const props = defineProps<{
-  id:          string
-  node:        NodeData
-  icon?:       string
-  isActive:    boolean
-  isHovered:   boolean
-  isDeploying: boolean
+  id:             string
+  node:           NodeData
+  icon?:          string
+  isActive:       boolean
+  isHovered:      boolean
+  isDeploying:    boolean
+  isUnconfigured: boolean
 }>()
 
 const emit = defineEmits<{
   toggle:       []
   deploy:       []
   'open-local': []
+  'open-smb':   []
 }>()
+
+const isLocalhost  = computed(() =>
+  props.id === 'host' || props.node.ip === '127.0.0.1' || props.node.ip === 'localhost'
+)
+const showFolderBtn = computed(() => isLocalhost.value || !!props.node.smb)
+function handleFolder() {
+  if (isLocalhost.value) emit('open-local')
+  else emit('open-smb')
+}
 
 const hoveredBtn = ref<'deploy' | 'folder' | null>(null)
 
 const bubbleR     = computed(() => props.isActive ? BUBBLE_OPEN : props.isHovered ? BUBBLE_HOV : BUBBLE_R)
-const statusColor = computed(() => props.node.status === 'up' ? 'var(--color-up)' : 'var(--color-down)')
+const statusColor = computed(() => {
+  if (props.node.status === 'up') return 'var(--color-up)'
+  if (props.isUnconfigured)       return 'var(--color-secondary)'
+  return 'var(--color-down)'
+})
+const borderColor  = computed(() => props.node.color ?? '#ccccca')
+
+// Disabled (unconfigured) nodes keep their console icon in full colour so the
+// device stays recognisable — the "off" state is signalled by a dashed, muted
+// ring and a hollow fill rather than by greying the icon into the background.
+const isUp         = computed(() => props.node.status === 'up')
+const bubbleFill   = computed(() => props.isUnconfigured ? '#fbfbfa' : '#e8e8e6')
+const bubbleStroke = computed(() => props.isUnconfigured ? '#b4b4b0' : borderColor.value)
+const bubbleDash   = computed(() => props.isUnconfigured ? '5 5' : undefined)
+const iconOpacity  = computed(() => {
+  if (isUp.value)            return 0.92
+  if (props.isUnconfigured)  return 0.7
+  return 0.5 // configured but down
+})
+
+// Centre the action buttons as a group so the layout stays symmetric whether
+// one (deploy only) or two (deploy + folder) buttons are visible.
+const BTN_SPACING = 28
+const btnCount    = computed(() => showFolderBtn.value ? 2 : 1)
+const btnX        = (i: number) => (i - (btnCount.value - 1) / 2) * BTN_SPACING
 
 const nameLines = computed(() => {
   const words = props.node.name.split(' ')
@@ -40,17 +75,20 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
 <template>
   <circle
     :r="bubbleR"
-    fill="#e8e8e6"
-    :stroke="node.color ?? '#ccccca'"
+    :fill="bubbleFill"
+    :stroke="bubbleStroke"
+    :stroke-dasharray="bubbleDash"
     stroke-width="2.5"
     class="bubble"
     style="pointer-events:none"
   />
 
   <g :transform="isActive ? 'translate(0,-35)' : ''">
-    <circle cx="24" cy="-24" r="7" :fill="node.status === 'up' ? '#00ff55' : '#ff2222'"/>
-    <circle cx="24" cy="-24" r="4" fill="white" opacity="0.35"/>
-    <circle cx="22" cy="-26" r="2" fill="white" opacity="0.5"/>
+    <g v-if="!isUnconfigured">
+      <circle cx="24" cy="-24" r="7" :fill="node.status === 'up' ? '#00ff55' : '#ff2222'" class="status-dot"/>
+      <circle cx="24" cy="-24" r="4" fill="white" opacity="0.35"/>
+      <circle cx="22" cy="-26" r="2" fill="white" opacity="0.5"/>
+    </g>
 
     <svg v-if="!icon" x="-24" y="-24" width="48" height="48" viewBox="0 0 100 100">
       <path d="M50 28 m-28-8 a30 30 0 0 1 56 0" stroke="#1a1a1a" stroke-width="3" stroke-linecap="round" opacity="0.4" fill="none"/>
@@ -66,7 +104,7 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
       v-else
       :href="icon"
       x="-20" y="-20" width="40" height="40"
-      :opacity="node.status === 'up' ? 0.92 : 0.25"
+      :opacity="iconOpacity"
       @click.stop="emit('toggle')"
     />
 
@@ -79,7 +117,7 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
     <g v-if="isActive" @click.stop :transform="nameLines.length > 1 ? 'translate(0,5)' : ''">
       <g
         class="action-btn"
-        transform="translate(-14, 0)"
+        :transform="`translate(${btnX(0)}, 0)`"
         @click.stop="emit('deploy')"
         @mouseenter="hoveredBtn = 'deploy'"
         @mouseleave="hoveredBtn = null"
@@ -108,9 +146,10 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
       </g>
 
       <g
+        v-if="showFolderBtn"
         class="action-btn"
-        transform="translate(14,0)"
-        @click.stop="emit('open-local')"
+        :transform="`translate(${btnX(1)}, 0)`"
+        @click.stop="handleFolder"
         @mouseenter="hoveredBtn = 'folder'"
         @mouseleave="hoveredBtn = null"
       >
@@ -130,6 +169,7 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
 
 <style scoped>
 .bubble { transition: r 0.2s ease; }
+.status-dot { transition: fill 0.8s ease; }
 .node-label {
   font-family: var(--font-mono);
   font-size: 11px;
