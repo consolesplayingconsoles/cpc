@@ -10,6 +10,11 @@
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
+# Source shell profile so the correct python3 is on PATH regardless of
+# whether this is called from SSH, tmux, or the local terminal.
+[ -f ~/.bashrc ]  && source ~/.bashrc  2>/dev/null || true
+[ -f ~/.profile ] && source ~/.profile 2>/dev/null || true
+
 # Always run relative to this script's own directory so paths stay
 # correct whether called directly or via SSH.
 cd "$(dirname "$0")"
@@ -56,30 +61,20 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-# ── Python version guard ──────────────────────────────────────
-# The console interface uses f-strings (Python 3.6+). Fail fast with a clean,
-# scannable message instead of a cryptic "invalid syntax" deep in the renderer
-# when a node ships an older python3.
-if ! command -v python3 >/dev/null 2>&1; then
-  echo ""
-  echo "  [ERROR] python3 not found on this node — install Python 3.6 or newer."
-  echo ""
-  exit 1
-fi
-if ! python3 -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 6) else 1)'; then
-  PYV="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
-  echo ""
-  echo "  [ERROR] Python ${PYV} is too old — the CPC console interface needs 3.6+."
-  echo "          Install a newer python3 on this node and retry."
-  echo ""
-  exit 1
+# ── Python selection ─────────────────────────────────────────
+# Prefer an explicit versioned binary so a stale system python3 doesn't
+# shadow the freshly compiled one.
+if   command -v python3.6 >/dev/null 2>&1; then PY=python3.6
+elif command -v python3.7 >/dev/null 2>&1; then PY=python3.7
+elif command -v python3.8 >/dev/null 2>&1; then PY=python3.8
+elif command -v python3   >/dev/null 2>&1; then PY=python3
+else
+  echo "  [ERROR] no python3 found" && exit 1
 fi
 
-pkill -f 'python3 main.py' || true
+if ! $PY -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 6) else 1)'; then
+  PYV="$($PY -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+  echo "  [ERROR] Python ${PYV} is too old — needs 3.6+" && exit 1
+fi
 
-mkdir -p logs
-nohup env PYTHONPATH=vendor python3 main.py "$ENV_FILE" \
-  </dev/null >logs/cpc.log 2>&1 &
-
-echo "  started (PID $!)"
-echo "  logs: $(pwd)/logs/cpc.log"
+exec env PYTHONPATH=vendor COLORTERM=truecolor $PY main.py "$ENV_FILE"

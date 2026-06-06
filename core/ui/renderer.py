@@ -20,7 +20,16 @@ _TIERS = [
 ]
 
 
+def _truecolor() -> bool:
+    """Return True only when the terminal advertises 24-bit color support."""
+    import os
+    ct = os.environ.get("COLORTERM", "").lower()
+    return ct in ("truecolor", "24bit")
+
+
 def hex_fg(hex_color: str) -> str:
+    if not _truecolor():
+        return ""
     h = hex_color.lstrip("#")
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     return f"\033[38;2;{r};{g};{b}m"
@@ -58,7 +67,6 @@ def _flush(out: list, term_width: int, term_height: int):
             w.write(" " * term_width)
         if i < term_height - 1:
             w.write("\n")
-    w.write(SHOW_CUR)
     w.flush()
 
 
@@ -100,10 +108,55 @@ def _render_title(config: dict, primary: str, secondary: str,
     else:
         header = f"CPC {mfr.upper()} {node.upper()}"
         out.append(_center(f"{primary}{BOLD}{header}{RESET}", term_width))
-        out.append(_center(f"{primary}{'─' * len(header)}{RESET}", term_width))
+        out.append(_center(f"{primary}{'-' * len(header)}{RESET}", term_width))
 
     _title_cache[key] = out
     return out
+
+
+_CENSOR_REACTIONS = [
+    "CENSORED",
+    "UNACCEPTABLE",
+    "NOT TODAY",
+    "MUSICAL CRIMES",
+    "TOO LOUD",
+    "NOPE",
+    "SIR THIS IS A WII",
+    "MY EARS",
+    "BEEEEEP",
+    "CRITIC MODE",
+]
+
+
+def render_censor(config: dict, reaction: str, listening: bool):
+    """Render the Bongo Censor view."""
+    primary     = hex_fg(config["UI_PRIMARY_COLOR"])
+    secondary   = hex_fg(config["UI_SECONDARY_COLOR"])
+    term        = shutil.get_terminal_size(fallback=(80, 24))
+    term_width  = term.columns
+    term_height = term.lines
+    f_header, f_console = _pick_fonts(term_width, config["MANUFACTURER"], config["NODE_NAME"])
+
+    out = [""]
+    out += _render_title(config, primary, secondary, term_width, f_header, f_console)
+    out.append("")
+
+    if reaction:
+        f = _pick_fonts(term_width, "", reaction)[1] or "small"
+        for line in _figlet(reaction, f):
+            out.append(_center(f"{primary}{BOLD}{line}{RESET}", term_width))
+    else:
+        out.append("")
+        out.append(_center(f"{secondary}. . . listening . . .{RESET}", term_width))
+
+    out.append("")
+    if listening:
+        hint = "LIVE  |  q / ESC  exit"
+    else:
+        hint = "no mic  |  SPACE test beep  |  q / ESC  exit"
+    out.append(_center(f"{secondary}{hint}{RESET}", term_width))
+
+    _flush(out, term_width, term_height)
 
 
 def render_controller(config: dict, device_name: str, events: list):
@@ -121,7 +174,7 @@ def render_controller(config: dict, device_name: str, events: list):
     out += _render_title(config, primary, secondary, term_width, f_header, f_console)
     out.append("")
     out.append(_center(f"{secondary}{device_name}{RESET}", term_width))
-    out.append(_center(f"{secondary}{'─' * len(device_name)}{RESET}", term_width))
+    out.append(_center(f"{secondary}{'-' * len(device_name)}{RESET}", term_width))
     out.append("")
 
     # fill remaining lines with the event log, newest at bottom
@@ -165,7 +218,7 @@ def render_menu(config: dict, items: list, cursor: int):
     btn_down    = config.get("BUTTON_DOWN",    "DOWN")
     btn_confirm = config.get("BUTTON_CONFIRM", "enter")
     btn_cancel  = config.get("BUTTON_CANCEL",  "B")
-    hint = f"{btn_up}/{btn_down} navigate   {btn_confirm} select   {btn_cancel} quit"
+    hint = f"{btn_up}/{btn_down} navigate   {btn_confirm}/Enter select   {btn_cancel}/Q quit"
     out.append("")
     out.append(_center(f"{secondary}{hint}{RESET}", term_width))
 
@@ -193,7 +246,7 @@ def render_list(config: dict, title: str, items: list, cursor: int):
     out += title_block
     out.append("")
     out.append(_center(f"{primary}{BOLD}{title}{RESET}", term_width))
-    out.append(_center(f"{secondary}{'─' * len(title)}{RESET}", term_width))
+    out.append(_center(f"{secondary}{'-' * len(title)}{RESET}", term_width))
     out.append("")
 
     longest = max(len(i) for i in items) if items else 0
@@ -208,7 +261,7 @@ def render_list(config: dict, title: str, items: list, cursor: int):
     btn_up   = config.get("BUTTON_UP",   "UP")
     btn_down = config.get("BUTTON_DOWN", "DOWN")
     btn_back = config.get("BUTTON_BACK", "<")
-    hint = f"{btn_up}/{btn_down} scroll   {btn_back} back"
+    hint = f"{btn_up}/{btn_down} scroll   {btn_back}/Q back"
     out.append("")
     out.append(_center(f"{secondary}{hint}{RESET}", term_width))
 
