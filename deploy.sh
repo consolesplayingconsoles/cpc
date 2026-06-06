@@ -142,6 +142,7 @@ tar --no-xattrs \
     --exclude='__pycache__' \
     --exclude='*.pyc' \
     --exclude='dev.py' \
+    --exclude='deploy.sh' \
     "${CONSOLE_EXCLUDES[@]}" \
     -cf - . | $SSH "tar -xf - -C ${REMOTE_PATH}"
 

@@ -20,12 +20,12 @@ const emit = defineEmits<{
   'open-smb':   []
 }>()
 
-const isLocalhost  = computed(() =>
-  props.id === 'host' || props.node.ip === '127.0.0.1' || props.node.ip === 'localhost'
-)
-const showFolderBtn = computed(() => isLocalhost.value || !!props.node.smb)
+// Each action button renders only when its feature is configured (signalled by
+// the API). The host's folder opens LOCAL_PATH; a console's folder opens its SMB.
+const showDeployBtn = computed(() => props.node.deploy)
+const showFolderBtn = computed(() => props.node.folder)
 function handleFolder() {
-  if (isLocalhost.value) emit('open-local')
+  if (props.id === 'host') emit('open-local')
   else emit('open-smb')
 }
 
@@ -52,11 +52,20 @@ const iconOpacity  = computed(() => {
   return 0.5 // configured but down
 })
 
-// Centre the action buttons as a group so the layout stays symmetric whether
-// one (deploy only) or two (deploy + folder) buttons are visible.
+// Centre the visible action buttons as a group so the layout stays symmetric
+// whether one or two buttons are showing, regardless of which ones.
 const BTN_SPACING = 28
-const btnCount    = computed(() => showFolderBtn.value ? 2 : 1)
-const btnX        = (i: number) => (i - (btnCount.value - 1) / 2) * BTN_SPACING
+const visibleBtns = computed(() => {
+  const arr: string[] = []
+  if (showDeployBtn.value) arr.push('deploy')
+  if (showFolderBtn.value) arr.push('folder')
+  return arr
+})
+const btnX = (kind: string) => {
+  const i = visibleBtns.value.indexOf(kind)
+  const n = visibleBtns.value.length
+  return (i - (n - 1) / 2) * BTN_SPACING
+}
 
 const nameLines = computed(() => {
   const words = props.node.name.split(' ')
@@ -116,8 +125,9 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
 
     <g v-if="isActive" @click.stop :transform="nameLines.length > 1 ? 'translate(0,5)' : ''">
       <g
+        v-if="showDeployBtn"
         class="action-btn"
-        :transform="`translate(${btnX(0)}, 0)`"
+        :transform="`translate(${btnX('deploy')}, 0)`"
         @click.stop="emit('deploy')"
         @mouseenter="hoveredBtn = 'deploy'"
         @mouseleave="hoveredBtn = null"
@@ -148,7 +158,7 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
       <g
         v-if="showFolderBtn"
         class="action-btn"
-        :transform="`translate(${btnX(1)}, 0)`"
+        :transform="`translate(${btnX('folder')}, 0)`"
         @click.stop="handleFolder"
         @mouseenter="hoveredBtn = 'folder'"
         @mouseleave="hoveredBtn = null"

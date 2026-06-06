@@ -10,9 +10,16 @@ const { connections } = useConnections()
 const showOffline = ref(false)
 
 const displayNodes = computed(() => {
-  if (showOffline.value) return nodes.value
+  // When the whole control plane is unreachable (header OFFLINE), the live state
+  // of each node is unknown — present the last-known topology in an offline
+  // state instead of a stale "up" or a blank map.
+  const src = error.value
+    ? Object.fromEntries(Object.entries(nodes.value).map(
+        ([k, n]) => [k, n.status === 'unconfigured' ? n : { ...n, status: 'down' as const }]))
+    : nodes.value
+  if (showOffline.value) return src
   return Object.fromEntries(
-    Object.entries(nodes.value).filter(([, n]) => n.status !== 'unconfigured')
+    Object.entries(src).filter(([, n]) => n.status !== 'unconfigured')
   )
 })
 </script>

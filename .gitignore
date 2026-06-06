@@ -236,3 +236,5 @@ logs/
 pluto/node_modules/
 pluto/dist/
 pluto/.vite/
+
+.DS_Store

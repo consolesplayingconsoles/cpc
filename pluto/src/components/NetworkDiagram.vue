@@ -14,14 +14,14 @@ import imgDc   from '../assets/consoles/dc.png'
 import imgPs3  from '../assets/consoles/ps3.png'
 import imgGba  from '../assets/consoles/gba.png'
 import imgWs   from '../assets/consoles/ws.png'
+import imgBatocera from '../assets/consoles/batocera.png'
 import imgHost from '../assets/consoles/host.png'
 
 const props = defineProps<{ nodes: NodeMap; connections: Connection[] }>()
 
 const ICONS: Record<string, string> = {
   wii: imgWii, dc: imgDc, ps3: imgPs3,
-  gba: imgGba, ws: imgWs, host: imgHost,
-  // batocera: add batocera.png to assets/consoles/ and import here
+  gba: imgGba, ws: imgWs, batocera: imgBatocera, host: imgHost,
 }
 
 const LAYOUT: Record<string, { x: number; y: number }> = {
@@ -30,7 +30,7 @@ const LAYOUT: Record<string, { x: number; y: number }> = {
   dc:       { x: 430, y:  90 },
   ps3:      { x: 720, y: 130 },
   gba:      { x:  70, y: 125 },
-  ws:       { x:  70, y: 280 },
+  ws:       { x:  70, y: 335 },
   host:     { x: 660, y: 460 },
   batocera: { x: 820, y: 350 },
 }
@@ -74,7 +74,12 @@ const visibleEdges = computed(() =>
 )
 
 function isUnconfigured(id: string) { return props.nodes[id]?.status === 'unconfigured' }
-function isClickable(id: string)    { return !isUnconfigured(id) && id !== 'gateway' }
+function isClickable(id: string) {
+  if (id === 'gateway') return false
+  const n = props.nodes[id]
+  // Only up nodes are expandable, and only when they have at least one button.
+  return !!n && n.status === 'up' && (n.deploy || n.folder)
+}
 
 async function openSmb(id: string) {
   await fetch(`${API_BASE}/smb/${id}`, { method: 'POST' })

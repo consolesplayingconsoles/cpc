@@ -9,6 +9,10 @@ export interface NodeData {
   color:  string | null
   status: NodeStatus
   smb:    string | null
+  // Per-node action-button availability. A node is expandable iff it has at
+  // least one configured button; each button renders only when configured.
+  deploy: boolean   // DEPLOY button (console) / CODE button (host)
+  folder: boolean   // FILES button (console SMB) / DIR button (host LOCAL_PATH)
 }
 
 export type NodeMap = Record<string, NodeData>
