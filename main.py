@@ -45,13 +45,11 @@ def _resolve_env() -> str:
 
 
 MENU_ITEMS = [
-    "List ROMs",
-    "List Share",
+    "Controller Test",
 ]
 
 ACTION_MAP = {
-    "List ROMs":  actions.list_roms,
-    "List Share": actions.list_share,
+    "Controller Test": actions.controller_test,
 }
 
 
@@ -98,7 +96,8 @@ def run():
                 action = ACTION_MAP.get(menu.selected)
                 if action:
                     items = action(config)
-                    stack.append((menu.selected, items, 0))
+                    if items is not None:
+                        stack.append((menu.selected, items, 0))
 
 
 if __name__ == "__main__":

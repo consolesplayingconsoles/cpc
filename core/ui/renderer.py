@@ -106,6 +106,40 @@ def _render_title(config: dict, primary: str, secondary: str,
     return out
 
 
+def render_controller(config: dict, device_name: str, events: list):
+    """Render the controller button intercept view.
+    events: list of (btn_name, code, pressed) tuples, newest last.
+    """
+    primary     = hex_fg(config["UI_PRIMARY_COLOR"])
+    secondary   = hex_fg(config["UI_SECONDARY_COLOR"])
+    term        = shutil.get_terminal_size(fallback=(80, 24))
+    term_width  = term.columns
+    term_height = term.lines
+    f_header, f_console = _pick_fonts(term_width, config["MANUFACTURER"], config["NODE_NAME"])
+
+    out = [""]
+    out += _render_title(config, primary, secondary, term_width, f_header, f_console)
+    out.append("")
+    out.append(_center(f"{secondary}{device_name}{RESET}", term_width))
+    out.append(_center(f"{secondary}{'─' * len(device_name)}{RESET}", term_width))
+    out.append("")
+
+    # fill remaining lines with the event log, newest at bottom
+    chrome   = len(out) + 2   # reserve hint + trailing blank
+    max_evts = max(1, term_height - chrome)
+    for name, code, pressed in events[-max_evts:]:
+        arrow = f"{primary}v{RESET}" if pressed else f"{secondary}^{RESET}"
+        out.append(_center(
+            f"  {arrow}  {primary}{name:<24}{RESET}  {secondary}{code}{RESET}",
+            term_width,
+        ))
+
+    out.append("")
+    out.append(_center(f"{secondary}q / ESC  exit{RESET}", term_width))
+
+    _flush(out, term_width, term_height)
+
+
 def render_menu(config: dict, items: list, cursor: int):
     """Render the main navigable menu."""
     primary     = hex_fg(config["UI_PRIMARY_COLOR"])

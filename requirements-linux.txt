@@ -1,0 +1,3 @@
+# Linux-only dependencies — installed on the remote console by deploy.sh.
+# Not needed on the dev machine (dev.py stubs anything missing here).
+evdev==1.7.1
