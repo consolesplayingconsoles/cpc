@@ -114,6 +114,9 @@ echo ""
 
 # ── Vendor dependencies ───────────────────────────────────────
 echo "  [1/4] Vendoring dependencies..."
+# Cross-platform deps (pyfiglet etc.) are vendored locally so they're included
+# in the rsync payload. Linux-only deps (evdev etc.) are installed on the remote
+# after syncing — avoids build failures on macOS.
 rm -rf vendor/
 pip install -r requirements.txt --target=vendor/ --quiet
 echo "        done."
@@ -146,6 +149,12 @@ tar --no-xattrs \
     "${CONSOLE_EXCLUDES[@]}" \
     -cf - . | $SSH "tar -xf - -C ${REMOTE_PATH}"
 
+echo "        done."
+
+# ── Install Linux-only dependencies on remote ─────────────────
+echo "  [3b/4] Installing Linux-only dependencies on ${NODE_NAME}..."
+$SSH "pip3 install -r ${REMOTE_PATH}/requirements-linux.txt --target=${REMOTE_PATH}/vendor/ --quiet 2>/dev/null \
+      || pip install -r ${REMOTE_PATH}/requirements-linux.txt --target=${REMOTE_PATH}/vendor/ --quiet" || true
 echo "        done."
 
 # ── Start & verify ────────────────────────────────────────────
