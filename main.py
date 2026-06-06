@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+
+import sys
+import os
+
+# Only add the vendor path if it exists on the current system
+vendor_path = '/opt/cpc/vendor'
+if os.path.exists(vendor_path):
+    sys.path.insert(0, vendor_path)
+
 """
 main.py — production entrypoint.
 
@@ -16,6 +25,11 @@ import os
 import sys
 import glob
 import atexit
+import io
+
+# Ensure stdout can handle UTF-8 regardless of the terminal's locale settings.
+if hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -44,13 +58,23 @@ def _resolve_env() -> str:
     loader._fatal(f"multiple console envs found ({names}) — pass one explicitly: main.py <console>/.env")
 
 
-MENU_ITEMS = [
-    "Controller Test",
-]
+def _build_menu(config):
+    """Build menu items and action map dynamically based on the current console."""
+    items = ["Controller Test"]
+    action_map = {"Controller Test": actions.controller_test}
 
-ACTION_MAP = {
-    "Controller Test": actions.controller_test,
-}
+    if config.get("SHORT_NAME") == "wii":
+        if config.get("GC_GAMES_PATH"):
+            items.append("GameCube Games")
+            action_map["GameCube Games"] = actions.list_gc_games
+        if config.get("WII_GAMES_PATH"):
+            items.append("Wii Games")
+            action_map["Wii Games"] = actions.list_wii_games
+        # Bongo Censor requires gcn-pad + gcn-mic kernel support — hidden until ready.
+        # items.append("Bongo Censor")
+        # action_map["Bongo Censor"] = actions.bongo_censor
+
+    return items, action_map
 
 
 def run():
@@ -61,7 +85,8 @@ def run():
     sys.stdout.flush()
     atexit.register(lambda: sys.stdout.write(renderer.ALT_EXIT + renderer.SHOW_CUR) or sys.stdout.flush())
 
-    menu  = menu_mod.Menu(MENU_ITEMS)
+    items, ACTION_MAP = _build_menu(config)
+    menu  = menu_mod.Menu(items)
     stack = []
 
     while True:

@@ -29,7 +29,19 @@ To prevent platform collisions, all assets, firmware, and executables are encaps
   * **`/share`**: Shared media, document templates, and static external resources that are architecture-independent (aligns with the Linux `/usr/share` convention).
   * **`/roms`**: Read-only gaming files, firmware images, and system baselines.
 
-### 5. Interface Design Guidelines
+### 5. Python Compatibility & Dependency Rules
+
+Console nodes run constrained hardware (PowerPC, ARM, MIPS) with Python built from source. Every Python feature and dependency choice must be **validated against the minimum target before use**.
+
+* **Minimum Python version: 3.6** — f-strings and basic type annotations are fine. Nothing from 3.7+ unless explicitly noted as safe (e.g. `importlib.resources` is 3.7+ and is **banned**).
+* **No C extension dependencies** — packages that compile native code (e.g. `evdev`, `cryptography`, `lxml`) will fail to build on exotic architectures. Use pure-Python alternatives or implement the feature directly using stdlib.
+* **No modern setuptools/pip assumptions** — pip on these nodes is old (18.x). Dependencies must install cleanly without requiring `setuptools>=61` or PEP 517 build backends. When in doubt, test with pip 18.
+* **Prefer stdlib over third-party** — if something can be done with `struct`, `os`, `select`, `termios`, `subprocess`, or `socket`, do it that way. External packages must justify their presence.
+* **Raw hardware access over libraries** — for input devices, serial ports, audio, etc., read/write device files directly using `struct` and `os.read/write` rather than pulling in a library wrapper.
+* **Conservative pyfiglet version** — locked to `0.8.post1`, the last release before `importlib.resources` was introduced. Do not upgrade without verifying 3.6 compatibility.
+* **ASCII-safe output** — console terminals may be ASCII-only (no UTF-8 locale). Never use Unicode box-drawing characters, emoji, or non-ASCII symbols in terminal output. Plain `-`, `|`, `+` only.
+
+### 6. Interface Design Guidelines
 
 #### 5.1 Pluto Web Dashboard (Remote Monitoring)
 Pluto is a web-based management dashboard. 
@@ -53,7 +65,7 @@ The Python application features a terminal-based administrative interface for di
 * **Title format**: ASCII header always renders as `CPC MANUFACTURER CONSOLENAME` using pyfiglet. CPC + manufacturer on one line (secondary color), console name large below (primary color).
 * **Dependencies**: managed via `requirements.txt`, vendored with `pip install -r requirements.txt --target=vendor/`, deployed via `deploy.sh <console>/.env`.
 
-### 6. Cross-Platform Topology & Dynamic Availability
+### 7. Cross-Platform Topology & Dynamic Availability
 The core Python interface executes natively on a **master** Linux console. However, its management scope extends beyond the host machine to coordinate specialized **client** devices directly from the master interface.
 
 #### 6.1 Input & Controller Navigation
@@ -63,7 +75,7 @@ The core Python interface executes natively on a **master** Linux console. Howev
 * **Master/Client Architecture**: The Linux machine acts as the central master console, driving administrative actions for connected client hardware.
 * **Context-Aware Menu Visibility**: Client-specific submenus and management features are completely dynamic. Mirroring Pluto's discovery logic, they only become visible and usable within the UI if the master console actively detects that the client configuration exists and the live device responds to network pinging. Disabled, missing, or disconnected clients are automatically stripped from the active menu options to keep the terminal view clean.
 
-### 7. Application Layer & Byproduct Services (Webapps & Servers)
+### 8. Application Layer & Byproduct Services (Webapps & Servers)
 Beyond the administrative control plane, the platform hosts an ecosystem of localized web applications, custom test pages, and Proof of Concept (POC) servers. These byproducts (e.g., experimental servers, diagnostic test views, or localized online/LAN game rooms for any given title) represent the creative and functional outputs of the system rather than the core infrastructure tools themselves.
 
 #### 7.1 Web Stack & Coding Standards
@@ -75,7 +87,7 @@ Pluto itself is never loaded on a console browser. However, consumer-facing bypr
 * **Graceful Degradation ("Strip Rather Than Break")**: If a console browser breaks on modern CSS layout rules or advanced properties, the system strips those layers entirely, gracefully dropping back to a functional, unstyled text-and-grid layout.
 * **Real-Time Fallback Workflow**: Because console rendering behaviors must be verified interactively in real-time, the architecture permits writing explicit, lightweight fallback templates or alternative stylesheets. If real-time physical device testing reveals visual or structural breakage, the engine will explicitly serve the simplified fallback view to that legacy target.
 
-### 8. Local Development & Interface Testing
+### 9. Local Development & Interface Testing
 To keep production application logic perfectly clean and free of testing conditionals, the platform utilizes separate execution scripts for live deployments versus local development environments.
 
 * **Production Entrypoint (`main.py`)**: Runs the strict live logic. It parses the namespace-targeted `.env` file, evaluates real host infrastructure, executes live pings, and dynamically hides/strips UI menus based on physical hardware availability.
