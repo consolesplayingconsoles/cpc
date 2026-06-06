@@ -31,12 +31,22 @@ def _is_allowed_origin(origin: str) -> bool:
     import re
     return bool(re.match(r'^https?://(localhost|127\.0\.0\.1)(:\d+)?$', origin))
 
-# The explicit checklist of variables required for your environment infrastructure
+# Variables that must be set for Pluto to start. LOCAL_PATH and WORKSPACE_PATH
+# are optional — their corresponding host buttons simply won't appear if absent.
 REQUIRED_VARS = [
-    "LOCAL_PATH",
-    "WORKSPACE_PATH",
     "GATEWAY_IP",
 ]
+
+# Console node ids. Each console's env file lives at "<id>/.env" by convention
+# (a sibling of the pluto/ directory), so no per-console *_ENV variable is needed
+# in pluto/.env — the path is derived directly from the node id.
+CONSOLE_IDS = ["wii", "dc", "ps3", "gba", "ws", "batocera"]
+
+
+def console_env_path(base_dir: str, node_id: str) -> str:
+    """Resolve a console's env file from the name convention: <repo>/<id>/.env.
+    base_dir is the pluto/ directory, so console dirs are its siblings."""
+    return os.path.normpath(os.path.join(base_dir, "..", node_id, ".env"))
 
 
 def ping(ip: str) -> bool:
@@ -132,21 +142,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         path = os.path.expanduser(path)
-        if action == "open" and target_node != "host":
-            path = os.path.join(path, target_node)
-        print(f"  [OPEN:{action}] Targeted Node: {target_node} → {path}")
+        print(f"  [OPEN:{action}] → {path}")
         open_path(path)
         self._send(200, {"status": "opened", "path": path, "target": target_node})
 
     def _handle_smb(self, node_id: str):
-        cfg      = self.__class__.config
         base_dir = self.__class__.base_dir
-        env_key  = f"{node_id.upper()}_ENV"
-        env_path = cfg.get(env_key, "").strip()
-        if not env_path:
-            self._send(400, {"error": f"no env path for {node_id}"})
+        env_path = console_env_path(base_dir, node_id)
+        if not os.path.exists(env_path):
+            self._send(400, {"error": f"no env file for {node_id}"})
             return
-        console_cfg = load_env(os.path.normpath(os.path.join(base_dir, env_path)))
+        console_cfg = load_env(env_path)
         smb_url = console_cfg.get("SMB_PATH", "").strip()
         if not smb_url:
             self._send(400, {"error": f"SMB_PATH not configured for {node_id}"})
@@ -156,17 +162,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, {"status": "opened", "smb": smb_url})
 
     def _handle_deploy(self, node_id: str):
-        cfg = self.__class__.config
         base_dir = self.__class__.base_dir
 
-        env_key = f"{node_id.upper()}_ENV"
-        env_path = cfg.get(env_key, "").strip()
-
-        if not env_path:
-            self._send(400, {"error": f"no env path configured for {node_id}"})
+        full_env = console_env_path(base_dir, node_id)
+        if not os.path.exists(full_env):
+            self._send(400, {"error": f"no env file for {node_id}"})
             return
 
-        full_env = os.path.normpath(os.path.join(base_dir, env_path))
         repo_root = os.path.dirname(base_dir)
         deploy_sh = os.path.join(repo_root, "deploy.sh")
 
@@ -214,15 +216,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         base_dir = self.__class__.base_dir
         nodes = {}
 
-        console_envs = {
-            "wii":      "WII_ENV",
-            "dc":       "DC_ENV",
-            "ps3":      "PS3_ENV",
-            "gba":      "GBA_ENV",
-            "ws":       "WS_ENV",
-            "batocera": "BATOCERA_ENV",
-        }
-
+        # Host buttons map to local actions: "deploy" → open the workspace/IDE
+        # (CODE button, needs WORKSPACE_PATH); "folder" → open LOCAL_PATH (DIR).
         nodes["host"] = {
             "id": "host",
             "name": cfg.get("NODE_NAME", "Host"),
@@ -230,6 +225,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "color": cfg.get("UI_PRIMARY_COLOR") or None,
             "status": "up",
             "parent": "gateway",
+            "smb": None,
+            "deploy": bool(cfg.get("WORKSPACE_PATH", "").strip()),
+            "folder": bool(cfg.get("LOCAL_PATH", "").strip()),
         }
 
         gateway_ip = cfg.get("GATEWAY_IP", "").strip()
@@ -241,18 +239,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "color": None,
                 "status": "up" if ping(gateway_ip) else "down",
                 "parent": "gateway",
+                "smb": None,
+                "deploy": False,
+                "folder": False,
             }
 
-        for node_id, env_key in console_envs.items():
-            env_path = cfg.get(env_key, "").strip()
-            if not env_path:
+        for node_id in CONSOLE_IDS:
+            full_path = console_env_path(base_dir, node_id)
+            if not os.path.exists(full_path):
                 continue
-            full_path = os.path.join(base_dir, env_path)
             console_cfg = load_env(full_path)
             ip    = console_cfg.get("HOST_IP", "").strip()
             name  = console_cfg.get("NODE_NAME", node_id)
             color = console_cfg.get("UI_PRIMARY_COLOR") or None
             smb   = console_cfg.get("SMB_PATH", "").strip() or None
+
+            # Deploy is "configured" when the env has any SSH method:
+            # either a CUSTOM_SSH_ALIAS (e.g. an ssh-config entry) or both
+            # SSH_USER + SSH_KEY_PATH for a direct key-based connection.
+            # Nodes with only SMB (no SSH) show the files button but not deploy.
+            alias    = console_cfg.get("CUSTOM_SSH_ALIAS", "").strip()
+            ssh_user = console_cfg.get("SSH_USER", "").strip()
+            ssh_key  = console_cfg.get("SSH_KEY_PATH", "").strip()
+            deployable = bool(ip and (alias or (ssh_user and ssh_key)))
 
             if ip:
                 status = "up" if ping(ip) else "down"
@@ -266,6 +275,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "color":  color,
                 "status": status,
                 "smb":    smb,
+                "deploy": deployable,
+                "folder": bool(smb),
             }
 
         return nodes

@@ -56,6 +56,25 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
+# ── Python version guard ──────────────────────────────────────
+# The console interface uses f-strings (Python 3.6+). Fail fast with a clean,
+# scannable message instead of a cryptic "invalid syntax" deep in the renderer
+# when a node ships an older python3.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo ""
+  echo "  [ERROR] python3 not found on this node — install Python 3.6 or newer."
+  echo ""
+  exit 1
+fi
+if ! python3 -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 6) else 1)'; then
+  PYV="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+  echo ""
+  echo "  [ERROR] Python ${PYV} is too old — the CPC console interface needs 3.6+."
+  echo "          Install a newer python3 on this node and retry."
+  echo ""
+  exit 1
+fi
+
 pkill -f 'python3 main.py' || true
 
 mkdir -p logs
