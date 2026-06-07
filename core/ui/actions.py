@@ -1,6 +1,7 @@
 import os
 import sys
 import glob
+import json
 import math
 import select
 import struct
@@ -72,36 +73,28 @@ def list_wii_games(config):
 _EV_KEY = 1
 _EV_ABS = 3
 
-# Button code → name table (subset covering GC / common gamepads)
-_BTN_NAMES = {
-    0x120: "BTN_TRIGGER",   0x121: "BTN_THUMB",
-    0x122: "BTN_THUMB2",    0x123: "BTN_TOP",
-    0x124: "BTN_TOP2",      0x125: "BTN_PINKIE",
-    0x126: "BTN_BASE",      0x127: "BTN_BASE2",
-    0x128: "BTN_BASE3",     0x129: "BTN_BASE4",
-    0x12a: "BTN_BASE5",     0x12b: "BTN_BASE6",
-    0x12f: "BTN_DEAD",
-    0x130: "BTN_SOUTH/A",   0x131: "BTN_EAST/B",
-    0x132: "BTN_C",         0x133: "BTN_NORTH/X",
-    0x134: "BTN_WEST/Y",    0x135: "BTN_Z",
-    0x136: "BTN_TL",        0x137: "BTN_TR",
-    0x138: "BTN_TL2",       0x139: "BTN_TR2",
-    0x13a: "BTN_SELECT",    0x13b: "BTN_START",
-    0x13c: "BTN_MODE",      0x13d: "BTN_THUMBL",
-    0x13e: "BTN_THUMBR",
-}
 
-_ABS_HAT0X = 0x10
-_ABS_HAT0Y = 0x11
-_ABS_HAT1X = 0x12
-_ABS_HAT1Y = 0x13
+def _load_mappings():
+    """Load button/hat tables from core/mappings/gamepad.json.
+    Falls back to empty dicts if the file is missing — controller test
+    will still display raw hex codes instead of names.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.normpath(os.path.join(here, '..', 'mappings', 'gamepad.json'))
+    try:
+        with open(path) as f:
+            raw = json.load(f)
+        btn = {int(k): v for k, v in raw.get('buttons', {}).items()}
+        hat = {}
+        for key, name in raw.get('hats', {}).items():
+            axis_str, val_str = key.split(':')
+            hat[(int(axis_str), int(val_str))] = name
+        return btn, hat
+    except Exception:
+        return {}, {}
 
-_HAT_NAMES = {
-    (_ABS_HAT0X, -1): "DPAD_LEFT",   (_ABS_HAT0X, 1): "DPAD_RIGHT",
-    (_ABS_HAT0Y, -1): "DPAD_UP",     (_ABS_HAT0Y, 1): "DPAD_DOWN",
-    (_ABS_HAT1X, -1): "HAT1_LEFT",   (_ABS_HAT1X, 1): "HAT1_RIGHT",
-    (_ABS_HAT1Y, -1): "HAT1_UP",     (_ABS_HAT1Y, 1): "HAT1_DOWN",
-}
+
+_BTN_NAMES, _HAT_NAMES = _load_mappings()
 
 
 def _event_format():
@@ -231,10 +224,8 @@ def _beep(freq=880, duration=0.18):
         fd = os.open("/dev/dsp", os.O_WRONLY)
         os.write(fd, bytes(buf))
         os.close(fd)
-    except Exception as e:
-        # surface temporarily so we can diagnose
-        import sys
-        print("\r  [beep error] {}".format(e), file=sys.stderr)
+    except Exception:
+        pass
 
 
 def _find_mic():

@@ -16,6 +16,11 @@ import atexit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Local dev runs on a trusted developer terminal — force full color on,
+# regardless of how it advertises itself. Production (main.py) leaves this
+# unset and only colors when the terminal explicitly reports support.
+os.environ.setdefault("CPC_DEV", "1")
+
 from core.ui import renderer, menu as menu_mod, input as input_mod, actions
 
 

@@ -1,6 +1,8 @@
 import os
 import sys
 
+from core.env import load_env
+
 # Keys the local console interface needs to render and brand itself.
 # Networking / SSH fields (HOST_IP, SSH_USER, SSH_KEY_PATH, CUSTOM_SSH_ALIAS)
 # are deploy-time concerns validated by deploy.sh — not required to run the
@@ -25,16 +27,7 @@ def load(env_path: str) -> dict:
     if not os.path.exists(env_path):
         _fatal(f"env file not found: {env_path}")
 
-    config = {}
-    with open(env_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            config[key.strip()] = value.strip()
+    config = load_env(env_path)
 
     missing = [k for k in REQUIRED_KEYS if not config.get(k)]
     if missing:

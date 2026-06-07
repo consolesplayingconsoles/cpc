@@ -97,15 +97,17 @@ echo "  [2/3] Syncing files to ${REMOTE_PATH}..."
 $SSH "rm -rf ${REMOTE_PATH}/* && mkdir -p ${REMOTE_PATH}/logs"
 
 CONSOLE_EXCLUDES=()
-for _d in batocera dc gba pluto ps3 wii ws; do
+for _d in batocera dc dreame gba pluto ps3 wii ws; do
   [[ "$_d" != "$CONSOLE_DIR" ]] && CONSOLE_EXCLUDES+=("--exclude=$_d")
 done
 
-tar --no-xattrs \
+tar --no-xattrs --no-fflags --no-mac-metadata \
     --exclude='.git' \
     --exclude='.idea' \
     --exclude='__pycache__' \
     --exclude='*.pyc' \
+    --exclude='.venv' \
+    --exclude='node_modules' \
     --exclude='dev.py' \
     --exclude='deploy.sh' \
     "${CONSOLE_EXCLUDES[@]}" \
@@ -113,11 +115,35 @@ tar --no-xattrs \
 
 echo "        done."
 
+# ── Deploy peer .env files (bridge dependencies) ─────────────
+ENV_DEPS="$(_env_get DEPLOY_ENV_DEPS)"
+if [[ -n "$ENV_DEPS" ]]; then
+  echo "  [2b/3] Deploying peer env files: ${ENV_DEPS}..."
+  for dep in $ENV_DEPS; do
+    dep_env="${dep}/.env"
+    if [[ -f "$dep_env" ]]; then
+      $SSH "mkdir -p ${REMOTE_PATH}/${dep}"
+      $SSH "cat > ${REMOTE_PATH}/${dep_env}" < "$dep_env"
+      echo "        ${dep_env} -> ${REMOTE_PATH}/${dep_env}"
+    else
+      echo "        [WARN] ${dep_env} not found, skipping"
+    fi
+  done
+  echo "        done."
+fi
+
 # ── Install Linux-only dependencies on remote ─────────────────
-echo "  [3/3] Installing Linux-only dependencies on ${NODE_NAME}..."
-$SSH "pip3 install --disable-pip-version-check -r ${REMOTE_PATH}/requirements-linux.txt --target=${REMOTE_PATH}/vendor/ --quiet 2>/dev/null \
-      || pip install --disable-pip-version-check -r ${REMOTE_PATH}/requirements-linux.txt --target=${REMOTE_PATH}/vendor/ --quiet" || true
-echo "        done."
+# Skip the remote pip run entirely when requirements-linux.txt has no real
+# (non-comment, non-blank) entries — otherwise we SSH into a slow console to
+# install nothing on every deploy.
+if grep -qvE '^[[:space:]]*(#|$)' requirements-linux.txt; then
+  echo "  [3/3] Installing Linux-only dependencies on ${NODE_NAME}..."
+  $SSH "pip3 install --disable-pip-version-check -r ${REMOTE_PATH}/requirements-linux.txt --target=${REMOTE_PATH}/vendor/ --quiet 2>/dev/null \
+        || pip install --disable-pip-version-check -r ${REMOTE_PATH}/requirements-linux.txt --target=${REMOTE_PATH}/vendor/ --quiet" || true
+  echo "        done."
+else
+  echo "  [3/3] No Linux-only dependencies to install - skipping."
+fi
 
 echo ""
 echo "  ── Deploy complete — restart manually when ready ──"

@@ -6,5 +6,7 @@
   { "from": "dc",       "to": "gateway", "label": "Ethernet"    },
   { "from": "dc",       "to": "wii",     "label": "USB / Maple" },
   { "from": "gba",      "to": "wii",     "label": "GBA Link"    },
-  { "from": "ws",       "to": "wii",     "label": "Serial / USB"}
+  { "from": "ws",       "to": "wii",     "label": "Serial / USB"},
+  { "from": "dreame",  "to": "gateway", "label": "WiFi"        },
+  { "from": "batocera","to": "dreame",  "label": "miio"        }
 ]

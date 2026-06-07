@@ -70,7 +70,7 @@ def _build_menu(config):
         if config.get("WII_GAMES_PATH"):
             items.append("Wii Games")
             action_map["Wii Games"] = actions.list_wii_games
-        # Bongo Censor requires gcn-pad + gcn-mic kernel support — hidden until ready.
+        # pending gcn-pad + gcn-mic kernel support
         # items.append("Bongo Censor")
         # action_map["Bongo Censor"] = actions.bongo_censor
 
