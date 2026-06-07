@@ -59,13 +59,9 @@ def _load_dev_config(console: str) -> dict:
     sys.exit(1)
 
 
-MENU_ITEMS = [
-    "Controller Test",
-]
+MENU_ITEMS = []
 
-ACTION_MAP = {
-    "Controller Test": actions.controller_test,
-}
+ACTION_MAP = {}
 
 
 def run():
