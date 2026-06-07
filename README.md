@@ -14,15 +14,27 @@ consolesplayingconsoles is a distributed network connecting retro consoles from 
 
 ## Start here
 
+Shared infrastructure:
+
 | Folder             | What's inside                                                                                     |
 |--------------------|---------------------------------------------------------------------------------------------------|
 | [core/](./core/)   | Shared core: orchestration, cloud sync, UI layer, shared libs                                     |
-| [wii/](./wii/)     | Wii node: input orchestration, controller translation, Maple bus bridge                           |
-| [dc/](./dc/)       | Dreamcast node: Maple bus protocol, VMU tools, WiFi client                                        |
-| [ps3/](./ps3/)     | PlayStation 3 node: input orchestration, controller translation                                   |
-| [gba/](./gba/)     | Game Boy Advance: link cable tools, physical network remote                                       |
-| [ws/](./ws/)       | WonderSwan: serial cable tools, RAM homebrew                                                      |
 | [pluto/](./pluto/) | Network dashboard: node status, cloud sync client, distributed messaging, distributed deployments |
+
+Console nodes — auto-generated from each folder's `.env.sample`, do not edit by
+hand (run `python3 scripts/gen_readme.py`):
+
+<!-- CONSOLES:START -->
+| Folder | Node | Manufacturer |
+|--------|------|--------------|
+| [batocera/](./batocera/) | Batocera | Linux |
+| [dc/](./dc/) | Dreamcast | Sega |
+| [dreame/](./dreame/) | L40 Ultra | Dreame |
+| [gba/](./gba/) | Game Boy Advance | Nintendo |
+| [ps3/](./ps3/) | PlayStation 3 | Sony |
+| [wii/](./wii/) | Wii | Nintendo |
+| [ws/](./ws/) | WonderSwan | Bandai |
+<!-- CONSOLES:END -->
 
 ---
 

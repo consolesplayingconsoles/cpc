@@ -20,19 +20,65 @@ _TIERS = [
 ]
 
 
-def _truecolor() -> bool:
-    """Return True only when the terminal advertises 24-bit color support."""
+def _color_mode() -> str:
+    """Detect the richest color mode the terminal can safely handle.
+
+    Returns "truecolor" (24-bit), "256" (xterm-256), or "none".
+
+    Rule of thumb: only local dev is assumed colorful; production only emits
+    color when the terminal explicitly advertises support, otherwise none.
+
+    The floor is deliberately "none" (monochrome), never basic ANSI: a
+    primitive console such as the Wii framebuffer (TERM=linux) renders raw
+    color escapes as garbage, so in production we only emit color when the
+    terminal explicitly advertises it. truecolor needs COLORTERM; 256-color
+    needs a 256color TERM (Terminal.app, iTerm, modern SSH clients). Anything
+    that does not clearly say so falls back to the original no-color behavior.
+
+    The dev entrypoint sets CPC_DEV=1 to force full color on the developer's
+    trusted terminal regardless of how it advertises itself — best available
+    (truecolor where COLORTERM says so, otherwise 256).
+    """
     import os
+    if os.environ.get("NO_COLOR") is not None:
+        return "none"
     ct = os.environ.get("COLORTERM", "").lower()
-    return ct in ("truecolor", "24bit")
+    if ct in ("truecolor", "24bit"):
+        return "truecolor"
+    if os.environ.get("CPC_DEV") is not None:
+        return "256"
+    term = os.environ.get("TERM", "")
+    if "256color" in term:
+        return "256"
+    return "none"
+
+
+def _rgb_to_256(r: int, g: int, b: int) -> int:
+    """Map an 8-bit-per-channel RGB color to the nearest xterm-256 index."""
+    # Grayscale ramp gives a closer match for near-neutral colors.
+    if abs(r - g) < 10 and abs(g - b) < 10:
+        if r < 8:
+            return 16
+        if r > 248:
+            return 231
+        return 232 + round((r - 8) / 247 * 23)
+    ri = round(r / 255 * 5)
+    gi = round(g / 255 * 5)
+    bi = round(b / 255 * 5)
+    return 16 + 36 * ri + 6 * gi + bi
 
 
 def hex_fg(hex_color: str) -> str:
-    if not _truecolor():
+    mode = _color_mode()
+    if mode == "none":
         return ""
     h = hex_color.lstrip("#")
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    return f"\033[38;2;{r};{g};{b}m"
+    if mode == "truecolor":
+        return f"\033[38;2;{r};{g};{b}m"
+    if mode == "256":
+        return f"\033[38;5;{_rgb_to_256(r, g, b)}m"
+    return f"\033[{_rgb_to_16(r, g, b)}m"
 
 
 _figlet_cache: dict = {}

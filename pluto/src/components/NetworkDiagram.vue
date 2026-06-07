@@ -15,13 +15,15 @@ import imgPs3  from '../assets/consoles/ps3.png'
 import imgGba  from '../assets/consoles/gba.png'
 import imgWs   from '../assets/consoles/ws.png'
 import imgBatocera from '../assets/consoles/batocera.png'
+import imgDreame   from '../assets/consoles/dreame.png'
 import imgHost from '../assets/consoles/host.png'
 
 const props = defineProps<{ nodes: NodeMap; connections: Connection[] }>()
 
 const ICONS: Record<string, string> = {
   wii: imgWii, dc: imgDc, ps3: imgPs3,
-  gba: imgGba, ws: imgWs, batocera: imgBatocera, host: imgHost,
+  gba: imgGba, ws: imgWs, batocera: imgBatocera,
+  dreame: imgDreame, host: imgHost,
 }
 
 const LAYOUT: Record<string, { x: number; y: number }> = {
@@ -31,8 +33,9 @@ const LAYOUT: Record<string, { x: number; y: number }> = {
   ps3:      { x: 720, y: 130 },
   gba:      { x:  70, y: 125 },
   ws:       { x:  70, y: 335 },
-  host:     { x: 660, y: 460 },
+  host:     { x: 350, y: 470 },
   batocera: { x: 820, y: 350 },
+  dreame:   { x: 660, y: 460 },
 }
 
 

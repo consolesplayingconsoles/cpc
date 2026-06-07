@@ -40,7 +40,7 @@ REQUIRED_VARS = [
 # Console node ids. Each console's env file lives at "<id>/.env" by convention
 # (a sibling of the pluto/ directory), so no per-console *_ENV variable is needed
 # in pluto/.env — the path is derived directly from the node id.
-CONSOLE_IDS = ["wii", "dc", "ps3", "gba", "ws", "batocera"]
+CONSOLE_IDS = ["wii", "dc", "ps3", "gba", "ws", "batocera", "dreame"]
 
 
 def console_env_path(base_dir: str, node_id: str) -> str:

@@ -92,3 +92,11 @@ To keep production application logic perfectly clean and free of testing conditi
 
 * **Production Entrypoint (`main.py`)**: Runs the strict live logic. It parses the namespace-targeted `.env` file, evaluates real host infrastructure, executes live pings, and dynamically hides/strips UI menus based on physical hardware availability.
 * **Development Entrypoint (`dev.py`)**: A dedicated wrapper script used solely for local interface testing (the python equivalent to running `yarn dev`). It completely bypasses the live infrastructure pipeline and force-feeds a complete layout matrix directly into the UI engine. This ensures all menus and text inputs remain visible and editable locally without requiring a production host context or physical devices attached.
+
+### 10. Device Access Discipline
+Connecting to a physical console or device (e.g. `ssh wii ...`) is an explicit, per-command action — **never** a standing grant. See [`SECURITY.md`](./SECURITY.md) for the full policy.
+
+* **Per-command authorization**: Before each connection to a device — including read-only ones — state the exact command and its purpose and obtain approval. Approval of a task does not roll forward into later connections.
+* **Capability is not consent**: Passwordless key auth makes a connection possible, not permitted. The operator draws that line, per request.
+* **Least privilege & transparency**: Default to read-only; call out and confirm anything that writes to a device; never access a device silently or in the background.
+* **Credentials**: One dedicated SSH key per host (never a shared key file). Private keys and real `*.env` files are never committed — only `*.env.sample`.
