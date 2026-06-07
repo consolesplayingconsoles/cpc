@@ -60,8 +60,8 @@ def _resolve_env() -> str:
 
 def _build_menu(config):
     """Build menu items and action map dynamically based on the current console."""
-    items = ["Controller Test"]
-    action_map = {"Controller Test": actions.controller_test}
+    items = []
+    action_map = {}
 
     if config.get("SHORT_NAME") == "wii":
         if config.get("GC_GAMES_PATH"):
