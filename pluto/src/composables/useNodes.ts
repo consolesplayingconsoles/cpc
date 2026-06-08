@@ -17,7 +17,9 @@ export interface NodeData {
 
 export type NodeMap = Record<string, NodeData>
 
-export const API_BASE = 'http://127.0.0.1:7700'
+// Derive from the page's hostname so the same build works on localhost
+// and when accessed via the LAN IP — no extra env config required.
+export const API_BASE = `http://${window.location.hostname}:7700`
 const POLL_MS  = 5000
 
 export function useNodes() {

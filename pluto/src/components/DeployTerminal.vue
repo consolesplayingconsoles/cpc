@@ -1,16 +1,57 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed, nextTick, onUnmounted } from 'vue'
 import type { DeployResult } from '../composables/useDeploy'
 
 const props = defineProps<{
   consoleId: string
   output:    DeployResult
+  lastMs?:   number | null
   cardStyle: Record<string, string>
 }>()
 
 const emit = defineEmits<{ close: [] }>()
 
+const bodyEl = ref<HTMLElement | null>(null)
 const copied = ref(false)
+
+// ── Live elapsed timer ────────────────────────────────────────────────────────
+// Ticks once a second while the deploy is in flight so the slow sync step shows
+// visible progress; frozen on finish. Paired with the "~last" reference it turns
+// an opaque wait into a predictable one.
+const now    = ref(Date.now())
+let   timer: ReturnType<typeof setInterval> | null = null
+
+function stopTimer() {
+  if (timer) { clearInterval(timer); timer = null }
+}
+
+watch(() => props.output.ok, (ok) => {
+  if (ok === null) {
+    now.value = Date.now()
+    if (!timer) timer = setInterval(() => { now.value = Date.now() }, 1000)
+  } else {
+    now.value = Date.now()   // capture the final tick
+    stopTimer()
+  }
+}, { immediate: true })
+
+onUnmounted(stopTimer)
+
+function fmtDur(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  const m = Math.floor(s / 60)
+  return m > 0 ? `${m}:${String(s % 60).padStart(2, '0')}` : `${s}s`
+}
+
+const elapsed = computed(() => props.output.startedAt ? fmtDur(now.value - props.output.startedAt) : '0s')
+const lastRef = computed(() => (props.lastMs ? fmtDur(props.lastMs) : null))
+
+// Auto-scroll to bottom when output grows
+watch(() => props.output.raw, () => {
+  nextTick(() => {
+    if (bodyEl.value) bodyEl.value.scrollTop = bodyEl.value.scrollHeight
+  })
+})
 
 watch(() => props.output, () => { copied.value = false })
 
@@ -19,21 +60,40 @@ async function copyOutput() {
     await navigator.clipboard.writeText(props.output.raw)
     copied.value = true
     setTimeout(() => { copied.value = false }, 1500)
-  } catch { /* clipboard blocked — ignore */ }
+  } catch { /* clipboard blocked */ }
+}
+
+const STEP_LABELS: Record<string, string> = {
+  starting: 'starting',
+  vendor:   'vendoring',
+  sync:     'syncing',
+  deps:     'linux deps',
+  done:     'done',
+  failed:   'failed',
 }
 </script>
 
 <template>
   <div
     class="term"
-    :class="{ 'term--err': !output.ok, 'term--success': output.ok }"
+    :class="{
+      'term--running': output.ok === null,
+      'term--err':     output.ok === false,
+      'term--success': output.ok === true,
+    }"
     :style="cardStyle"
     @click.stop
   >
     <div class="term__bar">
-      <span class="term__title">▶ deploy · {{ consoleId }}</span>
+      <span class="term__title">
+        ▶ deploy ·
+        <span class="term__step">{{ STEP_LABELS[output.step] ?? output.step }}</span>
+        <span class="term__timer">
+          {{ elapsed }}<span v-if="lastRef" class="term__last"> / ~{{ lastRef }}</span>
+        </span>
+      </span>
       <span class="term__tools">
-        <button class="term__btn" :title="copied ? 'copied' : 'copy output'" @click="copyOutput">
+        <button class="term__btn" :title="copied ? 'copied' : 'copy'" @click="copyOutput">
           <svg v-if="!copied" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="9" y="9" width="11" height="11" rx="2"/>
             <path d="M5 15V5a2 2 0 0 1 2-2h10"/>
@@ -49,7 +109,7 @@ async function copyOutput() {
         </button>
       </span>
     </div>
-    <pre class="term__body">{{ output.raw }}</pre>
+    <pre ref="bodyEl" class="term__body">{{ output.raw }}</pre>
   </div>
 </template>
 
@@ -77,11 +137,31 @@ async function copyOutput() {
   flex: 0 0 auto;
 }
 .term__title {
+  flex: 1 1 auto;
+  min-width: 0;
   color: #3a7a52;
   font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+.term__step {
+  color: #3deb76;
+  opacity: 0.7;
+  font-size: 10px;
+}
+.term__timer {
+  margin-left: auto;
+  padding-left: 10px;
+  color: #3deb76;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.term__last { color: #3a7a52; }
 .term__tools { display: flex; gap: 6px; }
 .term__btn {
   display: flex;
@@ -115,6 +195,13 @@ async function copyOutput() {
     to bottom, transparent 0, transparent 2px, rgba(0,0,0,0.16) 3px
   );
 }
+.term--running .term__title { color: #6a8a7a; }
+.term--running .term__body::after {
+  content: '▋';
+  animation: blink 1s step-end infinite;
+  color: #3deb76;
+}
+@keyframes blink { 0%, 100% { opacity: 1 } 50% { opacity: 0 } }
 .term--err .term__title { color: #a8856a; }
 .term--err .term__body  { color: #ff6b6b; text-shadow: 0 0 4px rgba(255,80,80,0.35); }
 .term--success { animation: borderPulse 0.6s ease-out forwards; }

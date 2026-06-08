@@ -9,22 +9,9 @@ import NodeBubble from './NodeBubble.vue'
 import DeployTerminal from './DeployTerminal.vue'
 import AchievementToast from './AchievementToast.vue'
 
-import imgWii  from '../assets/consoles/wii.png'
-import imgDc   from '../assets/consoles/dc.png'
-import imgPs3  from '../assets/consoles/ps3.png'
-import imgGba  from '../assets/consoles/gba.png'
-import imgWs   from '../assets/consoles/ws.png'
-import imgBatocera from '../assets/consoles/batocera.png'
-import imgDreame   from '../assets/consoles/dreame.png'
-import imgHost from '../assets/consoles/host.png'
+import { ICONS } from '../composables/useIcons'
 
 const props = defineProps<{ nodes: NodeMap; connections: Connection[] }>()
-
-const ICONS: Record<string, string> = {
-  wii: imgWii, dc: imgDc, ps3: imgPs3,
-  gba: imgGba, ws: imgWs, batocera: imgBatocera,
-  dreame: imgDreame, host: imgHost,
-}
 
 const LAYOUT: Record<string, { x: number; y: number }> = {
   gateway:  { x: 500, y: 280 },
@@ -36,11 +23,12 @@ const LAYOUT: Record<string, { x: number; y: number }> = {
   host:     { x: 350, y: 470 },
   batocera: { x: 820, y: 350 },
   dreame:   { x: 660, y: 460 },
+  birdbuddy:{ x: 500, y: 565 },
 }
 
 
 const {
-  deploying, deployOutput,
+  deploying, deployOutput, lastDurations,
   showToast, toastConsoleName, toastDuration,
   deploy, openLocal, clearOutput, dismissToast,
 } = useDeploy(() => props.nodes)
@@ -102,7 +90,7 @@ const wrapEl    = ref<HTMLDivElement | null>(null)
 const svgEl     = ref<SVGSVGElement | null>(null)
 const cardStyle = ref<Record<string, string>>({ display: 'none' })
 const CARD_W    = 460
-const TUCK      = 30
+const TUCK      = 28
 
 const consoleId = computed(() => {
   const id = activeMenu.value
@@ -215,6 +203,7 @@ onUnmounted(() => window.removeEventListener('resize', updateCardPos))
       v-if="consoleId"
       :console-id="consoleId"
       :output="deployOutput[consoleId]!"
+      :last-ms="lastDurations[consoleId] ?? null"
       :card-style="cardStyle"
       @close="clearOutput(consoleId)"
     />
