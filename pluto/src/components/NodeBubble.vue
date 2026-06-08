@@ -127,8 +127,9 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
       <g
         v-if="showDeployBtn"
         class="action-btn"
+        :class="{ 'action-btn--busy': isDeploying }"
         :transform="`translate(${btnX('deploy')}, 0)`"
-        @click.stop="emit('deploy')"
+        @click.stop="!isDeploying && emit('deploy')"
         @mouseenter="hoveredBtn = 'deploy'"
         @mouseleave="hoveredBtn = null"
       >
@@ -185,7 +186,7 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
-  text-transform: uppercase;
+  text-transform: lowercase;
 }
 .node-ip {
   font-family: var(--font-mono);
@@ -193,7 +194,8 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
   fill: var(--color-secondary);
   opacity: 0.8;
 }
-.action-btn { cursor: pointer; }
+.action-btn        { cursor: pointer; }
+.action-btn--busy  { cursor: not-allowed; }
 .tooltip-label {
   font-family: var(--font-mono);
   font-size: 9px;
