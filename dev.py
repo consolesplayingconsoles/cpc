@@ -59,9 +59,23 @@ def _load_dev_config(console: str) -> dict:
     sys.exit(1)
 
 
-MENU_ITEMS = []
+def _build_dev_menu(config):
+    items = []
+    action_map = {}
 
-ACTION_MAP = {}
+    if config.get("SHORT_NAME") == "wii":
+        if config.get("GC_GAMES_PATH"):
+            items.append("GameCube Games")
+            action_map["GameCube Games"] = actions.list_gc_games
+        if config.get("WII_GAMES_PATH"):
+            items.append("Wii Games")
+            action_map["Wii Games"] = actions.list_wii_games
+
+    if config.get("PLUTO_IP", "").strip():
+        items.append("Chat")
+        action_map["Chat"] = actions.chat_view
+
+    return items, action_map
 
 
 def run():
@@ -70,7 +84,9 @@ def run():
     sys.stdout.write(renderer.ALT_ENTER)
     sys.stdout.flush()
     atexit.register(lambda: sys.stdout.write(renderer.ALT_EXIT + renderer.SHOW_CUR) or sys.stdout.flush())
-    menu   = menu_mod.Menu(MENU_ITEMS)
+
+    items, ACTION_MAP = _build_dev_menu(config)
+    menu   = menu_mod.Menu(items)
 
     stack  = []
 

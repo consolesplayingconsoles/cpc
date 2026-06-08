@@ -1,15 +1,12 @@
 import os
-import sys
-import glob
-import json
-import math
 import select
-import struct
 import termios
 import tty
 import time
+import threading
 
 from core.ui import renderer
+from core import chat as chat_mod
 
 # ── Game library ─────────────────────────────────────────────────────────────
 
@@ -32,7 +29,6 @@ def _list_games(config, path_key, label):
     if not path:
         return ["[{} path not configured]".format(label)]
 
-    # Check mount first — unmounted mount points are empty dirs, not useful
     mount = os.path.dirname(path.rstrip("/"))
     if not _is_mounted(path) and not _is_mounted(mount):
         return ["[disk not mounted — plug in USB drive]"]
@@ -55,155 +51,6 @@ def list_gc_games(config):
 
 def list_wii_games(config):
     return _list_games(config, "WII_GAMES_PATH", "Wii")
-
-
-# ── Raw /dev/input reader ─────────────────────────────────────────────────────
-# Reads Linux input events directly from /dev/input/event* as binary structs.
-# No external dependencies — works on any architecture including PowerPC.
-#
-# Event struct (32-bit kernel, e.g. Wii):
-#   struct timeval  { long tv_sec; long tv_usec; }  → 8 bytes (2 × 4-byte long)
-#   uint16_t type, code
-#   int32_t  value
-#   Total: 16 bytes
-#
-# On 64-bit: timeval is 16 bytes → total 24 bytes.
-# We detect the right size at runtime.
-
-_EV_KEY = 1
-_EV_ABS = 3
-
-
-def _load_mappings():
-    """Load button/hat tables from core/mappings/gamepad.json.
-    Falls back to empty dicts if the file is missing — controller test
-    will still display raw hex codes instead of names.
-    """
-    here = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.normpath(os.path.join(here, '..', 'mappings', 'gamepad.json'))
-    try:
-        with open(path) as f:
-            raw = json.load(f)
-        btn = {int(k): v for k, v in raw.get('buttons', {}).items()}
-        hat = {}
-        for key, name in raw.get('hats', {}).items():
-            axis_str, val_str = key.split(':')
-            hat[(int(axis_str), int(val_str))] = name
-        return btn, hat
-    except Exception:
-        return {}, {}
-
-
-_BTN_NAMES, _HAT_NAMES = _load_mappings()
-
-
-def _event_format():
-    """Return (struct_format, event_size) for this kernel's timeval width."""
-    import platform
-    bits = 8 * struct.calcsize("l")   # long size = pointer size on Linux
-    return ("llHHi", 16) if bits == 32 else ("qqHHi", 24)
-
-
-def _find_controllers():
-    """Return list of (path, name) for likely gamepad /dev/input/event* nodes.
-    Accepts devices with BTN keys, ABS axes, or joystick handlers — covers
-    native GC ports on the Wii which may not advertise KEY capabilities.
-    """
-    results = []
-    try:
-        current = {}
-        with open("/proc/bus/input/devices") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("N:"):
-                    current["name"] = line.split("=", 1)[-1].strip().strip('"')
-                elif line.startswith("H: Handlers="):
-                    handlers = line.split("=", 1)[-1].split()
-                    for h in handlers:
-                        if h.startswith("event"):
-                            current["event"] = h
-                        if h.startswith("js"):
-                            current["has_js"] = True
-                elif line.startswith("B: KEY="):
-                    current["has_key"] = True
-                elif line.startswith("B: ABS="):
-                    current["has_abs"] = True
-                elif line == "":
-                    name = current.get("name", "")
-                    event = current.get("event")
-                    is_input = current.get("has_key") or current.get("has_abs") or current.get("has_js")
-                    is_kbd = "keyboard" in name.lower() or "kbd" in name.lower() or "mouse" in name.lower()
-                    if event and is_input and not is_kbd:
-                        path = "/dev/input/" + event
-                        if os.path.exists(path):
-                            results.append((path, name or event))
-                    current = {}
-    except Exception:
-        pass
-    return results
-
-
-def controller_test(config: dict):
-    """Enter the controller button intercept mode.
-    Reads raw /dev/input events — no external dependencies.
-    Returns None (owns its own render loop).
-    """
-    if not os.path.isdir("/dev/input"):
-        renderer.render_controller(config, "no /dev/input on this platform", [])
-        time.sleep(2)
-        return None
-
-    controllers = _find_controllers()
-    if not controllers:
-        renderer.render_controller(config, "no controllers detected", [])
-        time.sleep(2)
-        return None
-
-    path, name = controllers[0]
-    fmt, size   = _event_format()
-    events      = []   # list of (label, code, pressed)
-
-    try:
-        dev_f  = open(path, "rb")
-        tty_f  = open("/dev/tty", "rb", buffering=0)
-        fd_dev = dev_f.fileno()
-        fd_kbd = tty_f.fileno()
-        old    = termios.tcgetattr(fd_kbd)
-        try:
-            tty.setraw(fd_kbd)
-            while True:
-                renderer.render_controller(config, name, events)
-                readable, _, _ = select.select([fd_dev, fd_kbd], [], [], 0.1)
-
-                if fd_kbd in readable:
-                    ch = os.read(fd_kbd, 1)
-                    if ch in (b'q', b'\x03', b'\x1b'):
-                        break
-
-                if fd_dev in readable:
-                    raw = dev_f.read(size)
-                    if len(raw) < size:
-                        continue
-                    _, _, ev_type, code, value = struct.unpack(fmt, raw)
-
-                    if ev_type == _EV_KEY and value in (0, 1):
-                        label = _BTN_NAMES.get(code, "BTN_0x{:03x}".format(code))
-                        events.append((label, code, value == 1))
-
-                    elif ev_type == _EV_ABS and (code, value) in _HAT_NAMES and value != 0:
-                        events.append((_HAT_NAMES[(code, value)], code, True))
-        finally:
-            termios.tcsetattr(fd_kbd, termios.TCSADRAIN, old)
-    except Exception as e:
-        renderer.render_controller(config, "error: {}".format(e), [])
-        time.sleep(3)
-    finally:
-        try: dev_f.close()
-        except: pass
-        try: tty_f.close()
-        except: pass
-
-    return None
 
 
 # ── Bongo Censor ──────────────────────────────────────────────────────────────
@@ -300,5 +147,155 @@ def bongo_censor(config: dict):
         tty_f.close()
         if mic_f:
             mic_f.close()
+
+    return None
+
+
+# ── Group Chat ────────────────────────────────────────────────────────────────
+
+def chat_view(config: dict):
+    """Full-screen group chat against the Pluto API.
+
+    ESC / Ctrl+C (when idle)  → exit to menu
+    Ctrl+C (during expansion)  → kill subprocess, stay in chat
+    Ctrl+R                     → force refresh
+    Enter                      → send draft (expanding {{ cmd }} first)
+    Backspace                  → delete last char
+    Returns None.
+    """
+    pluto_ip  = config.get("PLUTO_IP", "").strip()
+    pluto_url = "http://%s:7700" % pluto_ip
+    sender    = config.get("NODE_NAME", config.get("SHORT_NAME", "console")).lower()
+
+    tty_f  = open("/dev/tty", "rb", buffering=0)
+    fd_tty = tty_f.fileno()
+    old    = termios.tcgetattr(fd_tty)
+
+    messages        = []
+    last_id         = 0
+    draft           = ""
+    status          = ""
+    POLL_S          = 5.0
+    last_full_state = None   # (len(messages), status) — triggers full redraw
+    last_draft      = None   # triggers input-line-only update
+
+    def fetch():
+        nonlocal last_id
+        new = chat_mod.fetch_messages(pluto_url, since=last_id)
+        if new:
+            messages.extend(new)
+            last_id = new[-1]["id"]
+
+    fetch()
+
+    try:
+        tty.setraw(fd_tty)
+        last_poll = time.time()
+
+        while True:
+            full_state = (len(messages), status)
+            if full_state != last_full_state:
+                renderer.render_chat(config, messages, draft, status)
+                last_full_state = full_state
+                last_draft = draft
+            elif draft != last_draft:
+                renderer.update_chat_input(config, draft, status)
+                last_draft = draft
+
+            r, _, _ = select.select([fd_tty], [], [], 0.5)
+
+            now = time.time()
+            if now - last_poll > POLL_S:
+                fetch()
+                last_poll = now
+                status = ""
+
+            if not r:
+                continue
+
+            ch = os.read(fd_tty, 1)
+
+            # ESC — bare ESC exits; arrow/function sequences are ignored
+            if ch == b'\x1b':
+                r2, _, _ = select.select([fd_tty], [], [], 0.05)
+                if r2:
+                    os.read(fd_tty, 8)   # flush the sequence bytes
+                else:
+                    break                # bare ESC → exit chat
+                continue
+
+            # Ctrl+C when idle → exit chat
+            if ch == b'\x03':
+                break
+
+            # Ctrl+R → manual refresh
+            if ch == b'\x12':
+                fetch()
+                last_poll = time.time()
+                status = "refreshed"
+                continue
+
+            # Enter → send
+            if ch in (b'\r', b'\n'):
+                text = draft.strip()
+                draft = ""
+                status = ""
+                if not text:
+                    continue
+
+                if chat_mod.has_expansion(text):
+                    interrupt = threading.Event()
+                    result    = [None]
+
+                    def _expand(t=text, ev=interrupt, out=result):
+                        out[0] = chat_mod.expand_shell(t, ev)
+
+                    t = threading.Thread(target=_expand)
+                    t.start()
+                    status = "expanding...  Ctrl+C to cancel"
+
+                    while t.is_alive():
+                        last_full_state = None  # force redraw so status updates are visible
+                        renderer.render_chat(config, messages, draft, status)
+                        r2, _, _ = select.select([fd_tty], [], [], 0.2)
+                        if r2:
+                            c2 = os.read(fd_tty, 1)
+                            if c2 == b'\x03':
+                                interrupt.set()
+
+                    t.join()
+
+                    if interrupt.is_set():
+                        status = "interrupted"
+                        continue
+
+                    text   = result[0] or ""
+                    status = ""
+
+                if text.strip():
+                    ok, err = chat_mod.post_message(pluto_url, sender, text)
+                    if ok:
+                        fetch()
+                        last_poll = time.time()
+                    else:
+                        status = "send failed: %s" % err
+                continue
+
+            # Backspace
+            if ch in (b'\x7f', b'\x08'):
+                draft = draft[:-1]
+                continue
+
+            # Printable ASCII
+            try:
+                c = ch.decode('ascii')
+                if c.isprintable():
+                    draft += c
+            except (UnicodeDecodeError, ValueError):
+                pass
+
+    finally:
+        termios.tcsetattr(fd_tty, termios.TCSADRAIN, old)
+        tty_f.close()
 
     return None

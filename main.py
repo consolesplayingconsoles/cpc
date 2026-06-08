@@ -74,6 +74,10 @@ def _build_menu(config):
         # items.append("Bongo Censor")
         # action_map["Bongo Censor"] = actions.bongo_censor
 
+    if config.get("PLUTO_IP", "").strip():
+        items.append("Chat")
+        action_map["Chat"] = actions.chat_view
+
     return items, action_map
 
 
