@@ -23,7 +23,6 @@ from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 
 import vacuum
-import birdfeed
 
 
 def open_path(path):
@@ -42,15 +41,6 @@ PORT = 7700
 # Chat senders allowed to drive the @l40 vacuum (a shared chat surface controls a
 # physical robot, so default to the operator's own surfaces). Overridable via env.
 _vacuum_senders = {"pluto", "host"}
-
-# BirdBuddy is a cloud device with no LAN ping — its graph status follows the
-# postcard poller (set True/False as the cloud feed succeeds/fails).
-_bb_online = False
-
-
-def _bb_set_status(up):
-    global _bb_online
-    _bb_online = up
 
 # ── @claude bot (Anthropic API) ──────────────────────────────────────────────
 # Claude as a guest in the chat, running on the operator's own Anthropic API key.
@@ -343,8 +333,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if parsed.path == "/messages":
             self._handle_post_message()
-        elif parsed.path == "/birdbuddy/test":
-            self._handle_birdbuddy_test()
         elif len(parts) == 2 and parts[0] == "smb":
             self._handle_smb(parts[1])
         elif len(parts) == 2 and parts[0] in ("open", "workspace"):
@@ -383,13 +371,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         low = text.lower()
         if "@l40" in low or "@dreame" in low:
             self._maybe_vacuum(sender, text)
-
-    def _handle_birdbuddy_test(self):
-        """Inject a synthetic postcard event — verifies the chat path without a
-        real bird (sightings are motion-triggered at the device, not on demand)."""
-        msg = _new_message("birdbuddy", birdfeed.describe({"species": "Test Sparrow"}))
-        print("  [birdbuddy] test event injected")
-        self._send(201, msg)
 
     def _maybe_vacuum(self, sender, text):
         """Handle an @l40 chat command: run a safe verb, reply as the vacuum.
@@ -561,15 +542,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ssh_user = console_cfg.get("SSH_USER", "").strip()
             ssh_key  = console_cfg.get("SSH_KEY_PATH", "").strip()
             deployable = bool(ip and (alias or (ssh_user and ssh_key)))
-            if node_id == "birdbuddy":
-                # Cloud device: no LAN ping. Present only when credentials exist;
-                # status follows the postcard poller.
-                if console_cfg.get("BIRDBUDDY_EMAIL", "").strip():
-                    status = "up" if _bb_online else "down"
-                else:
-                    status = "unconfigured"
-            else:
-                status = ("up" if ping(ip) else "down") if ip else "unconfigured"
+            status = ("up" if ping(ip) else "down") if ip else "unconfigured"
             nodes[node_id] = {
                 "id":     node_id,
                 "name":   name,
@@ -648,30 +621,6 @@ def run():
     if senders:
         _vacuum_senders = {s.strip().lower() for s in senders.split(",") if s.strip()}
     print("  @l40 vacuum: senders allowed -> %s" % ", ".join(sorted(_vacuum_senders)))
-
-    # BirdBuddy postcard poller — posts "a bird visited" events into the chat.
-    bb_env  = load_env(console_env_path(parent_dir, "birdbuddy"))
-    bb_user = bb_env.get("BIRDBUDDY_EMAIL", "").strip()
-    bb_pass = bb_env.get("BIRDBUDDY_PASSWORD", "").strip()
-    if bb_user and bb_pass:
-        # Sightings are rare and also hit the phone app — no need to be greedy.
-        # Check once at startup, then poll no faster than every 2 minutes.
-        try:
-            bb_interval = max(120, int(bb_env.get("BIRDBUDDY_POLL_SECONDS", "120") or "120"))
-        except ValueError:
-            bb_interval = 120
-        print("  birdbuddy: starting postcard poller (%s, every %ds)" % (bb_user, bb_interval))
-        threading.Thread(
-            target=birdfeed.run_poller,
-            args=(bb_user, bb_pass,
-                  lambda text: _new_message("birdbuddy", text),
-                  _bb_set_status,
-                  lambda: False),
-            kwargs={"interval": bb_interval},
-            daemon=True,
-        ).start()
-    else:
-        print("  birdbuddy: disabled (set BIRDBUDDY_EMAIL/PASSWORD in birdbuddy/.env)")
 
     Handler.config   = config
     Handler.base_dir = parent_dir

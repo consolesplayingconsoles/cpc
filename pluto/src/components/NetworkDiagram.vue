@@ -23,7 +23,7 @@ const LAYOUT: Record<string, { x: number; y: number }> = {
   host:     { x: 350, y: 470 },
   batocera: { x: 820, y: 350 },
   dreame:   { x: 660, y: 460 },
-  birdbuddy:{ x: 500, y: 565 },
+  birdbuddy:{ x: 500, y: 470 },
 }
 
 

@@ -143,6 +143,13 @@ const filteredCmds = computed(() => {
 })
 
 function selectCmd(cmd: string) {
+  // Unimplemented commands are readable & navigable, but cannot be added to the
+  // prompt — selecting one (click / Tab / Enter) is a deliberate no-op.
+  const def = COMMANDS.find(c => c.cmd === cmd)
+  if (def && def.done !== true) {
+    (inputEl.value ?? textareaEl.value)?.focus()
+    return
+  }
   draft.value = cmd + ' '
   nextTick(() => (inputEl.value ?? textareaEl.value)?.focus())
 }
@@ -813,6 +820,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
   box-shadow: inset 2px 0 0 var(--color-primary);
 }
 /* not-yet-built command: visible & navigable, but visually muted */
+.autocomplete-item--soon { cursor: default; }
 .autocomplete-item--soon .autocomplete-cmd,
 .autocomplete-item--soon .autocomplete-desc { opacity: 0.5; }
 .autocomplete-tag--soon {

@@ -9,5 +9,5 @@
   { "from": "ws",       "to": "wii",     "label": "Serial / USB"},
   { "from": "dreame",  "to": "gateway", "label": "WiFi"        },
   { "from": "batocera","to": "dreame",  "label": "miio"        },
-  { "from": "birdbuddy","to": "gateway","label": "Cloud"       }
+  { "from": "birdbuddy","to": "gateway","label": "WiFi"        }
 ]
