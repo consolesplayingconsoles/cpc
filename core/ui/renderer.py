@@ -100,26 +100,72 @@ def _rendered_width(text: str, font: str) -> int:
 
 
 def _flush(out: list, term_width: int, term_height: int):
-    """Overwrite every line in place — no clear, no ghosting."""
+    """Repaint every row in place using ABSOLUTE cursor positioning.
+
+    Each line is placed at an explicit (row, column 1) with \\033[r;1H, so there
+    is zero dependence on newline / carriage-return translation, autowrap, or the
+    framebuffer console's magic-margin behaviour (raw-mode stdout has no ONLCR, so
+    a bare "\\n" would not return to column 1 and every line would cascade right).
+    \\033[K clears the rest of each row, so no full-width padding is needed and the
+    last column is never written. Built into one string for a single write so the
+    line-buffered TTY does not flush mid-frame and flicker.
+    """
     lines = "\n".join(out).splitlines()
-    w = sys.stdout
-    w.write(HIDE_CUR + HOME)
+    parts = [HIDE_CUR]
     for i in range(term_height):
-        if i < len(lines):
-            visible = re.sub(r'\x1b\[[0-9;]*m', '', lines[i])
-            pad = max(0, term_width - len(visible))
-            w.write(lines[i] + " " * pad)
-        else:
-            w.write(" " * term_width)
-        if i < term_height - 1:
-            w.write("\n")
-    w.flush()
+        line = lines[i] if i < len(lines) else ""
+        parts.append("\033[%d;1H%s\033[K" % (i + 1, line))
+    sys.stdout.write("".join(parts))
+    sys.stdout.flush()
 
 
 def _center(line: str, width: int) -> str:
     visible = re.sub(r'\x1b\[[0-9;]*m', '', line)
     pad = max(0, (width - len(visible)) // 2)
     return " " * pad + line
+
+
+def _fit_visible(s: str, width: int) -> str:
+    """Truncate a plain (un-colored) string to at most `width` columns."""
+    if width <= 0:
+        return ""
+    return s if len(s) <= width else s[:width - 1] + ">"
+
+
+# ── Shared chat line builders ────────────────────────────────────────────────
+# render_chat and update_chat_input MUST emit byte-identical bottom rows, and no
+# line may exceed term_width or the terminal wraps it, scrolls, and desyncs the
+# absolute-positioned updates (the duplicate-line bug). Both go through these.
+
+def _chat_sep_line(secondary: str, term_width: int) -> str:
+    return f"  {secondary}{'-' * min(max(0, term_width - 4), 60)}{RESET}"
+
+
+def _chat_draft_line(draft: str, primary: str, secondary: str, term_width: int) -> str:
+    # Visible chrome: "  > " (4) + cursor "_" (1), plus 1 column of safety margin.
+    avail = max(1, term_width - 6)
+    shown = draft if len(draft) <= avail else "<" + draft[-(avail - 1):]
+    return f"  {primary}>{RESET} {shown}{secondary}_{RESET}"
+
+
+def _chat_hint_line(status: str, secondary: str, term_width: int) -> str:
+    """Controls / status line — left-aligned to sit under the header at the top."""
+    if status:
+        txt = _fit_visible(status, term_width - 2)
+    else:
+        # Progressively shorter hints; pick the longest that fits the width.
+        for cand in (
+            "ESC exit  Enter send  Ctrl+R refresh  Ctrl+C interrupt",
+            "ESC exit  Enter send  Ctrl+R refresh",
+            "ESC exit  Enter send",
+            "ESC exit",
+        ):
+            if len(cand) <= term_width - 2:
+                txt = cand
+                break
+        else:
+            txt = _fit_visible("ESC exit", term_width - 2)
+    return f"  {secondary}{txt}{RESET}"
 
 
 def _pick_fonts(term_width: int, mfr: str, node: str):
@@ -271,6 +317,103 @@ def render_menu(config: dict, items: list, cursor: int):
     _flush(out, term_width, term_height)
 
 
+def render_chat(config: dict, messages: list, draft: str, status: str = ""):
+    """Render the full-screen group chat view.
+
+    Intentionally skips the figlet title — this runs in a tight input loop
+    and the full title block causes visible flicker on every keystroke.
+    """
+    primary     = hex_fg(config["UI_PRIMARY_COLOR"])
+    secondary   = hex_fg(config["UI_SECONDARY_COLOR"])
+    term        = shutil.get_terminal_size(fallback=(80, 24))
+    term_width  = term.columns
+    term_height = term.lines
+
+    node    = config.get("NODE_NAME", "").lower()
+    channel = "# consoles-chatting-consoles"
+
+    # Layout (top to bottom): header, controls, divider, [msg_area], separator, draft.
+    # The DRAFT is the very last line — keystrokes only ever repaint that one row, so
+    # there is nothing below it to desync. msg_area is exact so len(out) == term_height.
+    chrome   = 5
+    msg_area = max(0, term_height - chrome)
+    max_msgs = msg_area // 2
+
+    # Width-safe header: keep node + channel when they fit, else drop channel,
+    # else truncate node. A wrapped header at the top would scroll the whole view.
+    avail = max(1, term_width - 3)  # 2 leading spaces + 1 safety column
+    if len(node) + 2 + len(channel) <= avail:
+        header      = f"  {primary}{BOLD}{node}{RESET}  {secondary}{channel}{RESET}"
+        header_plain = f"{node}  {channel}"
+    elif len(node) <= avail:
+        header      = f"  {primary}{BOLD}{node}{RESET}"
+        header_plain = node
+    else:
+        header_plain = _fit_visible(node, avail)
+        header      = f"  {primary}{BOLD}{header_plain}{RESET}"
+    divider = f"  {secondary}{'-' * min(len(header_plain), term_width - 2)}{RESET}"
+
+    def _msg_lines(m):
+        try:
+            ts = m["ts"][11:16]
+        except Exception:
+            ts = "??:??"
+        sender = str(m.get("sender", "?")).lower()
+        text   = str(m.get("text", ""))
+        if len(text) > 300:
+            text = text[:297] + "..."
+        first = text.splitlines()[0] if text.splitlines() else text
+        max_w = max(10, term_width - 6)
+        if len(first) > max_w:
+            first = first[:max_w - 3] + "..."
+        return (
+            f"  {secondary}{sender}  {ts}{RESET}",
+            f"    {primary}{first}{RESET}",
+        )
+
+    # Build message lines and pad at top to fill msg_area exactly.
+    shown = messages[-max_msgs:] if max_msgs else []
+    msg_lines = []
+    for m in shown:
+        h, body = _msg_lines(m)
+        msg_lines.append(h)
+        msg_lines.append(body)
+    while len(msg_lines) < msg_area:
+        msg_lines.insert(0, "")
+
+    out = [
+        header,                                          # row 1
+        _chat_hint_line(status, secondary, term_width),  # row 2: controls / status
+        divider,                                         # row 3
+    ]
+    out.extend(msg_lines)                                          # msg_area rows
+    out.append(_chat_sep_line(secondary, term_width))             # row term_h - 1
+    out.append(_chat_draft_line(draft, primary, secondary, term_width))  # row term_h (LAST)
+    # len(out) == 3 + msg_area + 2 == term_height always
+
+    _flush(out, term_width, term_height)
+
+
+def update_chat_input(config: dict, draft: str, status: str = ""):
+    """Repaint ONLY the draft line — the last row of the screen.
+
+    Because the prompt is the final line (controls and status live up top), a
+    keystroke never touches anything above it, so there is nothing to desync.
+    The draft is width-fitted by _chat_draft_line, so it can never wrap/scroll.
+    \033[K erases to EOL instead of space-padding the last column, which would
+    otherwise set the terminal wrap-next flag and shift content.
+    """
+    primary   = hex_fg(config["UI_PRIMARY_COLOR"])
+    secondary = hex_fg(config["UI_SECONDARY_COLOR"])
+    term      = shutil.get_terminal_size(fallback=(80, 24))
+    term_w    = term.columns
+    term_h    = term.lines
+
+    draft_line = _chat_draft_line(draft, primary, secondary, term_w)
+    sys.stdout.write(f"\033[{term_h};1H{draft_line}\033[K")
+    sys.stdout.flush()
+
+
 def render_list(config: dict, title: str, items: list, cursor: int):
     """Render a list view clamped to the terminal height — no scrolling past the screen."""
     primary     = hex_fg(config["UI_PRIMARY_COLOR"])
@@ -307,7 +450,7 @@ def render_list(config: dict, title: str, items: list, cursor: int):
     btn_up   = config.get("BUTTON_UP",   "UP")
     btn_down = config.get("BUTTON_DOWN", "DOWN")
     btn_back = config.get("BUTTON_BACK", "<")
-    hint = f"{btn_up}/{btn_down} scroll   {btn_back}/Q back"
+    hint = f"{btn_up}/{btn_down} scroll   {btn_back}  back Q quit"
     out.append("")
     out.append(_center(f"{secondary}{hint}{RESET}", term_width))
 
