@@ -4,6 +4,7 @@ import type { NodeMap, NodeData } from '../composables/useNodes'
 import { ICONS } from '../composables/useIcons'
 import { useMessages } from '../composables/useMessages'
 import ConsoleAvatar from './ConsoleAvatar.vue'
+import chatConfig from '../chat.json'
 
 const props = defineProps<{
   nodes:       NodeMap
@@ -83,25 +84,18 @@ watch(messages, scrollToBottom, { deep: true })
 interface CmdDef {
   cmd:        string
   desc:       string
-  param?:     { label: string; type: 'console' }
+  param?:     { label: string; type: string }
   multiline?: boolean
   done?:      boolean   // implemented? defaults to false = visible but not sendable
 }
 
-const COMMANDS: CmdDef[] = [
-  { cmd: '/post-to-substack',  desc: 'write & broadcast to substack',    multiline: true },
-  { cmd: '/send-saved-games',  desc: 'push saved games to a console',    param: { label: 'console', type: 'console' } },
-  { cmd: '/steal-saved-games', desc: 'pull saved games from a console',  param: { label: 'console', type: 'console' } },
-]
+// Slash-commands come from the shared chat.json (single source of truth, also
+// read server-side by api.py and inlined into the barebones Wii client page).
+const COMMANDS: CmdDef[] = chatConfig.commands
 
-// @l40 vacuum verbs — offered as autocomplete after "@l40 " when the feeder's
-// cousin (the vacuum) is present. Mirrors the safe verb set in the Pluto API.
-const VACUUM_VERBS = [
-  { verb: 'locate', desc: 'beep so you can find it' },
-  { verb: 'clean',  desc: 'start cleaning' },
-  { verb: 'dock',   desc: 'return to charge' },
-  { verb: 'stop',   desc: 'stop / park in place' },
-]
+// @l40 vacuum verbs — autocomplete after "@l40 " when the vacuum is present.
+// From the shared chat.json; api.py reads the same list so client + server agree.
+const VACUUM_VERBS = chatConfig.vacuumVerbs
 
 // ── Input state ──────────────────────────────────────────────────────────────
 const draft       = ref('')
@@ -116,7 +110,7 @@ function syncScroll() {
   if (hlEl.value && inputEl.value) hlEl.value.scrollLeft = inputEl.value.scrollLeft
 }
 
-const EMOJIS = [':)', ':(', ':|', ':D', ":'(", '>:(', '+1', '-1', '<3', 'X_X', 'O_O', '\\o/', 'gg', 'lol', 'rip', 'ugh', 'zzz', 'ngl', ':P', '...']
+const EMOJIS = chatConfig.emojis
 
 function insertEmoji(e: string) {
   draft.value += e
@@ -182,9 +176,10 @@ const showMentionMenu = computed(() => {
 })
 
 const mentionList = computed(() => {
-  const base = ['@here', '@everyone']
-  if (props.nodes['claude']) base.push('@claude')
-  if (props.nodes['dreame']) base.push('@l40')
+  const base = [...chatConfig.mentions.base]
+  for (const [nodeId, token] of Object.entries(chatConfig.mentions.byNode)) {
+    if (props.nodes[nodeId]) base.push(token)
+  }
   return base
 })
 

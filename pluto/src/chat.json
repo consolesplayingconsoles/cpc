@@ -1,0 +1,19 @@
+{
+  "_comment": "Shared CLIENT-SIDE chat config -- single source of truth. Imported by the Vue app (build-time) and read by api.py, which inlines the relevant slice into the barebones Wii page at serve time. NON-SECRET ONLY: API keys and the vacuum sender allowlist (the security gate) live server-side in api.py / .env, never here.",
+  "commands": [
+    { "cmd": "/post-to-substack",  "desc": "write & broadcast to substack",   "multiline": true, "done": false },
+    { "cmd": "/send-saved-games",  "desc": "push saved games to a console",   "param": { "label": "console", "type": "console" }, "done": false },
+    { "cmd": "/steal-saved-games", "desc": "pull saved games from a console",  "param": { "label": "console", "type": "console" }, "done": false }
+  ],
+  "vacuumVerbs": [
+    { "verb": "locate", "desc": "beep so you can find it" },
+    { "verb": "clean",  "desc": "start cleaning" },
+    { "verb": "dock",   "desc": "return to charge" },
+    { "verb": "stop",   "desc": "stop / park in place" }
+  ],
+  "emojis": [":)", ":(", ":|", ":D", ":'(", ">:(", "+1", "-1", "<3", "X_X", "O_O", "\\o/", "gg", "lol", "rip", "ugh", "zzz", "ngl", ":P", "..."],
+  "mentions": {
+    "base": ["@here", "@everyone"],
+    "byNode": { "claude": "@claude", "dreame": "@l40" }
+  }
+}

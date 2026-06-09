@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CPC chat</title>
+<!--CPC_CONFIG-->
+<style>
+  /* Pluto's look-and-feel, legacy-safe. Light theme = also the graceful
+     fallback (unstyled console browsers render black-on-white anyway). Font
+     stack ends in 'monospace' so the Wii/DC just use their built-in mono. */
+  body{background:#fff;color:#1a1a1a;font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',monospace;margin:0;padding:10px;font-size:14px}
+  #hd{border-bottom:1px solid #c8c8c4;padding-bottom:8px;margin-bottom:8px}
+  #brand{font-weight:bold}
+  #me{color:#888884}
+  #feed{margin:6px 0}
+  .msg{margin:3px 0;word-wrap:break-word}
+  .who{color:#888884}
+  #hint{color:#888884;font-size:12px;margin:6px 0}
+  form{margin-top:10px}
+  #txt{background:#fff;color:#1a1a1a;border:1px solid #c8c8c4;font-family:inherit;font-size:14px;padding:4px;width:68%}
+  #snd{background:#e8e8e6;color:#1a1a1a;border:1px solid #c8c8c4;font-family:inherit;font-size:14px;padding:4px 12px;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="hd"><span id="brand">CPC</span> &nbsp;&nbsp; <span id="me"></span></div>
+<div id="feed"></div>
+<div id="hint"></div>
+<form id="f" onsubmit="return doSend()">
+<input id="txt" autocomplete="off" placeholder="message...">
+<input id="snd" type="submit" value="send">
+</form>
+<script>
+/* Config + identity inlined by the webserver (window.__CPC__): no fetch, no
+   build. ES3 only -- runs on the Wii Internet Channel (Opera 9) and the DC
+   browser. No fetch, no JSON object, no arrow funcs, no template strings. */
+var CPC = window.__CPC__ || {me:'guest',brand:'CPC',primary:'#1a1a1a',secondary:'#888884',commands:[],mentions:{},messages:[],lastId:0};
+var lastId = 0;
+var feed = document.getElementById('feed');
+var txt  = document.getElementById('txt');
+
+function esc(s){s=''+s;return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function trim(s){return (''+s).replace(/^\s+|\s+$/g,'');}
+function jstr(s){s=''+s;s=s.replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/\n/g,'\\n').replace(/\r/g,'\\r').replace(/\t/g,'\\t');return '"'+s+'"';}
+
+function setup(){
+  var b = document.getElementById('brand');
+  b.innerHTML = esc(CPC.brand); b.style.color = CPC.primary;
+  var me = document.getElementById('me');
+  me.innerHTML = 'you are: ' + esc(CPC.me); me.style.color = CPC.secondary;
+  var snd = document.getElementById('snd');
+  snd.style.borderColor = CPC.primary; snd.style.color = CPC.primary;
+  var hint = document.getElementById('hint'); hint.style.color = CPC.secondary;
+  var cmds = CPC.commands || [], names = [];
+  for (var i=0;i<cmds.length;i++){ names.push(cmds[i].cmd); }
+  if (names.length){ hint.innerHTML = 'commands: ' + esc(names.join('  ')); }
+}
+
+function xhr(method,url,body,cb){
+  var x = new XMLHttpRequest();
+  x.open(method,url,true);
+  if (body){ x.setRequestHeader('Content-Type','application/json'); }
+  x.onreadystatechange = function(){ if(x.readyState===4){ cb(x.status,x.responseText); } };
+  x.send(body||null);
+}
+
+function render(msgs){
+  for (var i=0;i<msgs.length;i++){
+    var m = msgs[i];
+    if (m.id <= lastId){ continue; }   /* already shown -- skip; this is what kills the repeats */
+    lastId = m.id;
+    var div = document.createElement('div');
+    div.className = 'msg';
+    div.innerHTML = '<span class="who" style="color:' + CPC.secondary + '">' + esc(m.sender) + ':</span> ' + esc(m.text);
+    feed.appendChild(div);
+  }
+  if (msgs.length){ window.scrollTo(0, 999999); }
+}
+
+var polling = false;
+function poll(){
+  if (polling){ return; }  /* a slow Wii can overlap polls -> same delta renders twice; gate it */
+  polling = true;
+  /* &t=... cache-buster: Opera 9 caches GETs hard, so without a unique URL the
+     poll keeps returning the first cached response and never shows new msgs. */
+  xhr('GET','/messages?since=' + lastId + '&t=' + (new Date()).getTime(), null, function(status,resp){
+    polling = false;
+    if (status === 200){
+      var msgs;
+      try { msgs = eval('(' + resp + ')'); } catch(e){ return; } /* Opera 9: no JSON.parse; own server, same origin */
+      render(msgs);
+    }
+  });
+}
+
+function doSend(){
+  var t = txt.value;
+  if (trim(t) === ''){ return false; }
+  /* no sender -- the server derives it from our IP/UA (authoritative) */
+  xhr('POST','/messages','{"text":' + jstr(t) + '}', function(status){ if(status===201){ poll(); } });
+  txt.value = '';
+  return false;
+}
+
+setup();
+render(CPC.messages || []);   /* history is inlined by the server -- render once, no fetch, no reload-dup */
+setInterval(poll, 2500);
+</script>
+</body>
+</html>

@@ -308,11 +308,47 @@ def load_env(path):
     return config
 
 
+# ── Client identity ──────────────────────────────────────────────────────────
+# Who is a requester? Source IP -> known node (from the env HOST_IPs), else a
+# User-Agent signature (closed system: one of each console), else "guest".
+# Server-authoritative: the browser clients never set their own sender.
+
+_UA_NODE_SIGNATURES = [
+    ("nintendo wii",  "wii"),
+    ("dreamcast",     "dc"),
+    ("playstation 3", "ps3"),
+]
+
+
+def ip_to_node(base_dir, config):
+    """Build {ip: node_id}. Localhost + pluto's own HOST_IP map to 'pluto' so
+    the operator can QA the client from the Mac."""
+    mapping = {"127.0.0.1": "pluto", "::1": "pluto"}
+    host_ip = config.get("HOST_IP", "").strip()
+    if host_ip:
+        mapping[host_ip] = "pluto"
+    for node_id in CONSOLE_IDS:
+        env = load_env(console_env_path(base_dir, node_id))
+        ip  = env.get("HOST_IP", "").strip()
+        if ip:
+            mapping[ip] = node_id
+    return mapping
+
+
+def node_for_ua(ua):
+    low = (ua or "").lower()
+    for sig, node in _UA_NODE_SIGNATURES:
+        if sig in low:
+            return node
+    return None
+
+
 # ── Request handler ──────────────────────────────────────────────────────────
 
 class Handler(http.server.BaseHTTPRequestHandler):
-    config   = {}
-    base_dir = ""
+    config      = {}
+    base_dir    = ""
+    chat_config = {}
 
     def log_message(self, format, *args):
         if "/deploy" in self.path or "/messages" in self.path:
@@ -328,6 +364,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self.send_header("Pragma", "no-cache")
         self._cors_headers()
         self.end_headers()
         self.wfile.write(data)
@@ -339,11 +377,56 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
+    def _identify(self):
+        """Resolve the requester's chat identity: source IP -> known node, else
+        User-Agent signature, else 'guest'. Server-authoritative."""
+        mapping = ip_to_node(self.__class__.base_dir, self.__class__.config)
+        ip = self.client_address[0]
+        if ip in mapping:
+            return mapping[ip]
+        return node_for_ua(self.headers.get("User-Agent", "")) or "guest"
+
+    def _serve_retro(self):
+        """Serve the barebones retro-console chat page with the client config +
+        the requester's identity inlined (no fetch, no build step)."""
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        try:
+            with open(os.path.join(script_dir, "retro.html"), "r") as f:
+                html = f.read()
+        except Exception:
+            self._send(500, {"error": "retro.html missing"})
+            return
+        cfg  = self.__class__.chat_config or {}
+        msgs = _get_messages(None)   # last 200 -- rendered once on load (light SSR)
+        inlined = {
+            "me":       self._identify(),
+            "brand":    self.__class__.config.get("NODE_NAME", "CPC"),
+            "primary":   self.__class__.config.get("UI_PRIMARY_COLOR", "") or "#1a1a1a",
+            "secondary": self.__class__.config.get("UI_SECONDARY_COLOR", "") or "#888884",
+            "commands":  cfg.get("commands", []),
+            "mentions":  cfg.get("mentions", {}),
+            "messages":  msgs,
+            "lastId":    msgs[-1]["id"] if msgs else 0,
+        }
+        blob = "<script>window.__CPC__ = %s;</script>" % json.dumps(inlined)
+        body = html.replace("<!--CPC_CONFIG-->", blob).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         parts  = parsed.path.strip("/").split("/")
 
-        if parsed.path == "/nodes":
+        if parsed.path == "/retro":
+            self._serve_retro()
+
+        elif parsed.path == "/nodes":
             self._send(200, self._build_nodes())
 
         elif parsed.path == "/connections":
@@ -387,11 +470,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(400, {"error": "invalid json"})
             return
 
-        sender = str(body.get("sender", "")).strip()
+        # Browser clients (the /retro page) post no sender -- the server is
+        # authoritative and derives it from IP/UA. Programmatic posters (the Vue
+        # app, bridges) may still pass an explicit sender.
+        sender = str(body.get("sender", "")).strip() or self._identify()
         text   = str(body.get("text",   "")).strip()
 
-        if not sender or not text:
-            self._send(400, {"error": "sender and text are required"})
+        if not text:
+            self._send(400, {"error": "text is required"})
             return
 
         msg = _new_message(sender, text)
@@ -650,6 +736,16 @@ def run():
 
     # Optional log file — stored alongside the env
     _log_path = os.path.join(parent_dir, "messages.log")
+
+    # Shared client-side chat config (commands, mention tokens) — one source of
+    # truth, also imported by the Vue app; inlined into the /retro page.
+    chat_path = os.path.join(parent_dir, "src", "chat.json")
+    try:
+        with open(chat_path) as f:
+            Handler.chat_config = json.load(f)
+        print("  chat.json: %d commands" % len(Handler.chat_config.get("commands", [])))
+    except Exception as exc:
+        print("  chat.json: not loaded (%s)" % exc)
 
     global _bot_key, _bot_model, _bot_broke
     _bot_key = config.get("ANTHROPIC_API_KEY", "").strip() or None
