@@ -27,7 +27,7 @@
 <div id="feed"></div>
 <div id="hint"></div>
 <form id="f" onsubmit="return doSend()">
-<input id="txt" autocomplete="off" placeholder="message...">
+<input id="txt" autocomplete="off" placeholder="message..." onkeyup="upd()">
 <input id="snd" type="submit" value="send">
 </form>
 <script>
@@ -38,6 +38,7 @@ var CPC = window.__CPC__ || {me:'guest',brand:'CPC',primary:'#1a1a1a',secondary:
 var lastId = 0;
 var feed = document.getElementById('feed');
 var txt  = document.getElementById('txt');
+var snd  = document.getElementById('snd');
 
 function esc(s){s=''+s;return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function trim(s){return (''+s).replace(/^\s+|\s+$/g,'');}
@@ -48,12 +49,20 @@ function setup(){
   b.innerHTML = esc(CPC.brand); b.style.color = CPC.primary;
   var me = document.getElementById('me');
   me.innerHTML = 'you are: ' + esc(CPC.me); me.style.color = CPC.secondary;
-  var snd = document.getElementById('snd');
-  snd.style.borderColor = CPC.primary; snd.style.color = CPC.primary;
   var hint = document.getElementById('hint'); hint.style.color = CPC.secondary;
   var cmds = CPC.commands || [], names = [];
   for (var i=0;i<cmds.length;i++){ names.push(cmds[i].cmd); }
   if (names.length){ hint.innerHTML = 'commands: ' + esc(names.join('  ')); }
+  upd();          /* set the send button's enabled/disabled look */
+  txt.focus();    /* ready to type immediately */
+}
+
+/* grey the send button while the input is empty (and block the submit) */
+function upd(){
+  var empty = trim(txt.value) === '';
+  snd.disabled = empty;
+  snd.style.borderColor = empty ? '#c8c8c4' : CPC.primary;
+  snd.style.color       = empty ? '#bbbbb8' : CPC.primary;
 }
 
 function xhr(method,url,body,cb){
@@ -96,9 +105,18 @@ function poll(){
 function doSend(){
   var t = txt.value;
   if (trim(t) === ''){ return false; }
-  /* no sender -- the server derives it from our IP/UA (authoritative) */
-  xhr('POST','/messages','{"text":' + jstr(t) + '}', function(status){ if(status===201){ poll(); } });
+  /* no sender -- the server derives it from our IP/UA (authoritative). The 201
+     reply IS the stored message (id + server-resolved sender), so echo it right
+     away for instant feedback; render()'s dedup stops the next poll re-showing it. */
+  xhr('POST','/messages','{"text":' + jstr(t) + '}', function(status,resp){
+    if (status === 201){
+      var m; try { m = eval('(' + resp + ')'); } catch(e){ m = null; }
+      if (m && m.id){ render([m]); }
+    }
+  });
   txt.value = '';
+  upd();
+  txt.focus();
   return false;
 }
 
