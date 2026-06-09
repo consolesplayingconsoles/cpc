@@ -197,6 +197,12 @@ REQUIRED_VARS = ["GATEWAY_IP"]
 
 CONSOLE_IDS = ["wii", "dc", "ps3", "gba", "ws", "batocera", "dreame", "birdbuddy"]
 
+# Consoles whose OS is fixed by definition — used as the badge default so it shows
+# even when the node is offline (TTL detection only works on a live reply).
+# Batocera is a Linux distro, full stop. The Wii is deliberately absent: it may run
+# Wii Linux today and a native homebrew .dol tomorrow, so we let it be detected.
+KNOWN_OS = {"batocera": "linux"}
+
 # ── In-memory message store ──────────────────────────────────────────────────
 # Ephemeral by design: cleared on restart.
 # Append-logged to _log_path (set at startup) for historical reference.
@@ -241,17 +247,48 @@ def console_env_path(base_dir, node_id):
     return os.path.normpath(os.path.join(base_dir, "..", node_id, ".env"))
 
 
-def ping(ip):
+def probe(ip):
+    """Reach a host and infer a coarse OS family from the reply TTL.
+
+    More than a plain up/down ping: Linux/macOS/BSD stamp packets with a default
+    TTL of 64, Windows 128, network gear 255. On a LAN (0-1 hops) that survives
+    intact, so it's a free, zero-config OS hint — no agent, no SSH, no MAC trick
+    (a MAC only identifies the NIC vendor, never the OS).
+
+    Returns (up: bool, os: str|None) where os is 'linux' | 'windows' | None.
+    Note TTL 64 can't tell Linux from macOS/BSD apart — it means "unix-like";
+    on this network the remote unix nodes are the Linux consoles, and the macOS
+    host is detected locally instead. The `.env` OS= var overrides when wrong.
+    """
     try:
         result = subprocess.run(
             ["ping", "-c", "1", "-W", "1", ip],
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=2,
+            text=True,
         )
-        return result.returncode == 0
     except Exception:
-        return False
+        return False, None
+    if result.returncode != 0:
+        return False, None
+    m   = re.search(r"ttl[=\s]*(\d+)", result.stdout, re.IGNORECASE)
+    ttl = int(m.group(1)) if m else None
+    if ttl is None:
+        return True, None
+    if ttl <= 64:
+        return True, "linux"     # unix-like — the Linux consoles on this LAN
+    if ttl <= 128:
+        return True, "windows"
+    return True, None            # ~255 = routers / network gear, no badge
+
+
+def _detect_os(env, fallback=None):
+    """OS for a node: explicit `.env` override (OS= or PLATFORM=) wins, else the
+    value sniffed from the probe. Set OS=native on a homebrew build to hide Tux."""
+    return (env.get("OS", "").strip().lower()
+            or env.get("PLATFORM", "").strip().lower()
+            or fallback)
 
 
 def load_env(path):
@@ -513,20 +550,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "smb":    None,
             "deploy": bool(cfg.get("WORKSPACE_PATH", "").strip()),
             "folder": bool(cfg.get("LOCAL_PATH", "").strip()),
+            # Host runs locally, so detect its OS exactly via platform.system().
+            "os":     _detect_os(cfg, {
+                "Darwin": "macos", "Linux": "linux", "Windows": "windows",
+            }.get(platform.system())),
         }
 
         gateway_ip = cfg.get("GATEWAY_IP", "").strip()
         if gateway_ip:
+            gw_up, _ = probe(gateway_ip)
             nodes["gateway"] = {
                 "id":     "gateway",
                 "name":   "gateway",
                 "ip":     gateway_ip,
                 "color":  None,
-                "status": "up" if ping(gateway_ip) else "down",
+                "status": "up" if gw_up else "down",
                 "parent": "gateway",
                 "smb":    None,
                 "deploy": False,
                 "folder": False,
+                "os":     None,   # network gear — no OS badge
             }
 
         for node_id in CONSOLE_IDS:
@@ -542,7 +585,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ssh_user = console_cfg.get("SSH_USER", "").strip()
             ssh_key  = console_cfg.get("SSH_KEY_PATH", "").strip()
             deployable = bool(ip and (alias or (ssh_user and ssh_key)))
-            status = ("up" if ping(ip) else "down") if ip else "unconfigured"
+            up, det_os = probe(ip) if ip else (False, None)
+            status = ("up" if up else "down") if ip else "unconfigured"
             nodes[node_id] = {
                 "id":     node_id,
                 "name":   name,
@@ -552,6 +596,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "smb":    smb,
                 "deploy": deployable,
                 "folder": bool(smb),
+                # Precedence: .env OS= override > known-by-definition > probe TTL.
+                # (e.g. OS=native on a Wii homebrew build to drop the Tux.)
+                "os":     _detect_os(console_cfg, KNOWN_OS.get(node_id) or det_os),
             }
 
         if _bot_enabled():

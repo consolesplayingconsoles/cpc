@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { NodeData } from '../composables/useNodes'
 import { BUBBLE_R, BUBBLE_HOV, BUBBLE_OPEN } from '../composables/bubbleConstants'
+import tuxImg from '../assets/tux.png'
 
 const props = defineProps<{
   id:             string
@@ -38,6 +39,8 @@ const statusColor = computed(() => {
   return 'var(--color-down)'
 })
 const borderColor  = computed(() => props.node.color ?? '#ccccca')
+const isLinux      = computed(() => props.node.os === 'linux')
+const isMac        = computed(() => props.node.os === 'macos')
 
 // Disabled (unconfigured) nodes keep their console icon in full colour so the
 // device stays recognisable — the "off" state is signalled by a dashed, muted
@@ -98,6 +101,21 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
       <circle cx="24" cy="-24" r="4" fill="white" opacity="0.35"/>
       <circle cx="22" cy="-26" r="2" fill="white" opacity="0.5"/>
     </g>
+
+    <!-- OS badge, top-left. Tux for Linux (real Larry Ewing penguin, see NOTICES);
+         the command glyph for macOS — a public-domain symbol, not Apple's logo. -->
+    <image
+      v-if="isLinux && !isUnconfigured"
+      :href="tuxImg"
+      x="-31" y="-33" width="16" height="19"
+      style="pointer-events:none"
+    />
+    <text
+      v-else-if="isMac && !isUnconfigured"
+      x="-24" y="-15" text-anchor="middle"
+      class="os-badge-mac"
+      style="pointer-events:none"
+    >&#x2318;</text>
 
     <svg v-if="!icon" x="-24" y="-24" width="48" height="48" viewBox="0 0 100 100">
       <path d="M50 28 m-28-8 a30 30 0 0 1 56 0" stroke="#1a1a1a" stroke-width="3" stroke-linecap="round" opacity="0.4" fill="none"/>
@@ -193,6 +211,11 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
   font-size: 11px;
   fill: var(--color-secondary);
   opacity: 0.8;
+}
+.os-badge-mac {
+  font-size: 24px;
+  font-weight: 600;
+  fill: #3a3a3a;
 }
 .action-btn        { cursor: pointer; }
 .action-btn--busy  { cursor: not-allowed; }
