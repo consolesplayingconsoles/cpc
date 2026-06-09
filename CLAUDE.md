@@ -24,10 +24,10 @@ Data synchronization relies on an integrated **commercial cloud storage provider
 ### 4. Repository Tidy Rules & Dynamic Scaffolding
 To prevent platform collisions, all assets, firmware, and executables are encapsulated into console-specific root application directories. 
 
-* **On-Demand Initialization**: The development pipeline monitors the repository root for empty directories matching the designated console codenames listed in the parent README. When a matched empty directory is created, the system must automatically initialize its internal structure using these strict folder naming conventions:
-  * **`/bin`**: Platform-locked native binaries, executables, and external code managed via console sites (aligns with standard Linux binary paths).
-  * **`/share`**: Shared media, document templates, and static external resources that are architecture-independent (aligns with the Linux `/usr/share` convention).
-  * **`/roms`**: Read-only gaming files, firmware images, and system baselines.
+* **On-Demand Initialization**: The development pipeline monitors the repository root for empty directories matching the designated console codenames listed in the parent README. When a matched empty directory is created, the system initializes it with the single in-repo storage convention below:
+  * **`/share`**: Shared media, document templates, and static external resources that are architecture-independent (aligns with the Linux `/usr/share` convention) — a clean storage dir.
+
+  ROMs and binaries are **not** committed to the repo. Game/ROM files are referenced live over SMB and the per-console `*_GAMES_PATH` env vars, so a `/roms` dir is obsolete. Native console code (e.g. Wii homebrew) lives in the console's own `homebrew/` directory and builds to a bootable artifact, so a `/bin` dir is obsolete too.
 
 ### 5. Python Compatibility & Dependency Rules
 
@@ -63,7 +63,7 @@ The Python application features a terminal-based administrative interface for di
 * **Input Model**: Displays interactive text input fields dynamically at the exact time and place user configuration is required.
 * **Config Printing**: Capable of reading and printing raw configuration files (such as controller mappings) directly into the terminal window for instant inspection.
 * **Title format**: ASCII header always renders as `CPC MANUFACTURER CONSOLENAME` using pyfiglet. CPC + manufacturer on one line (secondary color), console name large below (primary color).
-* **Dependencies**: managed via `requirements.txt`, vendored with `pip install -r requirements.txt --target=vendor/`, deployed via `deploy.sh <console>/.env`.
+* **Dependencies**: managed via `cpc-python-client/requirements.txt`, vendored into `cpc-python-client/vendor/`, deployed via `deploy.sh <console>/.env`.
 
 ### 7. Cross-Platform Topology & Dynamic Availability
 The core Python interface executes natively on a **master** Linux console. However, its management scope extends beyond the host machine to coordinate specialized **client** devices directly from the master interface.
@@ -90,8 +90,8 @@ Pluto itself is never loaded on a console browser. However, consumer-facing bypr
 ### 9. Local Development & Interface Testing
 To keep production application logic perfectly clean and free of testing conditionals, the platform utilizes separate execution scripts for live deployments versus local development environments.
 
-* **Production Entrypoint (`main.py`)**: Runs the strict live logic. It parses the namespace-targeted `.env` file, evaluates real host infrastructure, executes live pings, and dynamically hides/strips UI menus based on physical hardware availability.
-* **Development Entrypoint (`dev.py`)**: A dedicated wrapper script used solely for local interface testing (the python equivalent to running `yarn dev`). It completely bypasses the live infrastructure pipeline and force-feeds a complete layout matrix directly into the UI engine. This ensures all menus and text inputs remain visible and editable locally without requiring a production host context or physical devices attached.
+* **Production Entrypoint (`cpc-python-client/main.py`)**: Runs the strict live logic. It parses the namespace-targeted `.env` file, evaluates real host infrastructure, executes live pings, and dynamically hides/strips UI menus based on physical hardware availability.
+* **Development Entrypoint (`cpc-python-client/dev.py`)**: A dedicated wrapper script used solely for local interface testing (the python equivalent to running `yarn dev`). It completely bypasses the live infrastructure pipeline and force-feeds a complete layout matrix directly into the UI engine. This ensures all menus and text inputs remain visible and editable locally without requiring a production host context or physical devices attached.
 
 ### 10. Device Access Discipline
 Connecting to a physical console or device (e.g. `ssh wii ...`) is an explicit, per-command action — **never** a standing grant. See [`SECURITY.md`](./SECURITY.md) for the full policy.

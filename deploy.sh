@@ -71,23 +71,26 @@ echo "deploying ${NODE_NAME} (${CUSTOM_SSH_ALIAS:-${SSH_USER}@${HOST_IP}})"
 
 # ── Step 1: vendor ────────────────────────────────────────────
 echo "##STEP:vendor"
-rm -rf vendor/
-pip install --disable-pip-version-check -r requirements.txt --target=vendor/ --quiet
+rm -rf cpc-python-client/vendor/
+pip install --disable-pip-version-check -r cpc-python-client/requirements.txt --target=cpc-python-client/vendor/ --quiet
 echo "vendor ok"
 
 # ── Step 2: sync ──────────────────────────────────────────────
 echo "##STEP:sync"
 $SSH "rm -rf ${REMOTE_PATH}/* && mkdir -p ${REMOTE_PATH}/logs"
 
-CONSOLE_EXCLUDES=()
-for _d in batocera dc dreame gba pluto ps3 wii ws; do
-  [[ "$_d" != "$CONSOLE_DIR" ]] && CONSOLE_EXCLUDES+=("--exclude=$_d")
-done
+# Allowlist: ship ONLY the python client dir (code + vendored deps). No
+# .deployignore to babysit — anything else at the repo root (pluto/, birdbuddy/,
+# scripts/, start-pluto.sh, *.md, other consoles, ...) can't leak; it's not listed.
+INCLUDE=( cpc-python-client )
 
 tar --no-xattrs --no-fflags --no-mac-metadata \
-    --exclude-from='.deployignore' \
-    "${CONSOLE_EXCLUDES[@]}" \
-    -cf - . | $SSH "tar -xf - -C ${REMOTE_PATH}"
+    -cf - "${INCLUDE[@]}" | $SSH "tar -xf - -C ${REMOTE_PATH}"
+
+# This console's own .env, streamed separately so an absolute ENV_FILE path
+# (as the Pluto API passes) lands at the right relative spot, not /Users/...
+$SSH "mkdir -p ${REMOTE_PATH}/${CONSOLE_DIR}"
+$SSH "cat > ${REMOTE_PATH}/${CONSOLE_DIR}/.env" < "$ENV_FILE"
 
 echo "sync ok"
 
@@ -107,10 +110,12 @@ if [[ -n "$ENV_DEPS" ]]; then
 fi
 
 # ── Step 3: linux deps ────────────────────────────────────────
-if grep -qvE '^[[:space:]]*(#|$)' requirements-linux.txt; then
+if grep -qvE '^[[:space:]]*(#|$)' cpc-python-client/requirements-linux.txt; then
   echo "##STEP:deps"
-  $SSH "pip3 install --disable-pip-version-check -r ${REMOTE_PATH}/requirements-linux.txt --target=${REMOTE_PATH}/vendor/ --quiet 2>/dev/null \
-        || pip install --disable-pip-version-check -r ${REMOTE_PATH}/requirements-linux.txt --target=${REMOTE_PATH}/vendor/ --quiet" || true
+  RL="${REMOTE_PATH}/cpc-python-client/requirements-linux.txt"
+  RV="${REMOTE_PATH}/cpc-python-client/vendor/"
+  $SSH "pip3 install --disable-pip-version-check -r ${RL} --target=${RV} --quiet 2>/dev/null \
+        || pip install --disable-pip-version-check -r ${RL} --target=${RV} --quiet" || true
   echo "deps ok"
 fi
 

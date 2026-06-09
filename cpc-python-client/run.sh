@@ -15,8 +15,9 @@ set -euo pipefail
 [ -f ~/.bashrc ]  && source ~/.bashrc  2>/dev/null || true
 [ -f ~/.profile ] && source ~/.profile 2>/dev/null || true
 
-# Always run relative to this script's own directory so paths stay
-# correct whether called directly or via SSH.
+# Remember where we were invoked from (to resolve relative env-file args), then
+# run relative to this script's own dir (cpc-python-client/) so client paths hold.
+ORIG_PWD="$PWD"
 cd "$(dirname "$0")"
 
 if [[ $# -gt 1 ]]; then
@@ -29,13 +30,15 @@ fi
 
 if [[ $# -eq 1 ]]; then
   ENV_FILE="$1"
+  # A relative arg is relative to the caller's dir, not this client dir.
+  [[ "$ENV_FILE" != /* ]] && ENV_FILE="$ORIG_PWD/$ENV_FILE"
 else
-  # No argument: auto-detect the sole console env (every sibling except
-  # pluto is stripped on deploy, so only one <console>/.env should exist).
+  # No argument: auto-detect the sole console env. Console dirs sit one level up
+  # from this client dir; only the target <console>/.env ships on deploy.
   shopt -s nullglob
   CANDIDATES=()
-  for f in */.env; do
-    [[ "$f" == pluto/.env ]] && continue
+  for f in ../*/.env; do
+    [[ "$f" == ../pluto/.env ]] && continue
     CANDIDATES+=("$f")
   done
   if [[ ${#CANDIDATES[@]} -eq 1 ]]; then

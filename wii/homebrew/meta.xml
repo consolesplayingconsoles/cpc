@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<app version="1">
+	<name>CPC Chat</name>
+	<coder>consolesplayingconsoles</coder>
+	<version>0.1</version>
+	<short_description>Native Wii chat client</short_description>
+	<long_description>consoles playing consoles — a chat client running on the bare Wii, no OS underneath. Talks to the Pluto dashboard over wifi.</long_description>
+</app>

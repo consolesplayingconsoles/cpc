@@ -100,21 +100,29 @@ def _rendered_width(text: str, font: str) -> int:
 
 
 def _flush(out: list, term_width: int, term_height: int):
-    """Repaint every row in place using ABSOLUTE cursor positioning.
+    """Overwrite every line in place — no clear, no ghosting.
 
-    Each line is placed at an explicit (row, column 1) with \\033[r;1H, so there
-    is zero dependence on newline / carriage-return translation, autowrap, or the
-    framebuffer console's magic-margin behaviour (raw-mode stdout has no ONLCR, so
-    a bare "\\n" would not return to column 1 and every line would cascade right).
-    \\033[K clears the rest of each row, so no full-width padding is needed and the
-    last column is never written. Built into one string for a single write so the
-    line-buffered TTY does not flush mid-frame and flicker.
+    Pads each line to the full terminal width and joins with newlines, accumulated
+    into one string so a line-buffered TTY does not flush mid-frame and flicker.
+    Note: padding to the full width touches the last column, which on the Wii's
+    framebuffer console nudges the prompt a single char right via the magic-margin
+    quirk — a cosmetic artifact we accept; it reads as intentional and is stable.
     """
     lines = "\n".join(out).splitlines()
-    parts = [HIDE_CUR]
+    parts = [HIDE_CUR, HOME]
     for i in range(term_height):
-        line = lines[i] if i < len(lines) else ""
-        parts.append("\033[%d;1H%s\033[K" % (i + 1, line))
+        last = (i == term_height - 1)
+        if i < len(lines):
+            visible = re.sub(r'\x1b\[[0-9;]*m', '', lines[i])
+            if last:
+                parts.append(lines[i] + "\033[K")
+            else:
+                pad = max(0, term_width - len(visible))
+                parts.append(lines[i] + " " * pad)
+        else:
+            parts.append("\033[K" if last else " " * term_width)
+        if not last:
+            parts.append("\n")
     sys.stdout.write("".join(parts))
     sys.stdout.flush()
 
@@ -281,6 +289,33 @@ def render_controller(config: dict, device_name: str, events: list):
 
     out.append("")
     out.append(_center(f"{secondary}q / ESC  exit{RESET}", term_width))
+
+    _flush(out, term_width, term_height)
+
+
+def render_bridge(config: dict, title: str, lines: list):
+    """Render a live device-bridge view (generic across cpc_python_core.bridges).
+    title: e.g. "Dreame L40 -> Wii".  lines: status strings, newest last."""
+    primary     = hex_fg(config["UI_PRIMARY_COLOR"])
+    secondary   = hex_fg(config["UI_SECONDARY_COLOR"])
+    term        = shutil.get_terminal_size(fallback=(80, 24))
+    term_width  = term.columns
+    term_height = term.lines
+    f_header, f_console = _pick_fonts(term_width, config["MANUFACTURER"], config["NODE_NAME"])
+
+    out = [""]
+    out += _render_title(config, primary, secondary, term_width, f_header, f_console)
+    out.append("")
+    out.append(_center(f"{secondary}{title}{RESET}", term_width))
+    out.append("")
+
+    chrome   = len(out) + 2   # reserve hint + trailing blank
+    max_rows = max(1, term_height - chrome)
+    for ln in lines[-max_rows:]:
+        out.append(_center(f"{primary}{ln}{RESET}", term_width))
+
+    out.append("")
+    out.append(_center(f"{secondary}q / ESC  stop{RESET}", term_width))
 
     _flush(out, term_width, term_height)
 

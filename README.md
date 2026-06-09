@@ -18,7 +18,7 @@ Shared infrastructure:
 
 | Folder             | What's inside                                                                                     |
 |--------------------|---------------------------------------------------------------------------------------------------|
-| [core/](./core/)   | Shared core: orchestration, cloud sync, UI layer, shared libs                                     |
+| [cpc-python-client/](./cpc-python-client/) | Python console client: the shared `cpc_python_core` package (UI, env, chat), entrypoints, vendored deps |
 | [pluto/](./pluto/) | Network dashboard: node status, cloud sync client, distributed messaging, distributed deployments |
 
 Console nodes — auto-generated from each folder's `.env.sample`, do not edit by
