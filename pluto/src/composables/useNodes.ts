@@ -13,6 +13,7 @@ export interface NodeData {
   // least one configured button; each button renders only when configured.
   deploy: boolean   // DEPLOY button (console) / CODE button (host)
   folder: boolean   // FILES button (console SMB) / DIR button (host LOCAL_PATH)
+  os?:    string | null   // declared runtime; 'linux' shows a Tux on the bubble
 }
 
 export type NodeMap = Record<string, NodeData>
