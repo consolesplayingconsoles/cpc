@@ -3,8 +3,9 @@
 import sys
 import os
 
-# Only add the vendor path if it exists on the current system
-vendor_path = '/opt/cpc/vendor'
+# Only add the vendor path if it exists — relative to this file, so it works
+# wherever the client dir is deployed (/opt/cpc/cpc-python-client, etc.).
+vendor_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vendor')
 if os.path.exists(vendor_path):
     sys.path.insert(0, vendor_path)
 
@@ -33,8 +34,9 @@ if hasattr(sys.stdout, 'buffer'):
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core.ui import renderer, menu as menu_mod, input as input_mod, actions
-from core.ui.config import loader
+from cpc_python_core.ui import renderer, menu as menu_mod, input as input_mod, actions
+from cpc_python_core.ui.config import loader
+from cpc_python_core.bridges import dreame_wii
 
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -46,8 +48,9 @@ def _resolve_env() -> str:
 
     # No argument: a deployed console ships exactly one console directory
     # (deploy.sh strips every sibling), so discover the sole env automatically.
+    # Console dirs sit one level up from this client dir (cpc-python-client/).
     candidates = [
-        p for p in glob.glob(os.path.join(ROOT, "*", ".env"))
+        p for p in glob.glob(os.path.join(ROOT, "..", "*", ".env"))
         if os.path.basename(os.path.dirname(p)) != "pluto"
     ]
     if len(candidates) == 1:
@@ -77,6 +80,11 @@ def _build_menu(config):
     if config.get("PLUTO_IP", "").strip():
         items.append("Chat")
         action_map["Chat"] = actions.chat_view
+
+    # Only on a node that can actually run it: miio installed + peer envs present.
+    if dreame_wii.ready():
+        items.append("Dreame -> Wii")
+        action_map["Dreame -> Wii"] = actions.dreame_wii_view
 
     return items, action_map
 
