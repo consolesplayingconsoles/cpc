@@ -168,7 +168,7 @@ def run(pluto_url, sender, source, should_stop, on_status,
         poll_s=2.0, heartbeat_s=30.0):
     """Poll `source`, narrate state changes onto the Pluto chat as `sender`.
 
-    pluto_url   -- e.g. "http://192.168.68.51:7700"; if falsy -> DRY RUN (no post).
+    pluto_url   -- e.g. "http://<pluto-host>:7700"; if falsy -> DRY RUN (no post).
     sender      -- chat handle the events appear under (e.g. "dreame").
     source      -- anything with .read() -> state dict (SimSource / CloudSource).
     should_stop -- () -> bool, checked each tick.
@@ -223,7 +223,7 @@ def ready(config):
 if __name__ == "__main__":
     # Standalone sim demo:
     #   python3 -m cpc_python_core.bridges.dreame_chat            (dry run)
-    #   python3 -m cpc_python_core.bridges.dreame_chat 192.168.68.51   (-> Pluto)
+    #   python3 -m cpc_python_core.bridges.dreame_chat <pluto-host>   (-> Pluto)
     import sys
 
     pluto_ip = sys.argv[1] if len(sys.argv) > 1 else ""

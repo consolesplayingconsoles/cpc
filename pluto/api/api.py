@@ -419,12 +419,66 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _serve_dreame(self):
+        """Structured JSON for the Robutek tab. Returns live device state (via probe.py
+        --json, READ-ONLY) plus the cached cleaning history from routes.json."""
+        cfg     = self.__class__.config
+        default = os.path.normpath(os.path.join(self.__class__.base_dir, "..", "..", "dreamehome-client"))
+        repo    = cfg.get("DREAME_CLIENT_PATH", "").strip() or default
+        py      = os.path.join(repo, ".venv", "bin", "python")
+        probe   = os.path.join(repo, "probe.py")
+        routes  = os.path.join(repo, "routes.json")
+
+        if not (os.path.exists(py) and os.path.exists(probe)):
+            self._send(200, {
+                "device": None, "history": [], "updated": None,
+                "error": "dreamehome-client not found at: %s (set DREAME_CLIENT_PATH in pluto/.env)" % repo,
+            })
+            return
+
+        device_obj  = None
+        error_msg   = None
+
+        try:
+            result = subprocess.run(
+                [py, probe, "--json"], cwd=repo, stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=30,
+            )
+            raw = result.stdout.strip()
+            if raw:
+                parsed = json.loads(raw)
+                device_obj = parsed.get("device")
+                if parsed.get("error"):
+                    error_msg = parsed["error"]
+        except subprocess.TimeoutExpired:
+            error_msg = "probe timed out"
+        except Exception as exc:
+            error_msg = str(exc)
+
+        history = []
+        if os.path.exists(routes):
+            try:
+                with open(routes, encoding="utf-8") as f:
+                    history = json.load(f).get("sessions", [])
+            except Exception as exc:
+                error_msg = (error_msg or "") + "; routes.json: %s" % exc
+
+        self._send(200, {
+            "device":  device_obj,
+            "history": history,
+            "updated": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "error":   error_msg,
+        })
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         parts  = parsed.path.strip("/").split("/")
 
         if parsed.path == "/retro":
             self._serve_retro()
+
+        elif parsed.path == "/dreame":
+            self._serve_dreame()
 
         elif parsed.path == "/nodes":
             self._send(200, self._build_nodes())

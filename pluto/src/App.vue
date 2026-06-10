@@ -5,13 +5,16 @@ import { useConnections } from './composables/useConnections'
 import { useMessages } from './composables/useMessages'
 import NetworkDiagram from './components/NetworkDiagram.vue'
 import GroupChat from './components/GroupChat.vue'
+import Robutek from './components/Robutek.vue'
 
 const { nodes, loading, error } = useNodes()
 const { connections } = useConnections()
 const { messages } = useMessages()
 
+const dreameName = computed(() => nodes.value['dreame']?.name ?? 'dreame')
+
 const showOffline    = ref(false)
-const activeTab      = ref<'network' | 'chat'>('network')
+const activeTab      = ref<'network' | 'chat' | 'robutek'>('network')
 const lastSeenMsgId  = ref(0)
 const baselined      = ref(false)
 
@@ -37,7 +40,7 @@ watch(messages, () => {
 
 onMounted(() => {
   const tab = new URLSearchParams(window.location.search).get('tab')
-  if (tab === 'chat' || tab === 'network') activeTab.value = tab
+  if (tab === 'chat' || tab === 'network' || tab === 'robutek') activeTab.value = tab
 })
 
 watch(activeTab, (tab) => {
@@ -100,6 +103,11 @@ const displayNodes = computed(() => {
           CHAT
           <span v-if="unreadCount > 0" class="tab-badge">{{ unreadCount }}</span>
         </button>
+        <button
+          class="tab"
+          :class="{ 'tab--active': activeTab === 'robutek' }"
+          @click="activeTab = 'robutek'"
+        >{{ dreameName.toUpperCase() }}</button>
       </div>
 
       <div v-show="activeTab === 'network'" class="network-view">
@@ -112,6 +120,8 @@ const displayNodes = computed(() => {
         :nodes="nodes"
         :show-offline="showOffline"
       />
+
+      <Robutek v-show="activeTab === 'robutek'" :name="dreameName" :active="activeTab === 'robutek'" />
     </main>
 
     <footer class="footer">

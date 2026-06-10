@@ -8,6 +8,5 @@
   { "from": "gba",      "to": "wii",     "label": "GBA Link"    },
   { "from": "ws",       "to": "wii",     "label": "Serial / USB"},
   { "from": "dreame",  "to": "gateway", "label": "WiFi"        },
-  { "from": "batocera","to": "dreame",  "label": "miio"        },
   { "from": "birdbuddy","to": "gateway","label": "WiFi"        }
 ]
