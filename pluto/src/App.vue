@@ -75,7 +75,7 @@ const displayNodes = computed(() => {
       <span class="header-controls">
         <label class="toggle-label">
           <input type="checkbox" v-model="showOffline" class="toggle-checkbox" />
-          <span>show not present</span>
+          <span>Show not present</span>
         </label>
         <span class="header-status">
           <span>{{ loading ? 'SCANNING' : error ? 'OFFLINE' : 'LIVE' }}</span>
