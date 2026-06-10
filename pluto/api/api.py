@@ -23,6 +23,7 @@ from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 
 import vacuum
+import dreame_session
 
 
 def open_path(path):
@@ -178,8 +179,8 @@ def _claude_reply(messages_snapshot):
 
 
 def _is_allowed_origin(origin):
-    """Allow localhost and RFC-1918 LAN addresses."""
-    if re.match(r'^https?://(localhost|127\.0\.0\.1)(:\d+)?$', origin):
+    """Allow localhost (incl. *.localhost like pluto.localhost) and RFC-1918 LAN."""
+    if re.match(r'^https?://(localhost|127\.0\.0\.1|[a-z0-9-]+\.localhost)(:\d+)?$', origin):
         return True
     # 192.168.x.x, 10.x.x.x, 172.16-31.x.x
     if re.match(
@@ -419,56 +420,79 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _serve_dreame(self):
-        """Structured JSON for the Robutek tab. Returns live device state (via probe.py
-        --json, READ-ONLY) plus the cached cleaning history from routes.json."""
-        cfg     = self.__class__.config
+    def _dreame_repo(self):
+        """Absolute path to the dreamehome-client repo (DREAME_CLIENT_PATH or default)."""
+        cfg = self.__class__.config
         default = os.path.normpath(os.path.join(self.__class__.base_dir, "..", "..", "dreamehome-client"))
-        repo    = cfg.get("DREAME_CLIENT_PATH", "").strip() or default
-        py      = os.path.join(repo, ".venv", "bin", "python")
-        probe   = os.path.join(repo, "probe.py")
-        routes  = os.path.join(repo, "routes.json")
+        return cfg.get("DREAME_CLIENT_PATH", "").strip() or default
 
-        if not (os.path.exists(py) and os.path.exists(probe)):
-            self._send(200, {
-                "device": None, "history": [], "updated": None,
-                "error": "dreamehome-client not found at: %s (set DREAME_CLIENT_PATH in pluto/.env)" % repo,
-            })
-            return
-
-        device_obj  = None
-        error_msg   = None
-
-        try:
-            result = subprocess.run(
-                [py, probe, "--json"], cwd=repo, stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=30,
-            )
-            raw = result.stdout.strip()
-            if raw:
-                parsed = json.loads(raw)
-                device_obj = parsed.get("device")
-                if parsed.get("error"):
-                    error_msg = parsed["error"]
-        except subprocess.TimeoutExpired:
-            error_msg = "probe timed out"
-        except Exception as exc:
-            error_msg = str(exc)
-
-        history = []
+    def _dreame_history(self):
+        routes = os.path.join(self._dreame_repo(), "routes.json")
         if os.path.exists(routes):
             try:
                 with open(routes, encoding="utf-8") as f:
-                    history = json.load(f).get("sessions", [])
-            except Exception as exc:
-                error_msg = (error_msg or "") + "; routes.json: %s" % exc
+                    return json.load(f).get("sessions", [])
+            except Exception:
+                return []
+        return []
 
+    def _is_loopback(self):
+        return self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+
+    def _serve_dreame(self):
+        """Robutek tab state: live device state from the in-memory session (or
+        authenticated:false so the UI shows the login form) + cached history."""
+        authed = dreame_session.is_authenticated()
+        device = dreame_session.state() if authed else None
+        error = None
+        if authed and device is None:
+            # session went stale / device unreachable
+            authed = False
+            error = "session expired -- please log in again"
         self._send(200, {
-            "device":  device_obj,
-            "history": history,
+            "authenticated": authed,
+            "device":  device,
+            "history": self._dreame_history(),
             "updated": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "error":   error_msg,
+            "error":   error,
         })
+
+    def _handle_dreame_login(self):
+        """POST /dreame/login {region, username, password | secondary_key}.
+        Loopback-only. Credentials are used once and never stored or logged."""
+        if not self._is_loopback():
+            self._send(403, {"error": "login is only allowed from the local machine"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body   = json.loads(self.rfile.read(length))
+        except (ValueError, json.JSONDecodeError):
+            self._send(400, {"error": "invalid json"})
+            return
+
+        region   = str(body.get("region", "")).strip()
+        username = str(body.get("username", "")).strip()
+        password = body.get("password") or ""
+        sec_key  = str(body.get("secondary_key", "")).strip()
+        if not region:
+            self._send(400, {"authenticated": False, "error": "region is required"})
+            return
+
+        ok, err = dreame_session.login(
+            self._dreame_repo(), region=region,
+            username=username or None, password=password or None,
+            secondary_key=sec_key or None)
+        if not ok:
+            self._send(401, {"authenticated": False, "error": err or "login failed"})
+            return
+        self._send(200, {"authenticated": True, "device": dreame_session.state()})
+
+    def _handle_dreame_logout(self):
+        if not self._is_loopback():
+            self._send(403, {"error": "only from the local machine"})
+            return
+        dreame_session.logout()
+        self._send(200, {"authenticated": False})
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -507,6 +531,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if parsed.path == "/messages":
             self._handle_post_message()
+        elif parsed.path == "/dreame/login":
+            self._handle_dreame_login()
+        elif parsed.path == "/dreame/logout":
+            self._handle_dreame_logout()
         elif len(parts) == 2 and parts[0] == "smb":
             self._handle_smb(parts[1])
         elif len(parts) == 2 and parts[0] in ("open", "workspace"):

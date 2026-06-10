@@ -30,6 +30,7 @@ interface Session {
 }
 
 interface DreameData {
+  authenticated?: boolean
   device: Device | null
   history: Session[]
   updated: string | null
@@ -223,12 +224,86 @@ async function load() {
   }
 }
 
+// ── Login (shown when the API holds no live session) ──────────────
+const region     = ref('us')
+const email      = ref('')
+const password   = ref('')
+const submitting = ref(false)
+const loginError = ref('')
+
+const needsLogin = computed(() => data.value != null && data.value.authenticated === false)
+
+async function login() {
+  if (submitting.value) return
+  submitting.value = true
+  loginError.value = ''
+  try {
+    const r = await fetch(`${API}/dreame/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ region: region.value, username: email.value, password: password.value }),
+    })
+    const body = await r.json().catch(() => ({}))
+    if (!r.ok || !body.authenticated) {
+      loginError.value = body.error || `sign-in failed (HTTP ${r.status})`
+      return
+    }
+    password.value = ''      // don't retain the password any longer than needed
+    await load()             // now authenticated -> shows device + history
+  } catch {
+    loginError.value = 'could not reach the Pluto API'
+  } finally {
+    submitting.value = false
+  }
+}
+
 watch(() => props.active, on => { if (on) load() }, { immediate: true })
 </script>
 
 <template>
   <div class="rb">
 
+    <!-- ── hold everything behind a quiet loader until the first response,
+         so we never flash the content skeleton before resolving to login ── -->
+    <div v-if="!data" class="rb-init"><span class="rb-init-spinner" /></div>
+
+    <!-- ── login gate (API holds no live session) ── -->
+    <form v-else-if="needsLogin" class="rb-login" @submit.prevent="login" autocomplete="on">
+      <div class="rb-login-card">
+        <div class="rb-login-title">Connect to DreameHome</div>
+
+        <label class="rb-login-field">
+          <span>Region</span>
+          <select v-model="region" autocomplete="off" :disabled="submitting">
+            <option value="us">United States</option>
+            <option value="eu">Europe</option>
+            <option value="cn">China</option>
+            <option value="ru">Russia</option>
+            <option value="sg">Asia / Pacific</option>
+          </select>
+        </label>
+
+        <label class="rb-login-field">
+          <span>Email</span>
+          <input v-model="email" name="username" type="email" autocomplete="username"
+                 placeholder="you@example.com" :disabled="submitting" required />
+        </label>
+
+        <label class="rb-login-field">
+          <span>Password</span>
+          <input v-model="password" name="password" type="password" autocomplete="current-password"
+                 placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" :disabled="submitting" required />
+        </label>
+
+        <button class="rb-login-btn" type="submit" :disabled="submitting || !email || !password">
+          {{ submitting ? 'Signing in…' : 'Sign in' }}
+        </button>
+
+        <p v-if="loginError" class="rb-login-err">{{ loginError }}</p>
+      </div>
+    </form>
+
+    <template v-else>
     <!-- ── KPI floating cards ── -->
     <div class="rb-kpi">
 
@@ -398,22 +473,22 @@ watch(() => props.active, on => { if (on) load() }, { immediate: true })
               vector-effect="non-scaling-stroke"
               fill="none" opacity="0.3"
             />
-            <g v-if="baseBox.cx !== null">
+            <g v-if="baseBox.cx !== null && baseBox.cy !== null">
               <circle
-                :cx="baseBox.cx" :cy="baseBox.cy"
+                :cx="baseBox.cx" :cy="baseBox.cy ?? 0"
                 r="0"
                 stroke="var(--color-primary)" stroke-width="14"
                 vector-effect="non-scaling-stroke" fill="none"
               />
               <line
-                :x1="baseBox.cx - 1" :y1="baseBox.cy"
-                :x2="baseBox.cx + 1" :y2="baseBox.cy"
+                :x1="baseBox.cx - 1" :y1="baseBox.cy ?? 0"
+                :x2="baseBox.cx + 1" :y2="baseBox.cy ?? 0"
                 stroke="var(--color-primary)" stroke-width="6"
                 vector-effect="non-scaling-stroke"
               />
               <line
-                :x1="baseBox.cx" :y1="baseBox.cy - 1"
-                :x2="baseBox.cx" :y2="baseBox.cy + 1"
+                :x1="baseBox.cx" :y1="(baseBox.cy ?? 0) - 1"
+                :x2="baseBox.cx" :y2="(baseBox.cy ?? 0) + 1"
                 stroke="var(--color-primary)" stroke-width="6"
                 vector-effect="non-scaling-stroke"
               />
@@ -440,6 +515,7 @@ watch(() => props.active, on => { if (on) load() }, { immediate: true })
     </div>
 
     <div v-else-if="!loading" class="rb-prefetch">waiting for data</div>
+    </template>
   </div>
 </template>
 
@@ -729,4 +805,58 @@ watch(() => props.active, on => { if (on) load() }, { immediate: true })
   flex: 1; display: flex; align-items: center; justify-content: center;
   font-size: 11px; color: var(--color-secondary); opacity: 0.38; letter-spacing: 0.06em;
 }
+
+/* ── login gate ── */
+.rb-login {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 340px;
+  padding: 32px 16px;
+}
+.rb-login-card {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 22px 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+.rb-login-title { font-weight: 600; font-size: 15px; margin-bottom: 2px; }
+.rb-login-field {
+  display: flex; flex-direction: column; gap: 5px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280;
+}
+.rb-login-field input,
+.rb-login-field select {
+  font: inherit; font-size: 13px; text-transform: none; letter-spacing: 0;
+  padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 6px;
+  background: #fafaf8; color: inherit;
+}
+.rb-login-field input:focus,
+.rb-login-field select:focus {
+  outline: none; border-color: var(--color-primary); background: #fff;
+}
+.rb-login-btn {
+  margin-top: 6px; padding: 9px 12px;
+  font: inherit; font-weight: 600; font-size: 13px;
+  border: 1px solid var(--color-primary); border-radius: 6px;
+  background: var(--color-primary); color: #fff; cursor: pointer;
+}
+.rb-login-btn:disabled { opacity: 0.5; cursor: default; }
+.rb-login-err { font-size: 12px; color: #cc1111; margin: 0; }
+
+/* ── initial loader (held until the first /dreame response) ── */
+.rb-init { display: flex; align-items: center; justify-content: center; min-height: 340px; }
+.rb-init-spinner {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  animation: rb-spin 0.7s linear infinite;
+}
+@keyframes rb-spin { to { transform: rotate(360deg); } }
 </style>
