@@ -31,7 +31,10 @@ const unreadCount = computed(() => {
 // arrive while reading — so leaving for the network tab never resurfaces them as
 // unread. Also baseline once on first load so pre-existing history isn't "unread".
 watch(messages, () => {
-  if (!baselined.value) {
+  // Baseline only once the feed actually has content. The immediate run fires
+  // while messages is still empty; baselining there pins lastSeen at 0 and then
+  // counts all loaded history as "unread" — the phantom-badge bug.
+  if (!baselined.value && messages.value.length > 0) {
     lastSeenMsgId.value = latestId()
     baselined.value = true
   }
@@ -66,19 +69,26 @@ const displayNodes = computed(() => {
   <div class="shell">
     <header class="header">
       <span class="header-title">
-        <svg width="12" height="12" viewBox="0 0 12 12" style="vertical-align:middle; margin-right:8px;">
-          <circle cx="6" cy="6" r="5" fill="#F5A623" opacity="0.2"/>
-          <circle cx="6" cy="6" r="3.5" fill="#F5A623"/>
-          <circle cx="4.5" cy="4.5" r="1.5" fill="white" opacity="0.45"/>
-        </svg><span>CPC PLUTO</span>
+        <svg width="64" height="64" viewBox="0 0 24 24" style="vertical-align:middle; margin-right:6px;">
+          <!-- tilted orbit / network ring -->
+          <ellipse cx="12" cy="12" rx="11" ry="4.1" fill="none"
+                   stroke="var(--accent)" stroke-width="1.4" opacity="0.5"
+                   transform="rotate(-22 12 12)"/>
+          <!-- planet: terracotta Pluto -->
+          <circle cx="12" cy="12" r="5.6" fill="var(--accent)"/>
+          <circle cx="9.9" cy="9.9" r="1.9" fill="#fff" opacity="0.18"/>
+          <!-- network nodes riding the orbit -->
+          <circle cx="22.2" cy="7.9" r="1.6" fill="var(--accent)"/>
+          <circle cx="1.8" cy="16.1" r="1.6" fill="var(--accent)"/>
+        </svg><span>CPC Pluto</span>
       </span>
       <span class="header-controls">
         <label class="toggle-label">
           <input type="checkbox" v-model="showOffline" class="toggle-checkbox" />
-          <span>Show not present</span>
+          <span v-if="activeTab !== 'robutek'">Show unconfigured nodes</span>
         </label>
         <span class="header-status">
-          <span>{{ loading ? 'SCANNING' : error ? 'OFFLINE' : 'LIVE' }}</span>
+          <span>{{ loading ? 'Scanning' : error ? 'Offline' : 'Live' }}</span>
           <svg width="10" height="10" viewBox="0 0 14 14" style="vertical-align: middle; margin-left: 6px;">
             <circle cx="7" cy="7" r="5" :fill="loading ? '#999999' : error ? '#cc1111' : '#00aa44'"/>
             <circle cx="5" cy="5" r="2.5" fill="white" opacity="0.5"/>
@@ -94,24 +104,24 @@ const displayNodes = computed(() => {
           class="tab"
           :class="{ 'tab--active': activeTab === 'network' }"
           @click="activeTab = 'network'"
-        >NETWORK</button>
+        >Network</button>
         <button
           class="tab"
           :class="{ 'tab--active': activeTab === 'chat' }"
           @click="activeTab = 'chat'"
         >
-          CHAT
+          Chat
           <span v-if="unreadCount > 0" class="tab-badge">{{ unreadCount }}</span>
         </button>
         <button
           class="tab"
           :class="{ 'tab--active': activeTab === 'robutek' }"
           @click="activeTab = 'robutek'"
-        >{{ dreameName.toUpperCase() }}</button>
+        >Dreame</button>
       </div>
 
       <div v-show="activeTab === 'network'" class="network-view">
-        <div v-if="loading" class="state-msg">SCANNING NETWORK...</div>
+        <div v-if="loading" class="state-msg">Scanning network…</div>
         <NetworkDiagram v-show="!loading" :nodes="displayNodes" :connections="connections" />
       </div>
 
@@ -143,18 +153,20 @@ const displayNodes = computed(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 24px;
-  background: #ebebea;
-  border-bottom: 1px solid var(--color-border);
+  padding: 0px 28px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
 
 .header-title {
-  font-family: var(--font-mono);
-  font-size: 15px;
+  font-family: var(--font-sans);
+  font-size: 19px;
   font-weight: 700;
-  letter-spacing: 0.15em;
-  color: #9a6c1a;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
 }
 
 .header-controls {
@@ -167,9 +179,9 @@ const displayNodes = computed(() => {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  letter-spacing: 0.01em;
   color: var(--color-secondary);
   cursor: pointer;
   user-select: none;
@@ -207,9 +219,10 @@ const displayNodes = computed(() => {
 .header-status {
   display: flex;
   align-items: center;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 13px;
-  letter-spacing: 0.1em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--color-primary);
 }
 
@@ -234,43 +247,45 @@ const displayNodes = computed(() => {
   transform: translateX(-50%);
   z-index: 20;
   display: flex;
-  background: rgba(235, 235, 234, 0.92);
+  background: rgba(238, 240, 243, 0.9);   /* one unified track holds all three */
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--color-border);
-  border-radius: 24px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
   padding: 3px;
   gap: 2px;
-  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.1), 0 1px 4px rgba(0, 0, 0, 0.06);
+  box-shadow: inset 0 1px 1px rgba(26, 34, 51, 0.04);
 }
 
 .tab {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  padding: 6px 20px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 6px 18px;
   border: none;
-  border-radius: 20px;
+  border-radius: 18px;
   background: transparent;
-  color: var(--color-secondary);
+  color: var(--text-muted);
   cursor: pointer;
   transition: background 0.18s, color 0.18s;
   white-space: nowrap;
 }
 
+/* keyboard focus is on-brand; a mouse click never paints the default blue ring */
+.tab:focus         { outline: none; }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .tab:not(.tab--active):hover {
-  background: rgba(26, 26, 26, 0.1);
-  color: var(--color-primary);
+  background: rgba(26, 34, 51, 0.05);
+  color: var(--text);
 }
 
+.tab--active,
 .tab--active:hover {
-  background: rgba(26, 26, 26, 0.78);
-}
-
-.tab--active {
-  background: var(--color-primary);
-  color: var(--color-bg);
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 0 1px 3px rgba(176, 94, 67, 0.45);
 }
 
 .tab-badge {
@@ -292,10 +307,10 @@ const displayNodes = computed(() => {
 }
 
 .state-msg {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.05em;
   color: var(--color-secondary);
   position: absolute;
   top: 50%;
@@ -305,8 +320,8 @@ const displayNodes = computed(() => {
 
 .footer {
   padding: 10px 24px;
-  background: #ebebea;
-  border-top: 1px solid var(--color-border);
+  background: var(--surface);
+  border-top: 1px solid var(--line);
   font-family: var(--font-mono);
   font-size: 12px;
   letter-spacing: 0.1em;

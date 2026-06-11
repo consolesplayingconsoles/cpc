@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import type { NodeMap, NodeData } from '../composables/useNodes'
+import { API_BASE } from '../composables/useNodes'
 import { ICONS } from '../composables/useIcons'
 import { useMessages } from '../composables/useMessages'
 import ConsoleAvatar from './ConsoleAvatar.vue'
@@ -13,6 +14,45 @@ const props = defineProps<{
 
 // ── Messages (live API) ──────────────────────────────────────────────────────
 const { messages, sendMessage } = useMessages()
+
+// ── Identity: you're a named device, or just an editable guest string ────────
+// The server tells us if our IP maps to a known console (authoritative, locked).
+// Otherwise we're a guest: a display name we keep in localStorage, default
+// guestNNNN, editable inline. No server-side guest registry, no avatar fuss.
+const GUEST_KEY   = 'cpc-chat-name'
+const meNode      = ref<string | null>(null)   // server-recognized device, else null
+const guestName   = ref('')
+const editingName = ref(false)
+const nameDraft   = ref('')
+const nameInputEl = ref<HTMLInputElement | null>(null)
+
+const isGuest       = computed(() => !meNode.value)
+const identity      = computed(() => meNode.value ?? guestName.value)
+const identityLabel = computed(() => meNode.value ? displayName(meNode.value) : guestName.value)
+
+function loadGuestName() {
+  let n = window.localStorage.getItem(GUEST_KEY)
+  if (!n) { n = 'guest' + Math.floor(1000 + Math.random() * 9000); window.localStorage.setItem(GUEST_KEY, n) }
+  guestName.value = n
+}
+function startEditName() {
+  nameDraft.value = guestName.value
+  editingName.value = true
+  nextTick(() => { nameInputEl.value?.focus(); nameInputEl.value?.select() })
+}
+function saveName() {
+  const v = nameDraft.value.trim().slice(0, 24)
+  if (v) { guestName.value = v; window.localStorage.setItem(GUEST_KEY, v) }
+  editingName.value = false
+}
+
+onMounted(async () => {
+  loadGuestName()
+  try {
+    const r = await window.fetch(`${API_BASE}/whoami`)
+    if (r.ok) { const j = await r.json(); meNode.value = j.node ?? null }
+  } catch { /* offline — stay a guest */ }
+})
 
 // ── Member lists — ordered: online → offline → unconfigured ──────────────────
 const allNodes = computed(() => Object.values(props.nodes).filter(n => n.id !== 'gateway'))
@@ -33,13 +73,13 @@ function iconFor(id: string): string | undefined {
 }
 
 function displayName(id: string) {
-  if (id === 'pluto') return 'pluto'
-  return (props.nodes[id]?.name ?? id).toLowerCase()
+  if (id === 'pluto') return 'Pluto'
+  return props.nodes[id]?.name ?? id
 }
 
 function nameColor(id: string) {
   const node = nodeFor(id)
-  if (node?.status === 'unconfigured') return 'var(--color-secondary)'
+  if (node?.status === 'unconfigured') return 'var(--text-muted)'
   return node?.color ?? '#888884'
 }
 
@@ -271,11 +311,13 @@ const blockedCmd = computed(() => {
 function send() {
   const text = draft.value.trim()
   if (!text || blockedCmd.value) return
-  sendMessage('pluto', text)
+  sendMessage(identity.value, text)
   draft.value = ''
   showEmoji.value = false
   scrollToBottom()
 }
+
+
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') { showEmoji.value = false; return }
@@ -295,28 +337,58 @@ function onKeydown(e: KeyboardEvent) {
   // Textarea in multiline mode: Enter sends, Shift+Enter inserts newline
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
 }
-
-const plutoNode = computed(() => props.nodes['host'] ?? null)
 </script>
 
 <template>
   <div class="chat" @click="showEmoji = false">
+    <!-- Top bar: channel + your identity. The floating tab switcher nests here. -->
+    <div class="chat-topbar">
+      <span class="channel-name"># consoles-chatting-consoles</span>
+
+      <div class="identity">
+        <span class="identity-eyebrow">You're</span>
+        <input
+          v-if="isGuest && editingName"
+          ref="nameInputEl"
+          v-model="nameDraft"
+          class="identity-input"
+          maxlength="24"
+          @keydown.enter="saveName"
+          @keydown.escape="editingName = false"
+          @blur="saveName"
+        />
+        <button
+          v-else-if="isGuest"
+          class="identity-name"
+          title="Edit your display name"
+          @click="startEditName"
+        >
+          {{ guestName }}
+          <svg class="identity-pencil" width="11" height="11" viewBox="0 0 24 24" fill="none">
+            <path d="M14.06 6.19l3.75 3.75M4 20.5h3.75L18.31 9.94a1.5 1.5 0 0 0 0-2.12l-1.63-1.63a1.5 1.5 0 0 0-2.12 0L4 16.75v3.75z"
+                  stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <span v-else class="identity-name identity-name--locked">{{ identityLabel }}</span>
+      </div>
+    </div>
+
     <div class="chat-body">
 
       <!-- Left sidebar: ordered online → offline → unconfigured -->
       <aside class="sidebar">
         <div v-if="onlineMembers.length > 0">
-          <p class="sidebar-section">ONLINE &mdash; {{ onlineMembers.length }}</p>
+          <p class="sidebar-section">Online &mdash; {{ onlineMembers.length }}</p>
           <div v-for="n in onlineMembers" :key="n.id" class="member">
             <ConsoleAvatar :id="n.id" :icon="ICONS[n.id]" :status="n.status" :color="n.color" :size="36" />
-            <span class="member-name" :style="{ color: n.color ?? 'var(--color-primary)' }">
+            <span class="member-name" :style="{ color: n.color ?? 'var(--text)' }">
               {{ displayName(n.id) }}
             </span>
           </div>
         </div>
 
         <div v-if="offlineMembers.length > 0">
-          <p class="sidebar-section sidebar-section--dim">OFFLINE &mdash; {{ offlineMembers.length }}</p>
+          <p class="sidebar-section sidebar-section--dim">Offline &mdash; {{ offlineMembers.length }}</p>
           <div v-for="n in offlineMembers" :key="n.id" class="member member--offline">
             <ConsoleAvatar :id="n.id" :icon="ICONS[n.id]" :status="n.status" :color="n.color" :size="36" />
             <span class="member-name member-name--dim">
@@ -326,7 +398,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
         </div>
 
         <div v-if="unconfiguredMembers.length > 0">
-          <p class="sidebar-section sidebar-section--dim">NOT PRESENT &mdash; {{ unconfiguredMembers.length }}</p>
+          <p class="sidebar-section sidebar-section--dim">Not present &mdash; {{ unconfiguredMembers.length }}</p>
           <div v-for="n in unconfiguredMembers" :key="n.id" class="member member--unconfigured">
             <ConsoleAvatar :id="n.id" :icon="ICONS[n.id]" :status="n.status" :color="n.color" :size="36" />
             <span class="member-name member-name--dim">
@@ -336,12 +408,8 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
         </div>
       </aside>
 
-      <!-- Right: channel + feed + input -->
+      <!-- Right: feed + input -->
       <div class="chat-col">
-        <div class="channel-header">
-          <span class="channel-name"># consoles-chatting-consoles</span>
-        </div>
-
         <div ref="feedEl" class="feed">
           <div v-for="g in messageGroups" :key="g.key" class="msg-group">
             <ConsoleAvatar
@@ -368,7 +436,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
           </div>
 
           <div v-if="messageGroups.length === 0" class="feed-empty">
-            no messages yet &mdash; say something
+            No messages yet &mdash; say something
           </div>
         </div>
 
@@ -455,11 +523,24 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
           </div>
 
           <div class="input-bar">
+            <div v-if="isGuest" class="guest-avatar" :title="'Posting as ' + guestName">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="var(--accent)" shape-rendering="crispEdges">
+                <rect x="5"  y="4"  width="2"  height="2"/><rect x="17" y="4"  width="2"  height="2"/>
+                <rect x="7"  y="6"  width="2"  height="2"/><rect x="15" y="6"  width="2"  height="2"/>
+                <rect x="5"  y="8"  width="14" height="2"/>
+                <rect x="3"  y="10" width="4"  height="2"/><rect x="9"  y="10" width="6" height="2"/><rect x="17" y="10" width="4" height="2"/>
+                <rect x="1"  y="12" width="22" height="2"/>
+                <rect x="1"  y="14" width="2"  height="2"/><rect x="5"  y="14" width="14" height="2"/><rect x="21" y="14" width="2" height="2"/>
+                <rect x="1"  y="16" width="2"  height="2"/><rect x="5"  y="16" width="2" height="2"/><rect x="17" y="16" width="2" height="2"/><rect x="21" y="16" width="2" height="2"/>
+                <rect x="7"  y="18" width="4"  height="2"/><rect x="13" y="18" width="4" height="2"/>
+              </svg>
+            </div>
             <ConsoleAvatar
-              id="host"
-              :icon="ICONS['host']"
-              :status="plutoNode?.status ?? 'up'"
-              :color="plutoNode?.color"
+              v-else
+              :id="meNode!"
+              :icon="iconFor(meNode!)"
+              :status="nodeFor(meNode!)?.status ?? 'up'"
+              :color="nodeFor(meNode!)?.color"
               :size="36"
             />
 
@@ -469,7 +550,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
                 ref="textareaEl"
                 v-model="draft"
                 class="input-field input-field--textarea"
-                placeholder="write your post... (shift+enter for new line)"
+                placeholder="Write your post…  (shift+enter for new line)"
                 maxlength="2000"
                 rows="3"
                 @keydown="onKeydown"
@@ -485,7 +566,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
                   ref="inputEl"
                   v-model="draft"
                   class="input-field input-field--overlay"
-                  placeholder="message as pluto... (/ for commands, @ to mention)"
+                  :placeholder="'Message as ' + identityLabel + '…  (/ for commands, @ to mention)'"
                   maxlength="500"
                   @keydown="onKeydown"
                   @input="syncScroll"
@@ -507,7 +588,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
               :title="blockedCmd ? 'not built yet' : 'send'"
               @click="send"
             >
-              {{ blockedCmd ? 'SOON' : 'SEND' }}
+              {{ blockedCmd ? 'Soon' : 'Send' }}
             </button>
           </div>
         </div>
@@ -522,9 +603,10 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--color-bg);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-sans);
   overflow: hidden;
-  padding-top: 52px; /* clear floating tab switcher */
 }
 
 .chat-body {
@@ -537,21 +619,21 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
 .sidebar {
   width: 196px;
   flex-shrink: 0;
-  border-right: 1px solid var(--color-border);
-  background: #f5f5f3;
+  border-right: 1px solid var(--line);
+  background: var(--surface-2);
   overflow-y: auto;
   padding: 14px 0;
 }
 
 .sidebar::-webkit-scrollbar       { width: 4px; }
-.sidebar::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 2px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
 
 .sidebar-section {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.12em;
-  color: var(--color-secondary);
+  color: var(--text-muted);
   padding: 10px 14px 6px;
 }
 .sidebar-section--dim { opacity: 0.6; margin-top: 4px; }
@@ -570,7 +652,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
 .member--unconfigured     { opacity: 0.28; }
 
 .member-name {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -580,7 +662,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
   filter: brightness(0.78);
 }
 .member-name--dim {
-  color: var(--color-secondary) !important;
+  color: var(--text-muted) !important;
   filter: none;
 }
 
@@ -593,21 +675,85 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
   min-width: 0;
 }
 
-.channel-header {
+/* Full-width top bar — the floating tab switcher nests in this strip, so there
+   is no longer a dead band above the chat. Channel left, your identity right. */
+.chat-topbar {
   display: flex;
   align-items: center;
-  padding: 10px 20px;
-  border-bottom: 1px solid var(--color-border);
-  background: #f9f9f8;
+  justify-content: space-between;
+  height: 58px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
   flex-shrink: 0;
 }
 
 .channel-name {
-  font-family: var(--font-mono);
-  font-size: 13px;
+  font-family: var(--font-sans);
+  font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.05em;
-  color: var(--color-primary);
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+
+/* ── Identity: a named device (locked) or an editable guest string ───── */
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.identity-eyebrow {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.identity-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.identity-name:hover            { border-color: var(--accent); }
+.identity-pencil                { opacity: 0.55; }
+.identity-name--locked          { cursor: default; }
+.identity-name--locked:hover    { border-color: transparent; }
+.identity-input {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  width: 132px;
+  padding: 4px 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Guest sender avatar — a monogram, no console icon to borrow */
+.guest-avatar {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 700;
 }
 
 /* ── Feed ────────────────────────────────────────────────────── */
@@ -622,7 +768,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
 }
 
 .feed::-webkit-scrollbar       { width: 6px; }
-.feed::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+.feed::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
 
 .msg-group {
   display: flex;
@@ -641,7 +787,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
 }
 
 .msg-name {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -649,17 +795,17 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
 }
 
 .msg-time {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 10px;
-  color: var(--color-secondary);
+  color: var(--text-muted);
   letter-spacing: 0.06em;
   opacity: 0.65;
 }
 
 .msg-text {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 13px;
-  color: var(--color-primary);
+  color: var(--text);
   line-height: 1.6;
   word-break: break-word;
   margin: 0;
@@ -676,10 +822,10 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 12px;
   letter-spacing: 0.1em;
-  color: var(--color-secondary);
+  color: var(--text-muted);
   opacity: 0.5;
 }
 
@@ -687,8 +833,8 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
 .input-wrap {
   position: relative;
   flex-shrink: 0;
-  border-top: 1px solid var(--color-border);
-  background: #f5f5f3;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
 }
 
 .input-bar {
@@ -702,15 +848,17 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
 
 .input-field {
   width: 100%;
-  background: #f0f0ee;   /* recessed — distinct from the white chat bg */
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  padding: 8px 12px;
+  background: var(--surface-2);   /* recessed — distinct from the white chat bg */
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  padding: 9px 12px;
+  /* monospace stays: the @mention highlight overlay aligns char-for-char,
+     and bold mentions only stay aligned in a fixed-width font */
   font-family: var(--font-mono);
   font-size: 13px;
-  color: var(--color-primary);
+  color: var(--text);
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
   display: block;
 }
 .input-field--textarea {
@@ -730,7 +878,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
   z-index: 1;
   background: transparent;
   color: transparent;
-  caret-color: var(--color-primary);
+  caret-color: var(--text);
 }
 .input-hl {
   position: absolute;
@@ -738,21 +886,21 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
   z-index: 0;
   display: flex;
   align-items: center;
-  padding: 8px 12px;
+  padding: 9px 12px;
   border: 1px solid transparent;   /* match input border box for alignment */
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   box-sizing: border-box;
   overflow: hidden;
   pointer-events: none;
-  background: #f0f0ee;             /* recessed fill behind the transparent input */
-  font-family: var(--font-mono);
+  background: var(--surface-2);             /* recessed fill behind the transparent input */
+  font-family: var(--font-mono);            /* must match .input-field for char alignment */
   font-size: 13px;
-  color: var(--color-primary);
+  color: var(--text);
 }
 .input-hl-text { white-space: pre; }
-.input-hl-text strong { font-weight: 700; color: var(--color-primary); }
-.input-field::placeholder { color: var(--color-secondary); opacity: 0.55; }
-.input-field:focus        { border-color: var(--color-secondary); }
+.input-hl-text strong { font-weight: 700; color: var(--accent); }
+.input-field::placeholder { color: var(--text-faint); }
+.input-field:focus        { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 .emoji-toggle {
   font-size: 18px;
@@ -767,25 +915,25 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
   margin-bottom: 1px;
 }
 .emoji-toggle:hover       { background: rgba(0,0,0,0.06); }
-.emoji-toggle--active     { background: rgba(0,0,0,0.08); border-color: var(--color-border); }
+.emoji-toggle--active     { background: rgba(0,0,0,0.08); border-color: var(--line); }
 
 .send-btn {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  padding: 8px 16px;
-  border: 1.5px solid var(--color-primary);
-  border-radius: 3px;
-  background: var(--color-primary);
-  color: var(--color-bg);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 9px 18px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition: background 0.15s;
   flex-shrink: 0;
   margin-bottom: 1px;
 }
-.send-btn:disabled             { opacity: 0.3; cursor: default; }
-.send-btn:not(:disabled):hover { opacity: 0.72; }
+.send-btn:disabled             { opacity: 0.4; cursor: default; }
+.send-btn:not(:disabled):hover { background: var(--accent-hover); }
 
 /* ── Autocomplete / emoji popovers ───────────────────────────── */
 .autocomplete {
@@ -794,7 +942,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
   left: 16px;
   right: 16px;
   background: var(--color-bg);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--line);
   border-radius: 6px;
   box-shadow: 0 4px 20px rgba(0,0,0,0.1);
   overflow: hidden;
@@ -809,10 +957,10 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
   cursor: pointer;
   transition: background 0.1s;
 }
-.autocomplete-item:hover { background: #f0f0ee; }
+.autocomplete-item:hover { background: var(--surface-2); }
 .autocomplete-item--active {
   background: #e6e6e2;
-  box-shadow: inset 2px 0 0 var(--color-primary);
+  box-shadow: inset 2px 0 0 var(--text);
 }
 /* not-yet-built command: visible & navigable, but visually muted */
 .autocomplete-item--soon { cursor: default; }
@@ -825,31 +973,31 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
 }
 
 .autocomplete-cmd {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 700;
-  color: var(--color-primary);
+  color: var(--text);
   letter-spacing: 0.04em;
 }
 .autocomplete-param {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 11px;
   color: #9a6c1a;
   letter-spacing: 0.04em;
 }
 .autocomplete-desc {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 11px;
-  color: var(--color-secondary);
+  color: var(--text-muted);
   flex: 1;
 }
 .autocomplete-tag {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: var(--color-secondary);
-  border: 1px solid var(--color-border);
+  color: var(--text-muted);
+  border: 1px solid var(--line);
   border-radius: 3px;
   padding: 1px 5px;
 }
@@ -859,7 +1007,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
   bottom: calc(100% + 4px);
   right: 16px;
   background: var(--color-bg);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px;
   display: grid;
@@ -870,7 +1018,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
 }
 
 .emoji-btn {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.03em;
@@ -880,7 +1028,7 @@ const plutoNode = computed(() => props.nodes['host'] ?? null)
   border-radius: 4px;
   padding: 6px 8px;
   cursor: pointer;
-  color: var(--color-primary);
+  color: var(--text);
   transition: background 0.1s;
 }
 .emoji-btn:hover { background: #e8e8e6; }

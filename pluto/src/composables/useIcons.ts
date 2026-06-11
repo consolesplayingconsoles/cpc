@@ -8,6 +8,7 @@ import imgDreame   from '../assets/consoles/dreame.png'
 import imgHost     from '../assets/consoles/host.png'
 import imgClaude   from '../assets/consoles/claude.svg'
 import imgBird     from '../assets/consoles/birdbuddy.png'
+import imgPi       from '../assets/consoles/pi.svg'
 
 export const ICONS: Record<string, string> = {
   wii:       imgWii,
@@ -20,4 +21,5 @@ export const ICONS: Record<string, string> = {
   host:      imgHost,
   claude:    imgClaude,
   birdbuddy: imgBird,
+  pi:        imgPi,
 }

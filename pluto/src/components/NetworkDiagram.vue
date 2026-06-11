@@ -24,6 +24,7 @@ const LAYOUT: Record<string, { x: number; y: number }> = {
   batocera: { x: 820, y: 350 },
   dreame:   { x: 660, y: 460 },
   birdbuddy:{ x: 500, y: 470 },
+  pi:       { x: 170, y: 470 },
 }
 
 

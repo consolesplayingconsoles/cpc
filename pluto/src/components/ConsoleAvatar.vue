@@ -40,11 +40,16 @@ const border  = computed(() => props.color ?? 'var(--color-border)')
           opacity: status === 'up' ? 0.92 : status === 'unconfigured' ? 0.7 : 0.45,
         }"
       />
-      <!-- fallback: wifi/gateway symbol -->
-      <svg v-else :width="iconSz" :height="iconSz" viewBox="0 0 24 24" fill="none" opacity="0.4">
-        <path d="M12 18.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z" fill="#1a1a1a"/>
-        <path d="M7 14.5a7 7 0 0 1 10 0" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round"/>
-        <path d="M3.5 11A12 12 0 0 1 20.5 11" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round"/>
+      <!-- fallback: a generic retro pixel-invader (guests / iconless senders) -->
+      <svg v-else :width="iconSz" :height="iconSz" viewBox="0 0 24 24" fill="#1a1a1a" opacity="0.42" shape-rendering="crispEdges">
+        <rect x="5"  y="4"  width="2"  height="2"/><rect x="17" y="4"  width="2"  height="2"/>
+        <rect x="7"  y="6"  width="2"  height="2"/><rect x="15" y="6"  width="2"  height="2"/>
+        <rect x="5"  y="8"  width="14" height="2"/>
+        <rect x="3"  y="10" width="4"  height="2"/><rect x="9"  y="10" width="6" height="2"/><rect x="17" y="10" width="4" height="2"/>
+        <rect x="1"  y="12" width="22" height="2"/>
+        <rect x="1"  y="14" width="2"  height="2"/><rect x="5"  y="14" width="14" height="2"/><rect x="21" y="14" width="2" height="2"/>
+        <rect x="1"  y="16" width="2"  height="2"/><rect x="5"  y="16" width="2" height="2"/><rect x="17" y="16" width="2" height="2"/><rect x="21" y="16" width="2" height="2"/>
+        <rect x="7"  y="18" width="4"  height="2"/><rect x="13" y="18" width="4" height="2"/>
       </svg>
     </div>
 
