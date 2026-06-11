@@ -7,6 +7,8 @@
   { "from": "dc",       "to": "wii",     "label": "USB / Maple" },
   { "from": "gba",      "to": "wii",     "label": "GBA Link"    },
   { "from": "ws",       "to": "wii",     "label": "Serial / USB"},
-  { "from": "dreame",  "to": "gateway", "label": "WiFi"        },
-  { "from": "birdbuddy","to": "gateway","label": "WiFi"        }
+  { "from": "dreame",  "to": "gateway", "label": "WiFi"         },
+  { "from": "birdbuddy","to": "gateway","label": "WiFi"         },
+  { "from": "pi",       "to": "gateway", "label": "Ethernet"    },
+  { "from": "pi",       "to": "wii", "label": "USB"             }
 ]

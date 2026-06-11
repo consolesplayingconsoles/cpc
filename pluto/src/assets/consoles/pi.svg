@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <!-- PCB -->
+  <rect x="13" y="22" width="74" height="56" rx="7" fill="#2f8f4e"/>
+  <rect x="13" y="22" width="74" height="56" rx="7" fill="#000" opacity="0.06"/>
+  <!-- corner mounting holes -->
+  <circle cx="21" cy="30" r="2.6" fill="#1c5e36"/>
+  <circle cx="79" cy="30" r="2.6" fill="#1c5e36"/>
+  <circle cx="21" cy="70" r="2.6" fill="#1c5e36"/>
+  <circle cx="79" cy="70" r="2.6" fill="#1c5e36"/>
+  <!-- GPIO header: black strip with gold pins -->
+  <rect x="27" y="26" width="46" height="8" rx="1.5" fill="#15171a"/>
+  <g fill="#e3b23c">
+    <rect x="30" y="28.5" width="2.4" height="3" rx="0.6"/>
+    <rect x="35" y="28.5" width="2.4" height="3" rx="0.6"/>
+    <rect x="40" y="28.5" width="2.4" height="3" rx="0.6"/>
+    <rect x="45" y="28.5" width="2.4" height="3" rx="0.6"/>
+    <rect x="50" y="28.5" width="2.4" height="3" rx="0.6"/>
+    <rect x="55" y="28.5" width="2.4" height="3" rx="0.6"/>
+    <rect x="60" y="28.5" width="2.4" height="3" rx="0.6"/>
+    <rect x="65" y="28.5" width="2.4" height="3" rx="0.6"/>
+  </g>
+  <!-- SoC chip (centre) -->
+  <rect x="40" y="45" width="20" height="20" rx="2" fill="#141414"/>
+  <rect x="44" y="49" width="12" height="12" rx="1" fill="#2b2b2b"/>
+  <!-- port stack (right edge, metallic) -->
+  <rect x="83" y="40" width="9" height="11" rx="1.5" fill="#b9bdc2"/>
+  <rect x="83" y="56" width="9" height="13" rx="1.5" fill="#b9bdc2"/>
+  <!-- accent components -->
+  <rect x="22" y="46" width="9" height="6" rx="1" fill="#d9a441"/>
+  <rect x="22" y="57" width="6" height="6" rx="1" fill="#1c1c1c"/>
+  <rect x="65" y="68" width="7" height="5" rx="1" fill="#c9cdd2"/>
+</svg>

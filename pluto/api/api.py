@@ -196,7 +196,7 @@ def _is_allowed_origin(origin):
 
 REQUIRED_VARS = ["GATEWAY_IP"]
 
-CONSOLE_IDS = ["wii", "dc", "ps3", "gba", "ws", "batocera", "dreame", "birdbuddy"]
+CONSOLE_IDS = ["wii", "dc", "ps3", "gba", "ws", "batocera", "dreame", "birdbuddy", "pi"]
 
 # Consoles whose OS is fixed by definition — used as the badge default so it shows
 # even when the node is offline (TTL detection only works on a live reply).
@@ -245,7 +245,14 @@ def _log_message(msg):
 # ── Shared helpers ───────────────────────────────────────────────────────────
 
 def console_env_path(base_dir, node_id):
-    return os.path.normpath(os.path.join(base_dir, "..", node_id, ".env"))
+    """Path to a console's env file. Prefer the real .env; fall back to the
+    committed .env.sample so a node that has a blueprint but no .env yet still
+    surfaces on the map as 'unconfigured' (empty HOST_IP) instead of vanishing
+    — e.g. a device staged ahead of the hardware arriving."""
+    real = os.path.normpath(os.path.join(base_dir, "..", node_id, ".env"))
+    if os.path.exists(real):
+        return real
+    return os.path.normpath(os.path.join(base_dir, "..", node_id, ".env.sample"))
 
 
 def probe(ip):
@@ -387,6 +394,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return mapping[ip]
         return node_for_ua(self.headers.get("User-Agent", "")) or "guest"
 
+    def _known_device(self):
+        """The named node bound to the requester's source IP, or None for a
+        guest. This is the authoritative half of identity -- it can't be spoofed
+        by a client-supplied name."""
+        mapping = ip_to_node(self.__class__.base_dir, self.__class__.config)
+        return mapping.get(self.client_address[0])
+
+    def _handle_whoami(self):
+        """Tell the client whether its IP is a named device. If so it posts as
+        that device (locked); otherwise it's a guest and picks its own display
+        string client-side (localStorage). No server-side guest registry."""
+        self._send(200, {"node": self._known_device()})
+
     def _serve_retro(self):
         """Serve the barebones retro-console chat page with the client config +
         the requester's identity inlined (no fetch, no build step)."""
@@ -510,6 +530,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/connections":
             self._send(200, self._build_connections())
 
+        elif parsed.path == "/whoami":
+            self._handle_whoami()
+
         elif parsed.path == "/messages":
             qs    = urllib.parse.parse_qs(parsed.query)
             since = qs.get("since", [None])[0]
@@ -552,11 +575,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(400, {"error": "invalid json"})
             return
 
-        # Browser clients (the /retro page) post no sender -- the server is
-        # authoritative and derives it from IP/UA. Programmatic posters (the Vue
-        # app, bridges) may still pass an explicit sender.
-        sender = str(body.get("sender", "")).strip() or self._identify()
-        text   = str(body.get("text",   "")).strip()
+        # Identity rule: "you are a named device, or you are just a string."
+        # A request from a known device IP is authoritatively that device and
+        # cannot be spoofed. Everyone else is a guest -- we trust the client's
+        # chosen display string (the SPA keeps it in localStorage), falling back
+        # to a UA signature, then "guest". No server-side guest registry.
+        device = self._known_device()
+        if device:
+            sender = device
+        else:
+            sender = (str(body.get("sender", "")).strip()
+                      or node_for_ua(self.headers.get("User-Agent", ""))
+                      or "guest")[:32]
+        text = str(body.get("text", "")).strip()
 
         if not text:
             self._send(400, {"error": "text is required"})
