@@ -1,0 +1,15 @@
+# CPC local DEV tooling — macOS dev machine ONLY. NOT for console nodes.
+#
+# This powers the "drive an emulator" feature (Robutek → Output → Local Emulator
+# (Virtual Keyboard)): the KeyboardSink synthesizes controller input as keystrokes
+# via pynput. Console nodes (PowerPC/ARM/MIPS) never run this — their runtime deps
+# are the pure-stdlib set in cpc-python-client/requirements.txt, and pynput is NOT
+# deployed to them.
+#
+# Homebrew's python3 is externally-managed (PEP 668), so install into a venv:
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r requirements-dev.txt
+#
+# start-pluto.sh auto-detects .venv. For the CLI use .venv/bin/python (or
+# `source .venv/bin/activate` once, then plain `python`).
+pynput==1.8.2

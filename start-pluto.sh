@@ -46,17 +46,27 @@ pids=()
 cleanup() { trap - INT TERM EXIT; kill "${pids[@]}" 2>/dev/null || true; }
 trap cleanup INT TERM EXIT
 
-if [[ "$WANT_API" == 1 ]] && lsof -nP -iTCP:7700 -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "==> Pluto API already running on :7700 — leaving it; not starting a second one."
-  WANT_API=0
+# Always restart the API so code edits actually take effect — a long-running
+# server caches imported modules (controller.py etc.), so "leaving it running"
+# silently serves stale code. Kill any existing one and start fresh.
+if [[ "$WANT_API" == 1 ]]; then
+  OLD=$(lsof -ti:7700 2>/dev/null || true)
+  if [[ -n "$OLD" ]]; then
+    echo "==> Pluto API on :7700 — restarting (kill $OLD) so edits take effect."
+    kill $OLD 2>/dev/null || true
+    for _ in $(seq 1 20); do lsof -ti:7700 >/dev/null 2>&1 || break; sleep 0.2; done
+  fi
 fi
 
 if [[ "$WANT_API" == 1 ]]; then
-  # Prefer python3.11 — it's the interpreter that has pynput, which the Robutek
-  # "Output → Emulator (Virtual Keyboard)" drive needs (the API synthesizes the
-  # keys). api.py is pure stdlib, so any python3 runs it; 3.11 just unlocks drive.
-  # (Run this from a terminal with Accessibility granted, or the keys are dropped.)
-  PY=python3; command -v python3.11 >/dev/null 2>&1 && PY=python3.11
+  # Prefer the repo dev venv (.venv = Python 3.14 + pynput) — that's what unlocks
+  # the Robutek "Output → Local Emulator (Virtual Keyboard)" drive (the API
+  # synthesizes the keys). api.py is pure stdlib so any python3 runs it; the venv
+  # just adds pynput. Create it once:
+  #   python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+  # (Run from a terminal with Accessibility granted, or the synthesized keys drop.)
+  PY=python3
+  [[ -x "$ROOT/.venv/bin/python" ]] && PY="$ROOT/.venv/bin/python"
   echo "==> Pluto API   http://localhost:7700   ($PY)"
   ( cd "$PLUTO" && exec "$PY" api/api.py ) &
   pids+=($!)

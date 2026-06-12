@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, onMounted } from 'vue'
 import PetIcon from './PetIcon.vue'
 import type { NodeMap } from '../composables/useNodes'
 
@@ -119,9 +119,10 @@ function frame(ts: number) {
   if (!playing.value) return
   if (lastTs) {
     currentTime.value = Math.min(duration.value, currentTime.value + ((ts - lastTs) / 1000) * speed.value)
-    if (currentTime.value >= duration.value) { playing.value = false; lastTs = 0; return }
+    if (currentTime.value >= duration.value) { playing.value = false; lastTs = 0; syncVideo(); return }
   }
   lastTs = ts
+  syncVideo()
   raf = requestAnimationFrame(frame)
 }
 function play() {
@@ -129,12 +130,40 @@ function play() {
   if (progress.value >= 1) currentTime.value = 0
   playing.value = true; lastTs = 0; raf = requestAnimationFrame(frame)
   startDrive()
+  syncVideo()
 }
-function pause() { playing.value = false; cancelAnimationFrame(raf); stopDriveOutput() }
+function pause() { playing.value = false; cancelAnimationFrame(raf); stopDriveOutput(); syncVideo() }
 function togglePlay() { playing.value ? pause() : play() }
-function seek(e: Event) { pause(); currentTime.value = Number((e.target as HTMLInputElement).value) }
-watch(sel, () => { pause(); currentTime.value = 0; svgScale.value = 1; driveError.value = '' })
-onBeforeUnmount(() => { cancelAnimationFrame(raf); stopDriveOutput() })
+
+// Keyboard control of playback. Space = play/pause, so you don't have to mouse to
+// the button (and fight for browser focus) while the synthetic keys are flying.
+// While driving we also swallow the arrow keys at the window level so they can't
+// scroll the page; the emulator still gets them via its background input.
+function onPlaybackKey(e: KeyboardEvent) {
+  if (!props.active) return
+  const tag = (e.target as HTMLElement | null)?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return   // don't hijack form typing
+  if (e.code === 'Space') {
+    e.preventDefault(); e.stopPropagation(); togglePlay(); return
+  }
+  if (driveTarget.value !== 'none' && e.key.indexOf('Arrow') === 0) e.preventDefault()
+}
+// A focused <select> walks its options on arrow keys -- block that so the synthetic
+// stick can't change Output / Mapping / speed (or steal pause) mid-drive.
+function blockArrows(e: KeyboardEvent) {
+  if (e.key.indexOf('Arrow') === 0) e.preventDefault()
+}
+onMounted(() => {
+  window.addEventListener('keydown', onPlaybackKey, true)
+  window.addEventListener('pagehide', stopBeacon)
+})
+function seek(e: Event) { pause(); currentTime.value = Number((e.target as HTMLInputElement).value); syncVideo() }
+watch(sel, () => { pause(); currentTime.value = 0; svgScale.value = 1; driveError.value = ''; clearVideo() })
+onBeforeUnmount(() => {
+  cancelAnimationFrame(raf); stopDriveOutput(); clearVideo()
+  window.removeEventListener('keydown', onPlaybackKey, true)
+  window.removeEventListener('pagehide', stopBeacon)
+})
 
 // ── output drive: push the playback clock to the selected target ──────────────
 // Backend-paced: each play/seek/speed/target change (re)starts a paced replay at
@@ -157,6 +186,16 @@ function startDrive() {
 }
 function stopDriveOutput() {
   if (driveTarget.value !== 'none') drivePost({ action: 'pause' })
+}
+// Best-effort stop when the tab/window goes away (close, refresh, navigate): a
+// normal fetch can be cancelled mid-flight, so use sendBeacon to make sure the
+// backend drive releases its keys instead of leaving the character walking.
+function stopBeacon() {
+  if (driveTarget.value === 'none') return
+  try {
+    navigator.sendBeacon(`${API}/robutek/drive`,
+      new Blob([JSON.stringify({ action: 'pause' })], { type: 'application/json' }))
+  } catch { /* tab is going away; best effort only */ }
 }
 async function fetchMappings() {
   try {
@@ -261,10 +300,43 @@ const head = computed<Point | null>(() => {
   return r[n] ?? null
 })
 
-// ── layers / consumers (placeholders, wired later) ────────────────
+// ── layers / consumers ────────────────────────────────────────────
 const showFloor    = ref(false)   // floor-plan background layer (follow-up)
-const videoOffset  = ref(0)       // s; video plays at currentTime + offset
-const hasVideo     = computed(() => false)  // per-clean: true once a video exists for the open clean
+const videoOffset  = ref(0)       // s; the robot clip plays at currentTime + offset
+
+// 3rd-person clip of the REAL robot, loaded from a local file (object-URL, no
+// backend). Played on the same playback clock as the map + game, so one screen
+// capture shows real robot -> abstract map -> typewriter game, all in step.
+const videoUrl  = ref<string | null>(null)
+const videoEl   = ref<HTMLVideoElement | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
+const hasVideo  = computed(() => !!videoUrl.value)
+function pickVideo() { fileInput.value?.click() }
+function onPickVideo(e: Event) {
+  const f = (e.target as HTMLInputElement).files?.[0]
+  if (!f) return
+  if (videoUrl.value) URL.revokeObjectURL(videoUrl.value)
+  videoUrl.value = URL.createObjectURL(f)
+}
+function clearVideo() {
+  if (videoUrl.value) URL.revokeObjectURL(videoUrl.value)
+  videoUrl.value = null
+}
+// Keep the clip aligned: same rate as the map, seeked to currentTime+offset,
+// played/paused together. Only reseat on real drift (>0.34s) so playback stays
+// smooth instead of stuttering every frame.
+function syncVideo() {
+  const v = videoEl.value
+  if (!v) return
+  v.playbackRate = Math.min(speed.value, 16)   // browsers cap fast playback ~16x
+  if (Number.isFinite(v.duration)) {
+    const t = Math.max(0, Math.min(currentTime.value + videoOffset.value, v.duration))
+    if (Math.abs(v.currentTime - t) > 0.34) v.currentTime = t
+  }
+  if (playing.value) { if (v.paused) v.play().catch(() => {}) }
+  else if (!v.paused) v.pause()
+}
+watch([speed, videoOffset], syncVideo)
 
 // ── formatters ────────────────────────────────────────────────────
 function fmt(min: number | null): string {
@@ -496,19 +568,23 @@ async function signIn() {
           </template>
         </div>
 
-        <div v-if="hasVideo" class="rb-video"><!-- real <video> wired later --></div>
+        <div v-if="hasVideo" class="rb-video">
+          <video ref="videoEl" :src="videoUrl || undefined" muted playsinline preload="auto"
+                 @loadedmetadata="syncVideo"></video>
+          <button class="rb-video-x" @click="clearVideo" title="Remove clip" aria-label="Remove clip">×</button>
+        </div>
       </section>
     </div>
 
     <!-- ── transport / playback bar ── -->
     <footer class="rb-transport" :class="{ disabled: !sel?.route?.length }">
-      <button class="rb-play" :disabled="!sel?.route?.length" @click="togglePlay" :title="playing ? 'pause' : 'play'">
+      <button class="rb-play" :disabled="!sel?.route?.length" @click="togglePlay" :title="playing ? 'Pause (Space)' : 'Play (Space)'">
         {{ playing ? '❚❚' : '▶' }}
       </button>
       <span class="rb-time mono">{{ fmtClock(currentTime) }} / {{ fmtClock(duration) }}</span>
       <input class="rb-scrub" type="range" min="0" :max="duration" step="1" :value="currentTime" @input="seek" :disabled="!sel?.route?.length" />
       <label class="rb-tx-ctl" title="playback speed">
-        <select v-model.number="speed"><option v-for="x in SPEEDS" :key="x" :value="x">{{ x }}×</option></select>
+        <select v-model.number="speed" @keydown="blockArrows"><option v-for="x in SPEEDS" :key="x" :value="x">{{ x }}×</option></select>
       </label>
 
       <!-- output target: where the clock is sent. Disabled animates only the map;
@@ -516,27 +592,28 @@ async function signIn() {
       <span class="rb-tx-sep" />
       <label class="rb-tx-ctl" title="Where playback is sent">
         <span>Output</span>
-        <select v-model="driveTarget">
+        <select v-model="driveTarget" @keydown="blockArrows">
           <option value="none">Disabled</option>
-          <option value="keyboard">Emulator (Virtual Keyboard)</option>
+          <option value="keyboard">Local Emulator (Virtual Keyboard)</option>
           <option value="pi" :disabled="!piPresent">Console (Raspberry Pi)</option>
         </select>
       </label>
       <label v-if="driveTarget !== 'none' && driveMappings.length" class="rb-tx-ctl" title="Event → controller mapping (config)">
         <span>Mapping</span>
-        <select v-model="driveMapping">
+        <select v-model="driveMapping" @keydown="blockArrows">
           <option v-for="m in driveMappings" :key="m" :value="m">{{ m }}</option>
         </select>
       </label>
       <span v-if="driveError" class="rb-drive-err mono" :title="driveError">{{ driveError }}</span>
 
-      <template v-if="hasVideo">
-        <span class="rb-tx-sep" />
-        <label class="rb-tx-ctl" title="Video start offset">
-          <span>video</span>
-          <input type="number" v-model.number="videoOffset" step="1" /><span class="mono">s</span>
-        </label>
-      </template>
+      <span class="rb-tx-sep" />
+      <input ref="fileInput" type="file" accept="video/*" class="rb-file" @change="onPickVideo" />
+      <button v-if="!hasVideo" class="rb-tx-btn" @click="pickVideo" :disabled="!sel?.route?.length"
+              title="Load a 3rd-person clip of the real robot, synced to playback">+ Robot Clip</button>
+      <label v-else class="rb-tx-ctl" title="Nudge the clip's alignment vs the route (seconds)">
+        <span>Clip</span>
+        <input type="number" v-model.number="videoOffset" step="1" /><span class="mono">s</span>
+      </label>
     </footer>
   </div>
 </template>
@@ -680,7 +757,22 @@ async function signIn() {
   padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); cursor: pointer;
 }
 .rb-chip.off { opacity: 0.7; }
-.rb-video { width: 42%; border-left: 1px solid var(--line); background: #000; }
+.rb-video { width: 50%; position: relative; border-left: 1px solid var(--line); background: #000; padding: var(--sp-3); }
+.rb-video video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.rb-video-x {
+  position: absolute; top: var(--sp-2); right: var(--sp-2);
+  width: 24px; height: 24px; display: grid; place-items: center;
+  border: 0; border-radius: 50%; cursor: pointer; font-size: 15px; line-height: 1;
+  color: #fff; background: rgba(0, 0, 0, 0.5);
+}
+.rb-video-x:hover { background: rgba(0, 0, 0, 0.8); }
+.rb-file { display: none; }
+.rb-tx-btn {
+  font: inherit; font-size: 12px; color: var(--text); padding: 4px 8px; cursor: pointer;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface);
+}
+.rb-tx-btn:hover:not(:disabled) { border-color: var(--accent); }
+.rb-tx-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* Tall/narrow window (e.g. Pluto docked beside Dolphin): stack map over video
    instead of side-by-side, so each keeps usable width. No video yet -> the map
@@ -693,9 +785,12 @@ async function signIn() {
 
 /* ── transport ── */
 .rb-transport {
-  display: flex; align-items: center; gap: var(--sp-3);
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; row-gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-4); background: var(--surface); border-top: 1px solid var(--line);
 }
+/* keep the scrubber greedy so it claims row 1 and pushes the drive/clip controls
+   onto a second row when Pluto is docked narrow beside the emulator */
+.rb-scrub { flex: 1 1 160px; }
 .rb-transport.disabled { opacity: 0.55; }
 .rb-play {
   width: 34px; height: 34px; display: grid; place-items: center; flex-shrink: 0;
@@ -715,6 +810,7 @@ async function signIn() {
   border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface);
 }
 .rb-tx-ctl input[type="number"] { width: 48px; }
+.rb-tx-ctl select { max-width: 150px; }   /* truncate long options (the Output label) so they don't blow out the bar */
 .rb-tx-sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 var(--sp-1); }
 .rb-drive-err { font-size: 11px; color: var(--bad, #c0392b); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

@@ -1,6 +1,7 @@
 {
   "_comment": "SHARED mapping: input (Dreame action-trigger events) => output (GameCube-pad ops, Dolphin Pipe names). Convention <source>-to-<target>.mapping.json, loaded via controller.load_mapping('dreame-to-gamecube'). INTENT: open-world 'just move' (e.g. Wind Waker) -- the vacuum's route becomes the character's walk, so locomotion is the WHOLE mapping: heading -> analog stick, nothing else. The capture layer still emits turn/reposition/battery/pet; this policy simply doesn't bind them (a turn is just the stick pointing somewhere new -- not a button). A more button-heavy game would be a different mapping over the same events.",
   "controller": "GameCube pad (Dolphin Pipe)",
+  "move_duty": 0.05,
   "rules": {
     "move": { "axis": "MAIN", "from": "vector" },
     "end":  { "release_all": true }
