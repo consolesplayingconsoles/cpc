@@ -17,10 +17,11 @@ const LAYOUT: Record<string, { x: number; y: number }> = {
   gateway:  { x: 500, y: 280 },
   wii:      { x: 230, y: 180 },
   dc:       { x: 430, y:  90 },
+  vmu:      { x: 600, y:  90 },
   ps3:      { x: 720, y: 130 },
   gba:      { x:  70, y: 125 },
   ws:       { x:  70, y: 335 },
-  host:     { x: 350, y: 470 },
+  pluto:    { x: 350, y: 470 },
   batocera: { x: 820, y: 350 },
   dreame:   { x: 660, y: 460 },
   birdbuddy:{ x: 500, y: 470 },
@@ -31,7 +32,7 @@ const LAYOUT: Record<string, { x: number; y: number }> = {
 const {
   deploying, deployOutput, lastDurations,
   showToast, toastConsoleName, toastDuration,
-  deploy, openLocal, clearOutput, dismissToast,
+  deploy, clearOutput, dismissToast,
 } = useDeploy(() => props.nodes)
 
 const activeMenu  = ref<string | null>(null)
@@ -70,11 +71,28 @@ function isClickable(id: string) {
   if (id === 'gateway') return false
   const n = props.nodes[id]
   // Only up nodes are expandable, and only when they have at least one button.
-  return !!n && n.status === 'up' && (n.deploy || n.folder)
+  return !!n && n.status === 'up' && (n.deploy || n.folder || !!n.code)
 }
 
-async function openSmb(id: string) {
-  await fetch(`${API_BASE}/smb/${id}`, { method: 'POST' })
+function openSmb(id: string) {
+  // Open the share on THIS machine — the one viewing the dashboard — not on the
+  // API host. Pluto now runs headless on the EEE PC where xdg-open is useless;
+  // and opening client-side means the SMB traffic flows straight from here to
+  // the share host (a console, the EEE PC, ...), never through Pluto. The OS
+  // handles the smb:// scheme (Finder mounts it on macOS); the anchor click
+  // keeps it inside the user gesture so the browser delegates instead of blocking.
+  const url = props.nodes[id]?.smb
+  if (!url) return
+  const a = document.createElement('a')
+  a.href = url
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+async function openWorkspace(id: string) {
+  await fetch(`${API_BASE}/workspace/${id}`, { method: 'POST' })
 }
 
 function closeMenu() {
@@ -193,7 +211,7 @@ onUnmounted(() => window.removeEventListener('resize', updateCardPos))
           :is-unconfigured="isUnconfigured(id)"
           @toggle="toggleMenu(id)"
           @deploy="deploy(id)"
-          @open-local="openLocal(id)"
+          @open-workspace="openWorkspace(id)"
           @open-smb="openSmb(id)"
         />
       </g>
@@ -232,7 +250,7 @@ onUnmounted(() => window.removeEventListener('resize', updateCardPos))
           :is-unconfigured="isUnconfigured(activeMenu)"
           @toggle="toggleMenu(activeMenu)"
           @deploy="deploy(activeMenu)"
-          @open-local="openLocal(activeMenu)"
+          @open-workspace="openWorkspace(activeMenu)"
           @open-smb="openSmb(activeMenu)"
         />
       </g>

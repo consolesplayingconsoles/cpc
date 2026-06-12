@@ -1,5 +1,6 @@
 import imgWii      from '../assets/consoles/wii.png'
 import imgDc       from '../assets/consoles/dc.png'
+import imgVmu      from '../assets/consoles/vmu.png'
 import imgPs3      from '../assets/consoles/ps3.png'
 import imgGba      from '../assets/consoles/gba.png'
 import imgWs       from '../assets/consoles/ws.png'
@@ -13,12 +14,13 @@ import imgPi       from '../assets/consoles/pi.svg'
 export const ICONS: Record<string, string> = {
   wii:       imgWii,
   dc:        imgDc,
+  vmu:       imgVmu,
   ps3:       imgPs3,
   gba:       imgGba,
   ws:        imgWs,
   batocera:  imgBatocera,
   dreame:    imgDreame,
-  host:      imgHost,
+  pluto:     imgHost,
   claude:    imgClaude,
   birdbuddy: imgBird,
   pi:        imgPi,

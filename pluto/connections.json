@@ -1,14 +1,15 @@
 [
-  { "from": "host",     "to": "gateway", "label": "WiFi"        },
-  { "from": "wii",      "to": "gateway", "label": "WiFi"        },
-  { "from": "batocera", "to": "gateway", "label": "WiFi"        },
-  { "from": "ps3",      "to": "gateway", "label": "WiFi"        },
-  { "from": "dc",       "to": "gateway", "label": "Ethernet"    },
-  { "from": "dc",       "to": "wii",     "label": "USB / Maple" },
-  { "from": "gba",      "to": "wii",     "label": "GBA Link"    },
-  { "from": "ws",       "to": "wii",     "label": "Serial / USB"},
-  { "from": "dreame",  "to": "gateway", "label": "WiFi"         },
-  { "from": "birdbuddy","to": "gateway","label": "WiFi"         },
-  { "from": "pi",       "to": "gateway", "label": "Ethernet"    },
-  { "from": "pi",       "to": "wii", "label": "USB"             }
+  { "from": "pluto",    "to": "gateway", "label": "USB Eth"            },
+  { "from": "wii",      "to": "gateway", "label": "WiFi"               },
+  { "from": "batocera", "to": "gateway", "label": "WiFi"               },
+  { "from": "ps3",      "to": "gateway", "label": "WiFi"               },
+  { "from": "dc",       "to": "gateway", "label": "Ethernet"           },
+  { "from": "dc",       "to": "vmu",     "label": "Maple"              },
+  { "from": "gba",      "to": "wii",     "label": "GBA Link"           },
+  { "from": "ws",       "to": "pi",      "label": "Serial / Pico / USB"},
+  { "from": "dreame",   "to": "gateway",  "label": "WiFi / Cloud"      },
+  { "from": "birdbuddy","to": "gateway", "label": "WiFi"               },
+  { "from": "pi",       "to": "gateway", "label": "WiFi"               },
+  { "from": "pi",       "to": "wii",     "label": "USB / Pico"         },
+  { "from": "pi",       "to": "dc",      "label": "USB / Pico / Maple" }
 ]

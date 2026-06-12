@@ -11,8 +11,9 @@ export interface NodeData {
   smb:    string | null
   // Per-node action-button availability. A node is expandable iff it has at
   // least one configured button; each button renders only when configured.
-  deploy: boolean   // DEPLOY button (console) / CODE button (host)
-  folder: boolean   // FILES button (console SMB) / DIR button (host LOCAL_PATH)
+  deploy: boolean         // DEPLOY button — ship code to the node over SSH
+  folder: boolean         // FILES button — open the node's SMB share
+  code?:  boolean         // CODE button — open the source in the IDE (pluto only)
   os?:    string | null   // declared runtime; 'linux' shows a Tux on the bubble
 }
 

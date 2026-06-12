@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import PetIcon from './PetIcon.vue'
+import type { NodeMap } from '../composables/useNodes'
 
 interface Point { x: number; y: number }
 
@@ -39,8 +41,21 @@ interface DreameData {
   error?: string | null
 }
 
-const props = defineProps<{ name: string; active: boolean }>()
+const props = defineProps<{ name: string; active: boolean; nodes?: NodeMap }>()
 const API = `http://${window.location.hostname}:7700`
+
+// Output target: where the playback clock is sent. 'none' = just animate the map.
+// 'pi' (real console via the Raspberry Pi) is only offered when the pi node is
+// present; 'keyboard' drives an emulator via synthesized keys.
+const piPresent  = computed(() => {
+  const n = props.nodes?.['pi']
+  return !!n && n.status !== 'unconfigured'
+})
+const driveTarget   = ref<'none' | 'keyboard' | 'pi'>('none')
+const driveError    = ref('')
+// which event→controller mapping (config file) to drive with; list from the API
+const driveMapping  = ref('dreame-to-gamecube')
+const driveMappings = ref<string[]>([])
 
 const data      = ref<DreameData | null>(null)
 const loading   = ref(false)
@@ -93,7 +108,7 @@ const batColor = computed(() => {
 // ── playback clock (drives map, and later video + Pi) ─────────────
 const currentTime = ref(0)        // seconds into the clean
 const playing     = ref(false)
-const speed       = ref(8)
+const speed       = ref(2)
 const SPEEDS      = [1, 2, 4, 8, 16, 32]
 const duration    = computed(() => Math.max(1, (sel.value?.cleaning_min ?? 0) * 60))
 const progress    = computed(() => Math.min(1, currentTime.value / duration.value))
@@ -113,12 +128,54 @@ function play() {
   if (!sel.value?.route?.length) return
   if (progress.value >= 1) currentTime.value = 0
   playing.value = true; lastTs = 0; raf = requestAnimationFrame(frame)
+  startDrive()
 }
-function pause() { playing.value = false; cancelAnimationFrame(raf) }
+function pause() { playing.value = false; cancelAnimationFrame(raf); stopDriveOutput() }
 function togglePlay() { playing.value ? pause() : play() }
 function seek(e: Event) { pause(); currentTime.value = Number((e.target as HTMLInputElement).value) }
-watch(sel, () => { pause(); currentTime.value = 0; svgScale.value = 1 })
-onBeforeUnmount(() => cancelAnimationFrame(raf))
+watch(sel, () => { pause(); currentTime.value = 0; svgScale.value = 1; driveError.value = '' })
+onBeforeUnmount(() => { cancelAnimationFrame(raf); stopDriveOutput() })
+
+// ── output drive: push the playback clock to the selected target ──────────────
+// Backend-paced: each play/seek/speed/target change (re)starts a paced replay at
+// the current clock offset, so the emulator/console stays in step with the map.
+async function drivePost(payload: Record<string, unknown>) {
+  try {
+    const r = await fetch(`${API}/robutek/drive`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const j = await r.json().catch(() => null)
+    driveError.value = j && j.ok === false ? (j.error || 'drive error') : ''
+  } catch {
+    driveError.value = 'API unreachable'
+  }
+}
+function startDrive() {
+  if (driveTarget.value === 'none' || !sel.value?.route?.length) return
+  drivePost({ action: 'play', target: driveTarget.value, mapping: driveMapping.value, t: currentTime.value, speed: speed.value, session: sel.value })
+}
+function stopDriveOutput() {
+  if (driveTarget.value !== 'none') drivePost({ action: 'pause' })
+}
+async function fetchMappings() {
+  try {
+    const r = await fetch(`${API}/robutek/mappings`)
+    const j = await r.json().catch(() => null)
+    driveMappings.value = (j && Array.isArray(j.mappings)) ? j.mappings : []
+    if (driveMappings.value.length && !driveMappings.value.includes(driveMapping.value))
+      driveMapping.value = driveMappings.value[0]
+  } catch { /* leave list empty */ }
+}
+watch(speed, () => { if (playing.value) startDrive() })
+watch(driveTarget, (t) => {
+  driveError.value = ''
+  if (t === 'none') { stopDriveOutput(); return }
+  if (!driveMappings.value.length) fetchMappings()
+  if (playing.value) startDrive()
+})
+watch(driveMapping, () => { if (playing.value) startDrive() })
+watch(() => props.active, (a) => { if (!a) pause() })
 
 // ── route geometry + zoom ─────────────────────────────────────────
 const svgScale = ref(1)
@@ -208,9 +265,6 @@ const head = computed<Point | null>(() => {
 const showFloor    = ref(false)   // floor-plan background layer (follow-up)
 const videoOffset  = ref(0)       // s; video plays at currentTime + offset
 const hasVideo     = computed(() => false)  // per-clean: true once a video exists for the open clean
-const piAvailable  = ref(false)   // true once the Pi-forward feature is wired/reachable
-const piEnabled    = ref(false)   // opt-in, decoupled from network presence
-const piHeadstart  = ref(0)       // ms lead to compensate Pi/Wii lag
 
 // ── formatters ────────────────────────────────────────────────────
 function fmt(min: number | null): string {
@@ -307,7 +361,7 @@ async function signIn() {
         <span v-if="fetchedAt && !loading" class="rb-fetched mono">{{ fetchedAt }}</span>
         <button class="rb-ghost" :class="{ accent: !connected }" :disabled="loading"
           @click="connected ? load() : openLogin()">
-          {{ loading ? 'refreshing…' : connected ? 'refresh' : 'sign in' }}
+          {{ loading ? 'refreshing…' : connected ? 'refresh' : 'Sign in' }}
         </button>
       </div>
     </header>
@@ -328,7 +382,7 @@ async function signIn() {
         <label class="rb-field"><span>Password</span>
           <input v-model="password" name="password" type="password" autocomplete="current-password" placeholder="••••••••" :disabled="submitting" required />
         </label>
-        <button class="rb-primary" type="submit" :disabled="submitting || !email || !password">{{ submitting ? 'signing in…' : 'Sign in' }}</button>
+        <button class="rb-primary" type="submit" :disabled="submitting || !email || !password">{{ submitting ? 'Signing in…' : 'Sign in' }}</button>
         <p v-if="loginError" class="rb-login-err">{{ loginError }}</p>
       </form>
     </div>
@@ -356,6 +410,7 @@ async function signIn() {
             </span>
             <span class="rb-row-tags">
               <span v-if="s.kind === 'sweep'" class="rb-tag sweep" title="sweep pass (map may be skewed)">sweep</span>
+              <PetIcon v-if="s.pet" class="rb-pet" title="pet detected during this clean" />
               <button class="rb-id-copy" :title="'copy session id\n' + s.session_id" @click.stop="copyId(s.session_id)">
                 <svg v-if="copied !== s.session_id" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
@@ -377,6 +432,12 @@ async function signIn() {
       <!-- stage: map (+ video when present) -->
       <section class="rb-stage">
         <div class="rb-map" :class="{ wide: !hasVideo }">
+          <!-- pet badge: this clean detected a pet. We store pet as a per-clean
+               boolean with no coords, so it's a corner marker (not a placed pin)
+               for now -- same glyph as the table row, via the shared PetIcon. -->
+          <div v-if="sel && sel.pet" class="rb-map-pet" title="a pet was detected during this clean">
+            <PetIcon /><span>pet seen</span>
+          </div>
           <template v-if="!sel">
             <div class="rb-map-empty">Select a clean to replay its route</div>
           </template>
@@ -398,9 +459,13 @@ async function signIn() {
               @pointerup="onPanEnd"
               @pointercancel="onPanEnd"
             >
-              <!-- full route preview: only when paused (while playing, reveal progressively) -->
+              <!-- full route preview ONLY before playback starts (progress 0), as a
+                   "here's the session" overview. Once you play OR seek forward it's
+                   progressive (drawn-so-far only) -- so a demo never reveals the whole
+                   house when you scrub. (Was v-if=!playing, which leaked the full path
+                   on every manual pause/seek.) -->
               <polyline
-                v-if="!playing"
+                v-if="progress === 0"
                 :points="sel.route.map(p => p.x + ',' + p.y).join(' ')"
                 fill="none" stroke="#9aa1ad" stroke-width="1.5"
                 vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"
@@ -446,16 +511,30 @@ async function signIn() {
         <select v-model.number="speed"><option v-for="x in SPEEDS" :key="x" :value="x">{{ x }}×</option></select>
       </label>
 
-      <!-- video / Pi: appear only once the feature is actually available -->
-      <template v-if="hasVideo || piAvailable">
+      <!-- output target: where the clock is sent. Disabled animates only the map;
+           Console (Raspberry Pi) is offered only when the pi node is present. -->
+      <span class="rb-tx-sep" />
+      <label class="rb-tx-ctl" title="Where playback is sent">
+        <span>Output</span>
+        <select v-model="driveTarget">
+          <option value="none">Disabled</option>
+          <option value="keyboard">Emulator (Virtual Keyboard)</option>
+          <option value="pi" :disabled="!piPresent">Console (Raspberry Pi)</option>
+        </select>
+      </label>
+      <label v-if="driveTarget !== 'none' && driveMappings.length" class="rb-tx-ctl" title="Event → controller mapping (config)">
+        <span>Mapping</span>
+        <select v-model="driveMapping">
+          <option v-for="m in driveMappings" :key="m" :value="m">{{ m }}</option>
+        </select>
+      </label>
+      <span v-if="driveError" class="rb-drive-err mono" :title="driveError">{{ driveError }}</span>
+
+      <template v-if="hasVideo">
         <span class="rb-tx-sep" />
-        <label v-if="hasVideo" class="rb-tx-ctl" title="video start offset">
+        <label class="rb-tx-ctl" title="Video start offset">
           <span>video</span>
           <input type="number" v-model.number="videoOffset" step="1" /><span class="mono">s</span>
-        </label>
-        <label v-if="piAvailable" class="rb-tx-ctl" :class="{ off: !piEnabled }" title="forward playback to the Raspberry Pi (opt-in)">
-          <input type="checkbox" v-model="piEnabled" /><span>Pi</span>
-          <input type="number" v-model.number="piHeadstart" step="50" :disabled="!piEnabled" title="head-start (ms)" /><span class="mono">ms</span>
         </label>
       </template>
     </footer>
@@ -566,6 +645,14 @@ async function signIn() {
 .rb-row-tags { display: flex; align-items: center; gap: 5px; }
 .rb-tag { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: var(--surface-3); color: var(--text-muted); }
 .rb-tag.sweep { background: #fef3c7; color: #92580a; }
+.rb-pet { font-size: 14px; color: var(--accent); flex-shrink: 0; }
+.rb-map-pet {
+  position: absolute; top: var(--sp-3); left: var(--sp-3); z-index: 2;
+  display: flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm);
+  font-size: 12px; font-weight: 600; color: var(--accent);
+}
 .rb-id-copy {
   display: grid; place-items: center; width: 26px; height: 26px; padding: 0;
   border: 0; background: none; color: var(--text-faint); cursor: pointer; border-radius: var(--r-sm);
@@ -582,7 +669,7 @@ async function signIn() {
 
 /* stage */
 .rb-stage { flex: 1; display: flex; min-width: 0; background: var(--surface-2); }
-.rb-map { flex: 1; position: relative; display: grid; place-items: center; min-width: 0; background: var(--surface); }
+.rb-map { flex: 1; position: relative; display: grid; place-items: center; min-width: 0; min-height: 0; background: var(--surface); }
 .rb-svg { width: 100%; height: 100%; }
 .rb-map-empty { display: flex; flex-direction: column; gap: 4px; align-items: center; color: var(--text-muted); font-size: 14px; }
 .rb-map-empty-t { font-weight: 600; color: var(--text); }
@@ -594,6 +681,15 @@ async function signIn() {
 }
 .rb-chip.off { opacity: 0.7; }
 .rb-video { width: 42%; border-left: 1px solid var(--line); background: #000; }
+
+/* Tall/narrow window (e.g. Pluto docked beside Dolphin): stack map over video
+   instead of side-by-side, so each keeps usable width. No video yet -> the map
+   just takes the whole stage as today; this only kicks in once a video pane
+   renders. */
+@media (max-aspect-ratio: 1 / 1) {
+  .rb-stage { flex-direction: column; }
+  .rb-video { width: 100%; height: 42%; border-left: 0; border-top: 1px solid var(--line); }
+}
 
 /* ── transport ── */
 .rb-transport {
@@ -620,4 +716,5 @@ async function signIn() {
 }
 .rb-tx-ctl input[type="number"] { width: 48px; }
 .rb-tx-sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 var(--sp-1); }
+.rb-drive-err { font-size: 11px; color: var(--bad, #c0392b); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

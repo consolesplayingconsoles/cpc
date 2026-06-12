@@ -36,11 +36,6 @@ export function useDeploy(getNodes: () => NodeMap) {
   }
 
   function deploy(id: string) {
-    if (id === 'host') {
-      fetch(`${API_BASE}/workspace/${id}`, { method: 'POST' })
-      return
-    }
-
     const startedAt    = Date.now()
     deploying.value    = id
     deployOutput.value = { ...deployOutput.value, [id]: { raw: '', ok: null, step: 'starting', startedAt } }
@@ -95,10 +90,6 @@ export function useDeploy(getNodes: () => NodeMap) {
     }
   }
 
-  async function openLocal(id: string) {
-    await fetch(`${API_BASE}/open/${id}`, { method: 'POST' })
-  }
-
   function clearOutput(id: string) {
     deployOutput.value = { ...deployOutput.value, [id]: null }
   }
@@ -108,6 +99,6 @@ export function useDeploy(getNodes: () => NodeMap) {
   return {
     deploying, deployOutput, lastDurations,
     showToast, toastConsoleName, toastDuration,
-    deploy, openLocal, clearOutput, dismissToast,
+    deploy, clearOutput, dismissToast,
   }
 }

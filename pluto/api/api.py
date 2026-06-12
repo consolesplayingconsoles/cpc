@@ -179,8 +179,9 @@ def _claude_reply(messages_snapshot):
 
 
 def _is_allowed_origin(origin):
-    """Allow localhost (incl. *.localhost like pluto.localhost) and RFC-1918 LAN."""
-    if re.match(r'^https?://(localhost|127\.0\.0\.1|[a-z0-9-]+\.localhost)(:\d+)?$', origin):
+    """Allow localhost (incl. multi-label *.localhost like pluto.localhost and
+    pluto.dev.localhost) and RFC-1918 LAN."""
+    if re.match(r'^https?://(localhost|127\.0\.0\.1|([a-z0-9-]+\.)+localhost)(:\d+)?$', origin):
         return True
     # 192.168.x.x, 10.x.x.x, 172.16-31.x.x
     if re.match(
@@ -196,7 +197,7 @@ def _is_allowed_origin(origin):
 
 REQUIRED_VARS = ["GATEWAY_IP"]
 
-CONSOLE_IDS = ["wii", "dc", "ps3", "gba", "ws", "batocera", "dreame", "birdbuddy", "pi"]
+NODE_IDS = ["wii", "dc", "ps3", "gba", "ws", "batocera", "dreame", "birdbuddy", "pi", "pluto", "vmu"]
 
 # Consoles whose OS is fixed by definition — used as the badge default so it shows
 # even when the node is offline (TTL detection only works on a live reply).
@@ -335,7 +336,7 @@ def ip_to_node(base_dir, config):
     host_ip = config.get("HOST_IP", "").strip()
     if host_ip:
         mapping[host_ip] = "pluto"
-    for node_id in CONSOLE_IDS:
+    for node_id in NODE_IDS:
         env = load_env(console_env_path(base_dir, node_id))
         ip  = env.get("HOST_IP", "").strip()
         if ip:
@@ -349,6 +350,64 @@ def node_for_ua(ua):
         if sig in low:
             return node
     return None
+
+
+# ── Robutek drive: dev-only vacuum-replay -> emulator/console output ──────────
+# The Pluto playback clock drives a controller Sink via cpc_python_core. Lazy
+# everything: cpc-python-client isn't on the deployed headless box, and the one
+# working sink (KeyboardSink) needs pynput + macOS Accessibility -- so this whole
+# feature degrades to a clean JSON error anywhere but the dev Mac.
+_drive_lock  = threading.Lock()
+_drive_state = {"sink": None, "thread": None, "stop": None}
+
+
+def _drive_libs(base_dir):
+    """Import the bridge libs from the sibling cpc-python-client (dev checkout)."""
+    repo_root = os.path.dirname(base_dir)
+    cpc = os.path.join(repo_root, "cpc-python-client")
+    if cpc not in sys.path:
+        sys.path.insert(0, cpc)
+    from cpc_python_core import controller
+    from cpc_python_core.bridges import dreame_events
+    return controller, dreame_events
+
+
+def _drive_stop():
+    with _drive_lock:
+        st = _drive_state
+        stop, th, sink = st["stop"], st["thread"], st["sink"]
+        st["stop"] = st["thread"] = st["sink"] = None
+    if stop:
+        stop.set()
+    if th:
+        th.join(timeout=1.0)
+    if sink:
+        try:
+            sink.release_all()
+        except Exception:
+            pass
+
+
+def _drive_play(controller, events, mapping, sink, t0, speed):
+    _drive_stop()
+    stop = threading.Event()
+
+    def run():
+        try:
+            controller.drive_from(events, mapping, sink, t0=t0, speed=speed,
+                                  should_stop=stop.is_set)
+        except Exception as exc:
+            print("  [drive] %s" % exc)
+        finally:
+            try:
+                sink.release_all()
+            except Exception:
+                pass
+
+    th = threading.Thread(target=run, daemon=True)
+    with _drive_lock:
+        _drive_state.update(sink=sink, thread=th, stop=stop)
+    th.start()
 
 
 # ── Request handler ──────────────────────────────────────────────────────────
@@ -545,8 +604,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif len(parts) == 3 and parts[0] == "deploy" and parts[2] == "stream":
             self._handle_deploy_stream(parts[1])
 
+        elif parsed.path == "/robutek/mappings":
+            self._handle_mappings()
+
         else:
             self._send(404, {"error": "not found"})
+
+    def _handle_mappings(self):
+        """List available mapping stems from the root mappings store (dev-only)."""
+        try:
+            controller, _ = _drive_libs(self.__class__.base_dir)
+            self._send(200, {"mappings": controller.list_mappings()})
+        except Exception:
+            self._send(200, {"mappings": []})
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -558,9 +628,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_dreame_login()
         elif parsed.path == "/dreame/logout":
             self._handle_dreame_logout()
-        elif len(parts) == 2 and parts[0] == "smb":
-            self._handle_smb(parts[1])
-        elif len(parts) == 2 and parts[0] in ("open", "workspace"):
+        elif parsed.path == "/robutek/drive":
+            self._handle_drive()
+        elif len(parts) == 2 and parts[0] == "workspace":
             self._handle_open(action=parts[0], target_node=parts[1])
         else:
             self._send(404, {"error": "not found"})
@@ -640,33 +710,81 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # ── Existing handlers (unchanged) ─────────────────────────────────────────
 
     def _handle_open(self, action, target_node):
-        key = {"open": "LOCAL_PATH", "workspace": "WORKSPACE_PATH"}.get(action)
-        if not key:
-            self._send(404, {"error": "unknown action"})
-            return
-        path = self.__class__.config.get(key, "").strip()
+        # CODE button — open WORKSPACE_PATH (the source checkout) in the IDE. This
+        # runs on the API host, so it's host-local by nature: only meaningful when
+        # Pluto runs on your workstation, not headless on the box. (SMB shares are
+        # opened client-side in the browser, never here.)
+        path = self.__class__.config.get("WORKSPACE_PATH", "").strip()
         if not path:
-            self._send(400, {"error": "%s not configured" % key})
+            self._send(400, {"error": "WORKSPACE_PATH not configured"})
             return
         path = os.path.expanduser(path)
         print("  [OPEN:%s] -> %s" % (action, path))
         open_path(path)
         self._send(200, {"status": "opened", "path": path, "target": target_node})
 
-    def _handle_smb(self, node_id):
-        base_dir  = self.__class__.base_dir
-        env_path  = console_env_path(base_dir, node_id)
-        if not os.path.exists(env_path):
-            self._send(400, {"error": "no env file for %s" % node_id})
+    def _handle_drive(self):
+        """POST /robutek/drive {action, target, session, t, speed, mapping}.
+
+        Drives the selected output from the Pluto playback clock. action 'play'
+        (re)starts a paced replay from offset t at speed; 'pause'/'stop' release.
+        Dev-only: returns {ok:false, error} (never 500) when the libs/sink/target
+        aren't available, so the UI can surface it without breaking.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+        except (ValueError, json.JSONDecodeError):
+            self._send(400, {"error": "invalid json"})
             return
-        console_cfg = load_env(env_path)
-        smb_url = console_cfg.get("SMB_PATH", "").strip()
-        if not smb_url:
-            self._send(400, {"error": "SMB_PATH not configured for %s" % node_id})
+
+        action = body.get("action")
+        if action in ("pause", "stop"):
+            _drive_stop()
+            self._send(200, {"ok": True})
             return
-        print("  [SMB] %s -> %s" % (node_id, smb_url))
-        open_path(smb_url)
-        self._send(200, {"status": "opened", "smb": smb_url})
+        if action != "play":
+            self._send(400, {"error": "unknown action"})
+            return
+
+        target = body.get("target")
+        if target == "pi":
+            self._send(200, {"ok": False,
+                "error": "Console (Raspberry Pi) output isn't wired yet (Pico pending)."})
+            return
+        if target != "keyboard":
+            self._send(200, {"ok": False, "error": "unknown target: %s" % target})
+            return
+
+        try:
+            controller, dreame_events = _drive_libs(self.__class__.base_dir)
+        except Exception as exc:
+            self._send(200, {"ok": False, "error": "drive libs unavailable: %s" % exc})
+            return
+        try:
+            mapping = controller.load_mapping(body.get("mapping") or "dreame-to-gamecube")
+        except Exception as exc:
+            self._send(200, {"ok": False, "error": "mapping: %s" % exc})
+            return
+        try:
+            # the mapping carries its own per-emulator keys (its "keys" section)
+            sink = controller.KeyboardSink(keyset="arrows", button_keys=mapping.get("keys"))
+        except Exception as exc:
+            self._send(200, {"ok": False,
+                "error": "keyboard sink: %s -- pip install pynput, run the API under that "
+                         "interpreter, and grant the terminal Accessibility." % exc})
+            return
+
+        session = body.get("session") or {}
+        events = dreame_events.events_from_route(session)
+        if not events:
+            self._send(200, {"ok": False, "error": "no route in session"})
+            return
+        _drive_play(controller, events, mapping, sink,
+                    float(body.get("t") or 0.0), float(body.get("speed") or 1.0))
+        print("  [drive] play target=%s t=%.1f speed=%g events=%d" % (
+            target, float(body.get("t") or 0.0), float(body.get("speed") or 1.0), len(events)))
+        self._send(200, {"ok": True, "events": len(events), "target": target})
 
     def _handle_deploy_stream(self, node_id):
         """Stream deploy output as Server-Sent Events.
@@ -739,21 +857,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         base_dir = self.__class__.base_dir
         nodes    = {}
 
-        nodes["host"] = {
-            "id":     "host",
-            "name":   cfg.get("NODE_NAME", "Host"),
-            "ip":     "127.0.0.1",
-            "color":  cfg.get("UI_PRIMARY_COLOR") or None,
-            "status": "up",
-            "parent": "gateway",
-            "smb":    None,
-            "deploy": bool(cfg.get("WORKSPACE_PATH", "").strip()),
-            "folder": bool(cfg.get("LOCAL_PATH", "").strip()),
-            # Host runs locally, so detect its OS exactly via platform.system().
-            "os":     _detect_os(cfg, {
-                "Darwin": "macos", "Linux": "linux", "Windows": "windows",
-            }.get(platform.system())),
-        }
+        # Pluto itself is just another discovered node: it carries a real HOST_IP
+        # (the box the dashboard is deployed to) and is pinged like everything
+        # else — no phantom localhost entry. It's built by the NODE_IDS loop below
+        # from pluto/.env, which adds its CODE/DEPLOY/FILES buttons.
 
         gateway_ip = cfg.get("GATEWAY_IP", "").strip()
         if gateway_ip:
@@ -771,7 +878,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "os":     None,   # network gear — no OS badge
             }
 
-        for node_id in CONSOLE_IDS:
+        for node_id in NODE_IDS:
             full_path = console_env_path(base_dir, node_id)
             if not os.path.exists(full_path):
                 continue
@@ -784,6 +891,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ssh_user = console_cfg.get("SSH_USER", "").strip()
             ssh_key  = console_cfg.get("SSH_KEY_PATH", "").strip()
             deployable = bool(ip and (alias or (ssh_user and ssh_key)))
+            # CODE opens the source in the IDE on THIS host, so only surface it
+            # where the checkout actually exists — true on the dev workstation,
+            # false on the deployed headless box. Deterministic (no build flag).
+            ws         = os.path.expanduser(console_cfg.get("WORKSPACE_PATH", "").strip())
+            has_code   = bool(ws) and os.path.isdir(ws)
             up, det_os = probe(ip) if ip else (False, None)
             status = ("up" if up else "down") if ip else "unconfigured"
             nodes[node_id] = {
@@ -795,6 +907,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "smb":    smb,
                 "deploy": deployable,
                 "folder": bool(smb),
+                "code":   has_code,
                 # Precedence: .env OS= override > known-by-definition > probe TTL.
                 # (e.g. OS=native on a Wii homebrew build to drop the Tux.)
                 "os":     _detect_os(console_cfg, KNOWN_OS.get(node_id) or det_os),
@@ -852,7 +965,11 @@ def run():
 
     # Shared client-side chat config (commands, mention tokens) — one source of
     # truth, also imported by the Vue app; inlined into the /retro page.
-    chat_path = os.path.join(parent_dir, "src", "chat.json")
+    # Dev runs from the repo (src/chat.json); a deploy flattens it to the root so
+    # the box never needs the whole src/ tree shipped — just dist/ + this file.
+    chat_path = os.path.join(parent_dir, "chat.json")
+    if not os.path.exists(chat_path):
+        chat_path = os.path.join(parent_dir, "src", "chat.json")
     try:
         with open(chat_path) as f:
             Handler.chat_config = json.load(f)

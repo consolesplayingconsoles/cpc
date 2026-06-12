@@ -1,0 +1,17 @@
+[Unit]
+Description=CPC Pluto dashboard (API :7700 + SPA :5173)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# serve.sh launches the stdlib API + static SPA and waits on them; systemd's
+# cgroup kill makes sure both children die when the unit stops/restarts.
+ExecStart=/opt/pluto/serve.sh
+Restart=always
+RestartSec=3
+# Keep the dashboard reachable across both crashes and reboots.
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target
