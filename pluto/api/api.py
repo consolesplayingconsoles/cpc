@@ -18,6 +18,8 @@ import threading
 import time
 import random
 import re
+import atexit
+import signal
 from datetime import datetime
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
@@ -203,7 +205,7 @@ NODE_IDS = ["wii", "dc", "ps3", "gba", "ws", "batocera", "dreame", "birdbuddy", 
 # even when the node is offline (TTL detection only works on a live reply).
 # Batocera is a Linux distro, full stop. The Wii is deliberately absent: it may run
 # Wii Linux today and a native homebrew .dol tomorrow, so we let it be detected.
-KNOWN_OS = {"batocera": "linux"}
+KNOWN_OS = {"batocera": "linux", "pi": "linux"}
 
 # ── In-memory message store ──────────────────────────────────────────────────
 # Ephemeral by design: cleared on restart.
@@ -766,9 +768,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception as exc:
             self._send(200, {"ok": False, "error": "mapping: %s" % exc})
             return
+        speed = float(body.get("speed") or 1.0)
+        # base movement duty (mapping) scaled by speed: 1x = robot pace, the speed
+        # multipliers ramp toward a full sprint (capped at 1.0).
+        eff_duty = min(1.0, float(mapping.get("move_duty", 1.0)) * max(speed, 1e-6))
         try:
             # the mapping carries its own per-emulator keys (its "keys" section)
-            sink = controller.KeyboardSink(keyset="arrows", button_keys=mapping.get("keys"))
+            sink = controller.KeyboardSink(keyset="arrows", button_keys=mapping.get("keys"),
+                                           move_duty=eff_duty)
         except Exception as exc:
             self._send(200, {"ok": False,
                 "error": "keyboard sink: %s -- pip install pynput, run the API under that "
@@ -1006,6 +1013,18 @@ def run():
 
     server = _Server(("0.0.0.0", PORT), Handler)
 
+    # Release any held synthetic keys on shutdown, so a kill/restart mid-drive can't
+    # strand a keydown -- Dolphin's background input would hold it forever and the
+    # character keeps walking. atexit covers normal exit + Ctrl-C; the SIGTERM
+    # handler covers `kill` (e.g. start-pluto.sh restarting the API).
+    atexit.register(_drive_stop)
+
+    def _on_term(_sig, _frame):
+        _drive_stop()
+        os._exit(0)
+
+    signal.signal(signal.SIGTERM, _on_term)
+
     print("  api listening on 0.0.0.0:%d" % PORT)
     if host_ip:
         print("  LAN: http://%s:%d" % (host_ip, PORT))
@@ -1016,6 +1035,7 @@ def run():
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n  stopping...")
+        _drive_stop()
         server.server_close()
 
 

@@ -1,7 +1,7 @@
 {
-  "_comment": "SHARED mapping: Dreame events => top-down RELATIVE-steering keys (GTA2-style). GTA2/GTA1 use tank controls -- forward = accelerate in the current facing, left/right = steer/rotate -- NOT absolute 8-way. So this IGNORES heading and holds FORWARD while steering on the vacuum's turn events. The 'keys' block is THIS setup's emulator keys (per-game/emulator config): GTA2-on-PSX via DuckStation has S=accelerate (PSX X), A=reverse (PSX Square), arrows=steer. Edit 'keys' to match your binding. Tune: raise/lower the turn pulse ms for sharper/softer steering; lower events.TURN_DEG for more frequent steering input.",
-  "controller": "Top-down relative steering (GTA2)",
-  "keys": { "FWD": "s", "REV": "a", "STEERL": "left", "STEERR": "right" },
+  "_comment": "Dreame events => GTA2 (tank/relative steering: hold accelerate-forward, steer left/right on turns -- GTA2's movement is non-standard, NOT absolute analog; for analog use dreame-to-gamecube / dreame-to-dreamcast). 'keys' = the DC/Flycast binding (we run it there, never the PS1 one): X=accelerate (FWD), D=reverse (REV), arrows=steer. Edit 'keys' if your binding differs. Tune the turn pulse ms for sharper/softer steering; lower events.TURN_DEG for more frequent steering.",
+  "controller": "GTA2 (tank / relative steering)",
+  "keys": { "FWD": "x", "REV": "d", "STEERL": "left", "STEERR": "right" },
   "rules": {
     "start":      { "press": "FWD" },
     "turn":       { "left":  { "pulse": "STEERL", "ms": 160 },

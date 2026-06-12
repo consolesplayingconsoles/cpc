@@ -54,6 +54,9 @@ def main():
     ap.add_argument("--mapping", default="dreame-to-gamecube",
                     help="shared mapping name (cpc_python_core/mappings) or a path")
     ap.add_argument("--speed", type=float, default=1.0, help=">1 = faster than real time")
+    ap.add_argument("--duty", type=float, default=None,
+                    help="base movement duty at 1x (0-1; lower=slower/tiptoe). Scaled "
+                         "by --speed. Overrides the mapping's move_duty. 1=full sprint.")
     args = ap.parse_args()
 
     blob = json.load(open(args.routes))
@@ -78,8 +81,13 @@ def main():
         print("[pi] opening Dolphin pipe %s (waiting for Dolphin to read)..." % path)
         sink = controller.DolphinPipeSink(path)
     elif args.sink == "keyboard":
+        # base duty at 1x (mapping or --duty) scaled by speed: 1x = robot pace,
+        # multipliers ramp toward a full sprint (capped at 1.0).
+        base_duty = args.duty if args.duty is not None else float(mapping.get("move_duty", 1.0))
+        eff_duty = min(1.0, base_duty * max(args.speed, 1e-6))
         try:
-            sink = controller.KeyboardSink(keyset=args.keys, button_keys=mapping.get("keys"))
+            sink = controller.KeyboardSink(keyset=args.keys, button_keys=mapping.get("keys"),
+                                           move_duty=eff_duty)
         except Exception as exc:
             print("[ERROR] keyboard sink unavailable: %s" % exc)
             print("        pip install pynput, and grant this terminal Accessibility")

@@ -201,7 +201,8 @@ class KeyboardSink(Sink):
     and the emulator window focused.
     """
 
-    def __init__(self, keyset="arrows", button_keys=None, deadzone=0.18):
+    def __init__(self, keyset="arrows", button_keys=None, deadzone=0.18,
+                 move_duty=1.0, duty_period=0.1):
         super(KeyboardSink, self).__init__()
         from pynput.keyboard import Controller, Key  # lazy: Mac-dev only
         self._kb = Controller()
@@ -230,6 +231,26 @@ class KeyboardSink(Sink):
         self._button_keys = {op: self._resolve(k) for op, k in raw.items()}
         self._dir_down = set()   # held direction keys
         self._btn_down = set()   # held button keys
+        # Movement throttle: the keyboard is binary (full-tilt or nothing), so to
+        # move SLOWER than a sprint we duty-cycle the direction keys -- held for
+        # duty*period, released for the rest. 1.0 = hold (full speed, no ticker).
+        # The CALLER scales this by playback speed, so 1x clock = robot pace
+        # ("tiptoe") and the speed multipliers ramp it toward a full sprint.
+        self._duty = max(0.0, min(1.0, move_duty))
+        self._want_dirs = set()    # direction keys the duty ticker should pulse
+        self._ticker = None
+        if 0.0 < self._duty < 1.0:
+            # Keep each press >= ~1.5 frames @60fps (MIN_ON) so the emulator
+            # actually registers it at very low duty, and stretch the OFF time to
+            # preserve the duty RATIO -- a tiny duty pulses slower, not shorter
+            # than a frame (which the emulator would just drop -> no movement).
+            MIN_ON = 0.025
+            self._on_t = max(MIN_ON, duty_period * self._duty)
+            self._off_t = self._on_t * (1.0 - self._duty) / self._duty
+            import threading
+            self._tick_stop = threading.Event()
+            self._ticker = threading.Thread(target=self._duty_loop, daemon=True)
+            self._ticker.start()
 
     def _resolve(self, k):
         """A key name/char -> a pynput key: 'left'/'enter'/... -> special keys; a
@@ -250,11 +271,39 @@ class KeyboardSink(Sink):
             want.add(self._dir["right"])
         elif x < 0.5 - self._dead:
             want.add(self._dir["left"])
+        if self._ticker is not None:
+            self._want_dirs = want    # the duty ticker presses/releases these
+            return
         for k in want - self._dir_down:
             self._kb.press(k)
         for k in self._dir_down - want:
             self._kb.release(k)
         self._dir_down = want
+
+    def _duty_loop(self):
+        """Background ticker: hold the desired direction keys for on_t, release for
+        off_t, so movement averages to `duty` of full speed. The OFF period is
+        chunked so a direction change or a stop is picked up promptly."""
+        import time
+        while not self._tick_stop.is_set():
+            dirs = set(self._want_dirs)
+            if not dirs:
+                time.sleep(0.02)
+                continue
+            for k in dirs:
+                self._kb.press(k)
+            time.sleep(self._on_t)
+            for k in dirs:
+                try:
+                    self._kb.release(k)
+                except Exception:
+                    pass
+            slept = 0.0
+            while (slept < self._off_t and not self._tick_stop.is_set()
+                   and set(self._want_dirs) == dirs):
+                chunk = min(0.05, self._off_t - slept)
+                time.sleep(chunk)
+                slept += chunk
 
     def press(self, btn):
         k = self._button_keys.get(btn)
@@ -278,7 +327,16 @@ class KeyboardSink(Sink):
         self._kb.release(k)
 
     def release_all(self):
-        for k in list(self._dir_down | self._btn_down):
+        t = self._ticker
+        if t is not None:
+            self._tick_stop.set()
+            self._want_dirs = set()
+            try:
+                t.join(timeout=0.3)
+            except Exception:
+                pass
+            self._ticker = None
+        for k in list(self._dir_down | self._btn_down) + list(self._dir.values()):
             try:
                 self._kb.release(k)
             except Exception:
