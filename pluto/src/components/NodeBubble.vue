@@ -15,22 +15,22 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  toggle:       []
-  deploy:       []
-  'open-local': []
-  'open-smb':   []
+  toggle:           []
+  deploy:           []
+  'open-workspace': []
+  'open-smb':       []
 }>()
 
 // Each action button renders only when its feature is configured (signalled by
-// the API). The host's folder opens LOCAL_PATH; a console's folder opens its SMB.
+// the API). DEPLOY ships code over SSH; FILES opens the node's SMB share. CODE
+// opens the source in the IDE on the API host — the API only sets `code` when
+// that checkout actually exists on the host, so it's present on the dev box and
+// absent on the deployed headless one. Deterministic, no build-flag dependence.
+const showCodeBtn   = computed(() => !!props.node.code)
 const showDeployBtn = computed(() => props.node.deploy)
 const showFolderBtn = computed(() => props.node.folder)
-function handleFolder() {
-  if (props.id === 'host') emit('open-local')
-  else emit('open-smb')
-}
 
-const hoveredBtn = ref<'deploy' | 'folder' | null>(null)
+const hoveredBtn = ref<'code' | 'deploy' | 'folder' | null>(null)
 
 const bubbleR     = computed(() => props.isActive ? BUBBLE_OPEN : props.isHovered ? BUBBLE_HOV : BUBBLE_R)
 const statusColor = computed(() => {
@@ -60,6 +60,7 @@ const iconOpacity  = computed(() => {
 const BTN_SPACING = 28
 const visibleBtns = computed(() => {
   const arr: string[] = []
+  if (showCodeBtn.value)   arr.push('code')
   if (showDeployBtn.value) arr.push('deploy')
   if (showFolderBtn.value) arr.push('folder')
   return arr
@@ -142,6 +143,27 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
     <text :y="ipY" text-anchor="middle" class="node-ip" @click.stop="emit('toggle')">{{ node.ip }}</text>
 
     <g v-if="isActive" @click.stop :transform="nameLines.length > 1 ? 'translate(0,5)' : ''">
+      <!-- CODE — open the source checkout in the IDE (pluto host only) -->
+      <g
+        v-if="showCodeBtn"
+        class="action-btn"
+        :transform="`translate(${btnX('code')}, 0)`"
+        @click.stop="emit('open-workspace')"
+        @mouseenter="hoveredBtn = 'code'"
+        @mouseleave="hoveredBtn = null"
+      >
+        <circle cx="0" cy="90" r="11" fill="var(--color-secondary)"/>
+        <g transform="translate(0,90) scale(0.6)" style="pointer-events:none">
+          <path d="M-2,-6 Q-5,-6 -5,-3 L-5,0 Q-7,1.5 -5,3 L-5,6 Q-5,9 -2,9" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2,-6 Q5,-6 5,-3 L5,0 Q7,1.5 5,3 L5,6 Q5,9 2,9" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+        <g v-if="hoveredBtn === 'code'">
+          <rect :x="tooltipX('CODE')" y="108" :width="tooltipW('CODE')" height="14" rx="4" fill="#1a1a1a" opacity="0.85"/>
+          <text x="0" y="119" text-anchor="middle" class="tooltip-label">CODE</text>
+        </g>
+      </g>
+
+      <!-- DEPLOY — ship code to the node over SSH -->
       <g
         v-if="showDeployBtn"
         class="action-btn"
@@ -158,27 +180,22 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
           </circle>
         </g>
         <g transform="translate(0,90) scale(0.6)" style="pointer-events:none">
-          <g v-if="id !== 'host'">
-            <line x1="0" y1="6" x2="0" y2="-4" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-            <polyline points="-4,0 0,-5 4,0" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-            <line x1="-5" y1="6" x2="5" y2="6" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-          </g>
-          <g v-else>
-            <path d="M-2,-6 Q-5,-6 -5,-3 L-5,0 Q-7,1.5 -5,3 L-5,6 Q-5,9 -2,9" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M2,-6 Q5,-6 5,-3 L5,0 Q7,1.5 5,3 L5,6 Q5,9 2,9" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </g>
+          <line x1="0" y1="6" x2="0" y2="-4" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+          <polyline points="-4,0 0,-5 4,0" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <line x1="-5" y1="6" x2="5" y2="6" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
         </g>
         <g v-if="hoveredBtn === 'deploy'">
-          <rect :x="tooltipX(id === 'host' ? 'CODE' : 'DEPLOY')" y="108" :width="tooltipW(id === 'host' ? 'CODE' : 'DEPLOY')" height="14" rx="4" fill="#1a1a1a" opacity="0.85"/>
-          <text x="0" y="119" text-anchor="middle" class="tooltip-label">{{ id === 'host' ? 'CODE' : 'DEPLOY' }}</text>
+          <rect :x="tooltipX('DEPLOY')" y="108" :width="tooltipW('DEPLOY')" height="14" rx="4" fill="#1a1a1a" opacity="0.85"/>
+          <text x="0" y="119" text-anchor="middle" class="tooltip-label">DEPLOY</text>
         </g>
       </g>
 
+      <!-- FILES — open the node's SMB share -->
       <g
         v-if="showFolderBtn"
         class="action-btn"
         :transform="`translate(${btnX('folder')}, 0)`"
-        @click.stop="handleFolder"
+        @click.stop="emit('open-smb')"
         @mouseenter="hoveredBtn = 'folder'"
         @mouseleave="hoveredBtn = null"
       >
@@ -188,8 +205,8 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
           <path d="M-7,-3 L-4,-6 L0,-6 L3,-3" fill="none" stroke="white" stroke-width="2.5" stroke-linejoin="round"/>
         </g>
         <g v-if="hoveredBtn === 'folder'">
-          <rect :x="tooltipX(id === 'host' ? 'DIR' : 'FILES')" y="108" :width="tooltipW(id === 'host' ? 'DIR' : 'FILES')" height="14" rx="4" fill="#1a1a1a" opacity="0.85"/>
-          <text x="0" y="119" text-anchor="middle" class="tooltip-label">{{ id === 'host' ? 'DIR' : 'FILES' }}</text>
+          <rect :x="tooltipX('FILES')" y="108" :width="tooltipW('FILES')" height="14" rx="4" fill="#1a1a1a" opacity="0.85"/>
+          <text x="0" y="119" text-anchor="middle" class="tooltip-label">FILES</text>
         </g>
       </g>
     </g>

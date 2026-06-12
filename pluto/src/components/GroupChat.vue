@@ -65,7 +65,7 @@ const unconfiguredMembers = computed(() =>
 
 // ── Message helpers ──────────────────────────────────────────────────────────
 function nodeFor(id: string): NodeData | null {
-  return props.nodes[id] ?? props.nodes[id === 'pluto' ? 'host' : id] ?? null
+  return props.nodes[id] ?? null
 }
 
 function iconFor(id: string): string | undefined {

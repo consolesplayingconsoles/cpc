@@ -2,9 +2,14 @@
 # ─────────────────────────────────────────────────────────────
 #  start-pluto.sh — launch the Pluto dashboard from the repo root.
 #
-#  Starts both halves of Pluto:
+#  Starts both halves of Pluto for local dev:
 #    - the API server   (python3 pluto/api/api.py, port 7700)
-#    - the web dev server (yarn dev, port 5173)
+#    - the web dev server (yarn dev) at http://pluto.dev.localhost:5173/
+#
+#  The dev host is kept distinct from prod (pluto.localhost, via pluto/serve.sh)
+#  so the browser password manager doesn't mix dev/prod DreameHome logins.
+#  *.localhost resolves to loopback in the browser — no /etc/hosts needed.
+#  Override the web port with VITE_PORT (use 80 + sudo for the bare URL).
 #
 #  Ctrl+C stops both. Run from anywhere — it locates its own dir.
 #
@@ -13,6 +18,9 @@
 #    --web   start only the web dev server
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
+
+VITE_PORT="${VITE_PORT:-5173}"
+DEV_HOST="pluto.dev.localhost"
 
 # Resolve this script's own directory absolutely — robust whether invoked as
 # ./start-pluto.sh, bash start-pluto.sh, or sh start-pluto.sh (no BASH_SOURCE).
@@ -44,14 +52,19 @@ if [[ "$WANT_API" == 1 ]] && lsof -nP -iTCP:7700 -sTCP:LISTEN >/dev/null 2>&1; t
 fi
 
 if [[ "$WANT_API" == 1 ]]; then
-  echo "==> Pluto API   http://localhost:7700"
-  ( cd "$PLUTO" && exec python3 api/api.py ) &
+  # Prefer python3.11 — it's the interpreter that has pynput, which the Robutek
+  # "Output → Emulator (Virtual Keyboard)" drive needs (the API synthesizes the
+  # keys). api.py is pure stdlib, so any python3 runs it; 3.11 just unlocks drive.
+  # (Run this from a terminal with Accessibility granted, or the keys are dropped.)
+  PY=python3; command -v python3.11 >/dev/null 2>&1 && PY=python3.11
+  echo "==> Pluto API   http://localhost:7700   ($PY)"
+  ( cd "$PLUTO" && exec "$PY" api/api.py ) &
   pids+=($!)
 fi
 
 if [[ "$WANT_WEB" == 1 ]]; then
-  echo "==> Pluto web   http://localhost:5173"
-  ( cd "$PLUTO" && exec yarn dev ) &
+  echo "==> Pluto web   http://${DEV_HOST}:${VITE_PORT}/"
+  ( cd "$PLUTO" && exec yarn dev --port "$VITE_PORT" --strictPort ) &
   pids+=($!)
 fi
 

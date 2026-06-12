@@ -6,8 +6,11 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     host: true,
-    // Allow http://pluto.localhost:5174 so the browser's password manager treats
-    // Pluto as its own origin (distinct from a bare localhost) for the DreameHome login.
-    allowedHosts: ['localhost', 'pluto.localhost', '.localhost'],
+    // Distinct *.localhost origins so the browser's password manager keeps Pluto's
+    // DreameHome logins separate (and treats Pluto as its own origin):
+    //   dev  -> http://pluto.dev.localhost:5173   (start.sh — Vite HMR)
+    //   prod -> http://pluto.localhost            (serve.sh — built dist/)
+    // Any sub-label of `.localhost` resolves to loopback in the browser.
+    allowedHosts: ['localhost', '.localhost'],
   },
 })

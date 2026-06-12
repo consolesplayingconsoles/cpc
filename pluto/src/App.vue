@@ -13,6 +13,10 @@ const { messages } = useMessages()
 
 const dreameName = computed(() => nodes.value['dreame']?.name ?? 'dreame')
 
+// True under `vite dev` (the dev starter), compiled to false in the built dist
+// shipped to the box — drives the DEV badge and the dev-only CODE button.
+const isDev = import.meta.env.DEV
+
 const showOffline    = ref(false)
 const activeTab      = ref<'network' | 'chat' | 'robutek'>('network')
 const lastSeenMsgId  = ref(0)
@@ -81,6 +85,7 @@ const displayNodes = computed(() => {
           <circle cx="22.2" cy="7.9" r="1.6" fill="var(--accent)"/>
           <circle cx="1.8" cy="16.1" r="1.6" fill="var(--accent)"/>
         </svg><span>CPC Pluto</span>
+        <span v-if="isDev" class="dev-badge" title="Vite dev server — not the deployed build">DEV</span>
       </span>
       <span class="header-controls">
         <label class="toggle-label">
@@ -131,7 +136,7 @@ const displayNodes = computed(() => {
         :show-offline="showOffline"
       />
 
-      <Robutek v-show="activeTab === 'robutek'" :name="dreameName" :active="activeTab === 'robutek'" />
+      <Robutek v-show="activeTab === 'robutek'" :name="dreameName" :active="activeTab === 'robutek'" :nodes="nodes" />
     </main>
 
     <footer class="footer">
@@ -167,6 +172,21 @@ const displayNodes = computed(() => {
   color: var(--accent);
   display: flex;
   align-items: center;
+}
+
+.dev-badge {
+  margin-left: 10px;
+  padding: 2px 7px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+  background: var(--accent-soft, rgba(245, 166, 35, 0.14));
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  text-transform: uppercase;
+  /* a quiet mode chip — clearly a state cue, not part of the brand accent usage */
 }
 
 .header-controls {
@@ -245,7 +265,12 @@ const displayNodes = computed(() => {
   top: 14px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 20;
+  /* Layering vs the network diagram (all in the same root stacking context):
+     diagram bg/idle nodes (1) < tabs (2) = deploy terminal (2, later in DOM, so
+     it paints above the tabs) < active bubble (3). The terminal's 1/2/3 ladder
+     is fixed by the bubble overlay, so we drop the tabs to slot under it rather
+     than bumping the terminal. */
+  z-index: 2;
   display: flex;
   background: rgba(238, 240, 243, 0.9);   /* one unified track holds all three */
   backdrop-filter: blur(10px);

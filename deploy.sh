@@ -3,7 +3,9 @@
 #  deploy.sh — build locally and ship to a console node via SSH
 #
 #  Usage: ./deploy.sh <path-to-env-file>
-#  Example: ./deploy.sh wii/.env
+#  Examples:
+#    ./deploy.sh wii/.env          # console node
+#    ./deploy.sh pluto/.env        # Pluto host (ships api/ + dist/)
 #
 #  Lines starting with ##STEP:<name> are parsed by the Pluto API
 #  to emit structured SSE step events. Keep them on their own line.
@@ -68,6 +70,55 @@ else
 fi
 
 echo "deploying ${NODE_NAME} (${CUSTOM_SSH_ALIAS:-${SSH_USER}@${HOST_IP}})"
+
+# ── Pluto host deploy ─────────────────────────────────────────
+# Pluto is pure-stdlib Python (api/) + a pre-built static SPA (dist/). The API
+# reads connections.json and src/chat.json at runtime, so ship those too. No
+# vendoring, no pip — the box only needs python3 to serve.
+if [[ "$CONSOLE_DIR" == "pluto" ]]; then
+  REMOTE_PLUTO="/opt/pluto"
+
+  echo "##STEP:build"
+  npm --prefix pluto run build
+  echo "build ok"
+
+  echo "##STEP:sync"
+  $SSH "rm -rf ${REMOTE_PLUTO} && mkdir -p ${REMOTE_PLUTO}"
+  # Ship the runnable surface only — the pre-built SPA (dist/), the stdlib API
+  # (api/), the runtime data, the starter, and the systemd unit. No src/, no
+  # node_modules. --strip-components=1 drops the leading 'pluto/'.
+  tar --no-xattrs --no-fflags --no-mac-metadata \
+      -cf - pluto/api pluto/dist pluto/connections.json pluto/serve.sh pluto/deploy/pluto.service \
+      | $SSH "tar -xf - --strip-components=1 -C ${REMOTE_PLUTO}"
+  # chat.json lives under src/ in the repo; flatten it to the root so we never
+  # ship the whole src/ tree (api.py looks for it at the root first).
+  $SSH "cat > ${REMOTE_PLUTO}/chat.json" < pluto/src/chat.json
+  $SSH "cat > ${REMOTE_PLUTO}/.env"      < "$ENV_FILE"
+  $SSH "chmod +x ${REMOTE_PLUTO}/serve.sh"
+  # Mappings are CONFIG/DATA that PLUTO reads to translate vacuum events -> ops and
+  # hand them to the Pi. They ship WITH Pluto (single source of truth) and live at
+  # /opt/pluto/mappings (serve.sh points CPC_MAPPINGS there). Deliberately NOT in
+  # the cpc-python-client console deploy -- shipping them to the Pi too would drift.
+  # (No --strip-components: keep the mappings/ dir intact.)
+  tar --no-xattrs --no-fflags --no-mac-metadata -cf - mappings \
+      | $SSH "tar -xf - -C ${REMOTE_PLUTO}"
+  echo "sync ok"
+
+  # Restart so the new code takes effect. If pluto.service is installed under a
+  # live systemd, restart it (zero-touch); otherwise leave a one-time hint.
+  echo "##STEP:restart"
+  if $SSH "[ -d /run/systemd/system ] && systemctl cat pluto.service >/dev/null 2>&1"; then
+    $SSH "systemctl restart pluto" && echo "restarted via systemd (pluto.service)"
+  else
+    echo "not managed by systemd — restart manually:  /opt/pluto/serve.sh"
+    echo "  one-time setup (Debian w/ systemd):"
+    echo "    ssh ${CUSTOM_SSH_ALIAS:-${SSH_USER}@${HOST_IP}} 'cp /opt/pluto/deploy/pluto.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now pluto'"
+  fi
+
+  echo "##STEP:done"
+  echo "deploy complete — http://${HOST_IP}:5173  (API :7700)"
+  exit 0
+fi
 
 # ── Step 1: vendor ────────────────────────────────────────────
 echo "##STEP:vendor"

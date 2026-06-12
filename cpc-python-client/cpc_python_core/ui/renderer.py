@@ -341,11 +341,7 @@ def render_menu(config: dict, items: list, cursor: int):
         else:
             out.append(f"{pad}{secondary}   {item}{RESET}")
 
-    btn_up      = config.get("BUTTON_UP",      "UP")
-    btn_down    = config.get("BUTTON_DOWN",    "DOWN")
-    btn_confirm = config.get("BUTTON_CONFIRM", "enter")
-    btn_cancel  = config.get("BUTTON_CANCEL",  "B")
-    hint = f"{btn_up}/{btn_down} navigate   {btn_confirm}/Enter select   {btn_cancel}/Q quit"
+    hint = "UP/DOWN navigate   Enter select   Q quit"
     out.append("")
     out.append(_center(f"{secondary}{hint}{RESET}", term_width))
 
