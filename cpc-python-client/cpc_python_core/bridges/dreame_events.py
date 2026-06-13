@@ -97,7 +97,16 @@ def events_from_route(session, move_deg=MOVE_DEG, turn_deg=TURN_DEG, jump_factor
         "date":         session.get("date"),
     })]
     if session.get("pet"):
-        out.append(_ev(0.0, PET, True))
+        # We only know a pet was seen *this clean* (per-clean boolean -- the data has
+        # no detection time/location), so place one representative "encounter" at the
+        # route midpoint: a real point on the path, ~halfway through. Sorted into the
+        # stream by time below.
+        if n >= 2:
+            mid = n // 2
+            out.append(_ev((mid / float(n - 1)) * duration, PET,
+                           {"x": route[mid]["x"], "y": route[mid]["y"]}))
+        else:
+            out.append(_ev(0.0, PET, True))
 
     if n >= 2:
         # Median step length sets the reposition (path discontinuity) threshold.
@@ -137,6 +146,7 @@ def events_from_route(session, move_deg=MOVE_DEG, turn_deg=TURN_DEG, jump_factor
             prev_brg = brg
 
     out.append(_ev(duration, END, {"completed": bool(session.get("completed"))}))
+    out.sort(key=lambda e: e["t"])   # PET sits mid-route, so re-order by time (stable)
     return out
 
 

@@ -507,8 +507,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         default = os.path.normpath(os.path.join(self.__class__.base_dir, "..", "..", "dreamehome-client"))
         return cfg.get("DREAME_CLIENT_PATH", "").strip() or default
 
-    def _dreame_history(self):
+    def _dreame_history(self, sync=False):
         routes = os.path.join(self._dreame_repo(), "routes.json")
+        # On an explicit refresh (sync) with a live session, pull incrementally via
+        # the lib -- only new cleans download a route -- and refresh the cache. A
+        # plain load (or any failure) just reads the cached file.
+        if sync and dreame_session.is_authenticated():
+            try:
+                live = dreame_session.sync_history(routes)
+                if live is not None:
+                    return live
+            except Exception:
+                pass
         if os.path.exists(routes):
             try:
                 with open(routes, encoding="utf-8") as f:
@@ -521,8 +531,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 
     def _serve_dreame(self):
-        """Robutek tab state: live device state from the in-memory session (or
-        authenticated:false so the UI shows the login form) + cached history."""
+        """Robutek tab state: live device state + history. History is the cached
+        routes.json on a plain load; on ?sync=1 (the refresh button) it's re-pulled
+        live via the logged-in client (incremental) and the cache is refreshed."""
         authed = dreame_session.is_authenticated()
         device = dreame_session.state() if authed else None
         error = None
@@ -530,10 +541,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # session went stale / device unreachable
             authed = False
             error = "session expired -- please log in again"
+        sync = urllib.parse.parse_qs(
+            urllib.parse.urlparse(self.path).query).get("sync", ["0"])[0] == "1"
         self._send(200, {
             "authenticated": authed,
             "device":  device,
-            "history": self._dreame_history(),
+            "history": self._dreame_history(sync=sync),
             "updated": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
             "error":   error,
         })

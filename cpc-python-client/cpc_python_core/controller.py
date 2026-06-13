@@ -202,7 +202,7 @@ class KeyboardSink(Sink):
     """
 
     def __init__(self, keyset="arrows", button_keys=None, deadzone=0.18,
-                 move_duty=1.0, duty_period=0.1):
+                 move_duty=1.0, duty_period=0.5):
         super(KeyboardSink, self).__init__()
         from pynput.keyboard import Controller, Key  # lazy: Mac-dev only
         self._kb = Controller()
@@ -240,10 +240,12 @@ class KeyboardSink(Sink):
         self._want_dirs = set()    # direction keys the duty ticker should pulse
         self._ticker = None
         if 0.0 < self._duty < 1.0:
-            # Keep each press >= ~1.5 frames @60fps (MIN_ON) so the emulator
-            # actually registers it at very low duty, and stretch the OFF time to
-            # preserve the duty RATIO -- a tiny duty pulses slower, not shorter
-            # than a frame (which the emulator would just drop -> no movement).
+            # `duty_period` is the BURST LENGTH (on_t = period*duty). It must be long
+            # enough that a 3D character breaks past its walk->run ramp during a burst
+            # -- too short and it stutter-WALKS and feels slow no matter the speed; the
+            # speed dial sets the on/off RATIO. Keep each press >= ~1.5 frames @60fps
+            # (MIN_ON) so the emulator registers it at low duty, and stretch the OFF
+            # time to preserve the ratio.
             MIN_ON = 0.025
             self._on_t = max(MIN_ON, duty_period * self._duty)
             self._off_t = self._on_t * (1.0 - self._duty) / self._duty

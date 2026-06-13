@@ -10,7 +10,10 @@ password manager autofills, so it's one click).
 the dreamehome-client repo is on sys.path.
 """
 import sys
+import os
+import json
 import threading
+from datetime import datetime
 
 _lock = threading.RLock()
 _client = None
@@ -87,3 +90,44 @@ def state():
         "battery": st.get("battery"),
         "online": st.get("online"),
     }
+
+
+def sync_history(out_path):
+    """Pull cleaning history via the logged-in client and refresh the on-disk
+    cache at out_path. INCREMENTAL: only NEW sessions download/decode a route
+    (cached ones keep theirs), so a routine refresh is one event-list call plus a
+    download for each new clean. Returns the session list (newest first), or None
+    if not authenticated or the pull fails -- the caller falls back to the cache.
+    Mirrors dreamehome.commands.routes_main, but reuses our in-memory client."""
+    with _lock:
+        client = _client
+    if client is None:
+        return None
+    existing, meta = {}, {}
+    try:
+        if os.path.exists(out_path):
+            with open(out_path, encoding="utf-8") as f:
+                old = json.load(f)
+            for s in old.get("sessions", []):
+                sid = str(s.get("session_id", ""))
+                if sid:
+                    existing[sid] = s
+            meta = {k: v for k, v in old.items() if k != "sessions"}
+    except Exception:
+        existing, meta = {}, {}
+    try:
+        merged, _new = client.sync_cleaning(existing=existing)
+    except Exception:
+        return None   # network/session failure -> caller uses the cached file
+    sessions = sorted(merged.values(),
+                      key=lambda s: s.get("start_ts") or s.get("date") or "",
+                      reverse=True)
+    try:   # write back the cache (best-effort; a failed write just means next
+        payload = dict(meta)        # refresh re-pulls)
+        payload["sessions"] = sessions
+        payload["exported"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+    except Exception:
+        pass
+    return sessions
