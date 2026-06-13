@@ -56,6 +56,9 @@ const driveError    = ref('')
 // which event→controller mapping (config file) to drive with; list from the API
 const driveMapping  = ref('dreame-to-gamecube')
 const driveMappings = ref<string[]>([])
+// Output + Mapping selectors visible? Collapse them (settings toggle) so a
+// recording needn't reveal it's emulation — the drive keeps running regardless.
+const showDrive     = ref(true)
 
 const data      = ref<DreameData | null>(null)
 const loading   = ref(false)
@@ -108,8 +111,13 @@ const batColor = computed(() => {
 // ── playback clock (drives map, and later video + Pi) ─────────────
 const currentTime = ref(0)        // seconds into the clean
 const playing     = ref(false)
-const speed       = ref(2)
+const speed       = ref(4)   // default 4x: below this the character looks too slow/boring; duty scales with speed so 4x stays coherent
 const SPEEDS      = [1, 2, 4, 8, 16, 32]
+// Speed as +/- buttons, NOT a <select>: on macOS a native select changes value on
+// arrow keys and preventDefault can't stop it, so the synthetic stick keys walk it
+// mid-drive (you couldn't set speed without pausing). Buttons ignore arrow keys.
+const speedIdx    = computed(() => { const i = SPEEDS.indexOf(speed.value); return i < 0 ? 0 : i })
+function stepSpeed(d: number) { speed.value = SPEEDS[Math.min(SPEEDS.length - 1, Math.max(0, speedIdx.value + d))] }
 const duration    = computed(() => Math.max(1, (sel.value?.cleaning_min ?? 0) * 60))
 const progress    = computed(() => Math.min(1, currentTime.value / duration.value))
 
@@ -262,6 +270,24 @@ function onWheel(e: WheelEvent) {
 }
 function resetZoom() { svgScale.value = 1 }
 
+// Pet "encounter" pin. The data is a per-clean boolean (no coords), so we mark one
+// representative encounter at the route MIDPOINT -- a real path point, ~halfway --
+// matching where the backend fires the A press. petPin.t uses the capture layer's
+// linear time (i/(n-1) * duration); the paw appears as the replay reaches it.
+const petPin = computed(() => {
+  const r = sel.value?.route
+  if (!sel.value?.pet || !r || !r.length) return null
+  const mid = Math.floor(r.length / 2)
+  const t = r.length > 1 ? (mid / (r.length - 1)) * duration.value : 0
+  return { x: r[mid].x, y: r[mid].y, t }
+})
+const pawScale = computed(() => {
+  const b = baseBox.value?.fullVB
+  // ~5% of the VISIBLE map; dividing by svgScale keeps the marker a constant
+  // on-screen size instead of ballooning as you zoom in. (glyph viewBox is 24u)
+  return b ? (Math.max(b[2], b[3]) * 0.05) / (24 * svgScale.value) : 1
+})
+
 // ── click-drag pan (only once zoomed past the fit view) ───────────
 const isPanning = ref(false)
 let panSX = 0, panSY = 0, panCx0 = 0, panCy0 = 0
@@ -301,7 +327,6 @@ const head = computed<Point | null>(() => {
 })
 
 // ── layers / consumers ────────────────────────────────────────────
-const showFloor    = ref(false)   // floor-plan background layer (follow-up)
 const videoOffset  = ref(0)       // s; the robot clip plays at currentTime + offset
 
 // 3rd-person clip of the REAL robot, loaded from a local file (object-URL, no
@@ -362,10 +387,12 @@ function copyId(id: string) {
 }
 
 // ── cache-first load: history/map render without a session ────────
-async function load() {
+async function load(sync = false) {
   loading.value = true
   try {
-    const r = await fetch(`${API}/dreame`)
+    // ?sync=1 (the refresh button) re-pulls history live via the logged-in client
+    // and refreshes the cache; a plain load reads the cache (fast tab switches).
+    const r = await fetch(`${API}/dreame${sync ? '?sync=1' : ''}`)
     if (r.ok) {
       data.value = await r.json()
     } else {
@@ -432,7 +459,7 @@ async function signIn() {
       <div class="rb-bar-right">
         <span v-if="fetchedAt && !loading" class="rb-fetched mono">{{ fetchedAt }}</span>
         <button class="rb-ghost" :class="{ accent: !connected }" :disabled="loading"
-          @click="connected ? load() : openLogin()">
+          @click="connected ? load(true) : openLogin()">
           {{ loading ? 'refreshing…' : connected ? 'refresh' : 'Sign in' }}
         </button>
       </div>
@@ -504,12 +531,9 @@ async function signIn() {
       <!-- stage: map (+ video when present) -->
       <section class="rb-stage">
         <div class="rb-map" :class="{ wide: !hasVideo }">
-          <!-- pet badge: this clean detected a pet. We store pet as a per-clean
-               boolean with no coords, so it's a corner marker (not a placed pin)
-               for now -- same glyph as the table row, via the shared PetIcon. -->
-          <div v-if="sel && sel.pet" class="rb-map-pet" title="a pet was detected during this clean">
-            <PetIcon /><span>pet seen</span>
-          </div>
+          <!-- the pet "encounter" is now a placed paw pin inside the route SVG
+               (below), appearing as playback reaches the representative midpoint -->
+
           <template v-if="!sel">
             <div class="rb-map-empty">Select a clean to replay its route</div>
           </template>
@@ -555,15 +579,26 @@ async function signIn() {
                 <line :x1="baseBox.cx" :y1="(baseBox.cy ?? 0) - 1" :x2="baseBox.cx" :y2="(baseBox.cy ?? 0) + 1"
                   stroke="var(--text-muted)" stroke-width="6" vector-effect="non-scaling-stroke" />
               </g>
+              <!-- pet "encounter": a placed paw at the representative route midpoint,
+                   persistent so it's visible the moment a pet clean is selected; the
+                   drive still fires its A press when the replay reaches that point -->
+              <g v-if="petPin" class="rb-map-paw"
+                 :transform="`translate(${petPin.x},${petPin.y}) scale(${pawScale})`">
+                <circle r="14" class="rb-paw-bg" vector-effect="non-scaling-stroke" />
+                <g transform="translate(-12,-12.4)">
+                  <ellipse cx="12" cy="16.5" rx="5.2" ry="4.3" />
+                  <ellipse cx="5.6" cy="11" rx="2.1" ry="2.7" />
+                  <ellipse cx="18.4" cy="11" rx="2.1" ry="2.7" />
+                  <ellipse cx="9.4" cy="6.8" rx="2" ry="2.6" />
+                  <ellipse cx="14.6" cy="6.8" rx="2" ry="2.6" />
+                </g>
+              </g>
               <!-- robot head -->
               <circle v-if="head" :cx="head.x" :cy="head.y" r="9" fill="var(--accent)" vector-effect="non-scaling-stroke" />
             </svg>
 
             <div class="rb-map-tools">
-              <label class="rb-chip" :class="{ off: !showFloor }" title="floor-plan layer (coming soon)">
-                <input type="checkbox" v-model="showFloor" disabled /><span>floor plan</span>
-              </label>
-              <button v-if="svgScale > 1" class="rb-chip" @click="resetZoom">reset zoom</button>
+              <button v-if="svgScale > 1" class="rb-chip" @click="resetZoom">Reset zoom</button>
             </div>
           </template>
         </div>
@@ -583,14 +618,27 @@ async function signIn() {
       </button>
       <span class="rb-time mono">{{ fmtClock(currentTime) }} / {{ fmtClock(duration) }}</span>
       <input class="rb-scrub" type="range" min="0" :max="duration" step="1" :value="currentTime" @input="seek" :disabled="!sel?.route?.length" />
-      <label class="rb-tx-ctl" title="playback speed">
-        <select v-model.number="speed" @keydown="blockArrows"><option v-for="x in SPEEDS" :key="x" :value="x">{{ x }}×</option></select>
-      </label>
+      <div class="rb-speed" title="Playback speed">
+        <button class="rb-step" @click="stepSpeed(-1)" :disabled="speedIdx <= 0" title="Slower" aria-label="Slower">−</button>
+        <span class="rb-speed-val mono">{{ speed }}×</span>
+        <button class="rb-step" @click="stepSpeed(1)" :disabled="speedIdx >= SPEEDS.length - 1" title="Faster" aria-label="Faster">+</button>
+      </div>
 
-      <!-- output target: where the clock is sent. Disabled animates only the map;
-           Console (Raspberry Pi) is offered only when the pi node is present. -->
+      <!-- output target: where the clock is sent. Collapsible behind the settings
+           toggle so a recording needn't reveal the output/mapping (IP); the drive
+           keeps running while hidden. Disabled animates only the map; Console
+           (Raspberry Pi) is offered only when the pi node is present. -->
       <span class="rb-tx-sep" />
-      <label class="rb-tx-ctl" title="Where playback is sent">
+      <button class="rb-tx-gear" :class="{ on: showDrive }" @click="showDrive = !showDrive"
+              :title="showDrive ? 'Hide output settings' : 'Show output settings'" aria-label="Toggle output settings">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <line x1="2.5" y1="5" x2="13.5" y2="5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          <line x1="2.5" y1="11" x2="13.5" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          <circle cx="6" cy="5" r="2.1" fill="var(--surface)" stroke="currentColor" stroke-width="1.5" />
+          <circle cx="10" cy="11" r="2.1" fill="var(--surface)" stroke="currentColor" stroke-width="1.5" />
+        </svg>
+      </button>
+      <label v-if="showDrive" class="rb-tx-ctl" title="Where playback is sent">
         <span>Output</span>
         <select v-model="driveTarget" @keydown="blockArrows">
           <option value="none">Disabled</option>
@@ -598,13 +646,13 @@ async function signIn() {
           <option value="pi" :disabled="!piPresent">Console (Raspberry Pi)</option>
         </select>
       </label>
-      <label v-if="driveTarget !== 'none' && driveMappings.length" class="rb-tx-ctl" title="Event → controller mapping (config)">
+      <label v-if="showDrive && driveTarget !== 'none' && driveMappings.length" class="rb-tx-ctl" title="Event → controller mapping (config)">
         <span>Mapping</span>
         <select v-model="driveMapping" @keydown="blockArrows">
           <option v-for="m in driveMappings" :key="m" :value="m">{{ m }}</option>
         </select>
       </label>
-      <span v-if="driveError" class="rb-drive-err mono" :title="driveError">{{ driveError }}</span>
+      <span v-if="showDrive && driveError" class="rb-drive-err mono" :title="driveError">{{ driveError }}</span>
 
       <span class="rb-tx-sep" />
       <input ref="fileInput" type="file" accept="video/*" class="rb-file" @change="onPickVideo" />
@@ -723,13 +771,9 @@ async function signIn() {
 .rb-tag { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: var(--surface-3); color: var(--text-muted); }
 .rb-tag.sweep { background: #fef3c7; color: #92580a; }
 .rb-pet { font-size: 14px; color: var(--accent); flex-shrink: 0; }
-.rb-map-pet {
-  position: absolute; top: var(--sp-3); left: var(--sp-3); z-index: 2;
-  display: flex; align-items: center; gap: 5px;
-  padding: 3px 9px; border-radius: 999px;
-  background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm);
-  font-size: 12px; font-weight: 600; color: var(--accent);
-}
+.rb-map-paw { fill: var(--accent); pointer-events: none; animation: rb-paw-in 0.25s ease-out; }
+.rb-paw-bg { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
+@keyframes rb-paw-in { from { opacity: 0; } to { opacity: 1; } }
 .rb-id-copy {
   display: grid; place-items: center; width: 26px; height: 26px; padding: 0;
   border: 0; background: none; color: var(--text-faint); cursor: pointer; border-radius: var(--r-sm);
@@ -773,6 +817,21 @@ async function signIn() {
 }
 .rb-tx-btn:hover:not(:disabled) { border-color: var(--accent); }
 .rb-tx-btn:disabled { opacity: 0.5; cursor: default; }
+.rb-tx-gear {
+  display: grid; place-items: center; padding: 4px; cursor: pointer; flex-shrink: 0;
+  border: 0; background: transparent; color: var(--text-muted); border-radius: var(--r-sm);
+}
+.rb-tx-gear.on { color: var(--text); }
+.rb-tx-gear:hover { color: var(--accent); }
+.rb-speed { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
+.rb-speed-val { font-size: 12px; min-width: 30px; text-align: center; color: var(--text); }
+.rb-step {
+  font: inherit; font-size: 14px; line-height: 1; width: 22px; height: 22px; cursor: pointer;
+  display: grid; place-items: center; color: var(--text);
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface);
+}
+.rb-step:hover:not(:disabled) { border-color: var(--accent); }
+.rb-step:disabled { opacity: 0.4; cursor: default; }
 
 /* Tall/narrow window (e.g. Pluto docked beside Dolphin): stack map over video
    instead of side-by-side, so each keeps usable width. No video yet -> the map
