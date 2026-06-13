@@ -188,11 +188,30 @@ async function drivePost(payload: Record<string, unknown>) {
     driveError.value = 'API unreachable'
   }
 }
+// Heartbeat while driving so the API knows we're still here. If it stops (tab
+// closed/crashed before a 'pause' lands), the API's watchdog stops the drive and
+// releases the keys -- otherwise the route keeps replaying and the character runs
+// away. Fires while the page is visible (the side-by-side recording setup), which
+// is exactly when it matters.
+let keepaliveTimer = 0
+function startKeepalive() {
+  if (keepaliveTimer) return
+  keepaliveTimer = window.setInterval(() => {
+    if (driveTarget.value === 'none') return
+    fetch(`${API}/robutek/drive`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'keepalive' }),
+    }).catch(() => {})
+  }, 2000)
+}
+function stopKeepalive() { if (keepaliveTimer) { clearInterval(keepaliveTimer); keepaliveTimer = 0 } }
 function startDrive() {
   if (driveTarget.value === 'none' || !sel.value?.route?.length) return
   drivePost({ action: 'play', target: driveTarget.value, mapping: driveMapping.value, t: currentTime.value, speed: speed.value, session: sel.value })
+  startKeepalive()
 }
 function stopDriveOutput() {
+  stopKeepalive()
   if (driveTarget.value !== 'none') drivePost({ action: 'pause' })
 }
 // Best-effort stop when the tab/window goes away (close, refresh, navigate): a
@@ -228,16 +247,21 @@ watch(() => props.active, (a) => { if (!a) pause() })
 const svgScale = ref(1)
 const svgCx = ref(0)
 const svgCy = ref(0)
+// The route's x-axis arrives mirrored vs the real room (left/right flipped), so the
+// map was drawing the house backwards. Flip x through one isolated constant — applied
+// to the path, bounds, charger, paw and head — so the map matches reality (and the
+// un-mirrored video). The game (Sonic) needs no flip: its level isn't the room.
+const MIRROR_X = -1
 
 const baseBox = computed(() => {
   const s = sel.value
   if (!s?.route?.length) return null
   const pts = s.route
-  const xs = pts.map(p => p.x), ys = pts.map(p => p.y)
+  const xs = pts.map(p => MIRROR_X * p.x), ys = pts.map(p => p.y)
   const minX = Math.min(...xs), maxX = Math.max(...xs)
   const minY = Math.min(...ys), maxY = Math.max(...ys)
   const pad = Math.max(maxX - minX, maxY - minY) * 0.07
-  const cx = s.charger_mm?.[0] ?? null, cy = s.charger_mm?.[1] ?? null
+  const cx = s.charger_mm ? MIRROR_X * s.charger_mm[0] : null, cy = s.charger_mm?.[1] ?? null
   const bx0 = (cx !== null ? Math.min(minX, cx) : minX) - pad
   const by0 = (cy !== null ? Math.min(minY, cy) : minY) - pad
   const bx1 = (cx !== null ? Math.max(maxX, cx) : maxX) + pad
@@ -279,7 +303,7 @@ const petPin = computed(() => {
   if (!sel.value?.pet || !r || !r.length) return null
   const mid = Math.floor(r.length / 2)
   const t = r.length > 1 ? (mid / (r.length - 1)) * duration.value : 0
-  return { x: r[mid].x, y: r[mid].y, t }
+  return { x: MIRROR_X * r[mid].x, y: r[mid].y, t }
 })
 const pawScale = computed(() => {
   const b = baseBox.value?.fullVB
@@ -317,13 +341,14 @@ const drawnPoints = computed(() => {
   const r = sel.value?.route ?? []
   if (!r.length) return ''
   const n = Math.max(1, Math.floor(progress.value * r.length))
-  return r.slice(0, n).map(p => `${p.x},${p.y}`).join(' ')
+  return r.slice(0, n).map(p => `${MIRROR_X * p.x},${p.y}`).join(' ')
 })
 const head = computed<Point | null>(() => {
   const r = sel.value?.route ?? []
   if (!r.length) return null
   const n = Math.min(r.length - 1, Math.max(0, Math.floor(progress.value * r.length) - 1))
-  return r[n] ?? null
+  const p = r[n]
+  return p ? { x: MIRROR_X * p.x, y: p.y } : null
 })
 
 // ── layers / consumers ────────────────────────────────────────────
@@ -353,12 +378,26 @@ function clearVideo() {
 function syncVideo() {
   const v = videoEl.value
   if (!v) return
-  v.playbackRate = Math.min(speed.value, 16)   // browsers cap fast playback ~16x
+  // Lock the clip's FULL length to the map's duration so they start AND end
+  // together. The Dreame's reported cleaning_min rarely equals the clip's real
+  // length, so without this they drift apart ("footage runs ahead"). `ratio`
+  // gently time-stretches the clip to fit (imperceptible on a vacuum); it's ~1
+  // when the lengths already match, so it does nothing in that case.
+  const ratio = (Number.isFinite(v.duration) && v.duration > 0 && duration.value > 0)
+    ? v.duration / duration.value : 1
+  v.playbackRate = Math.min(speed.value * ratio, 16)   // browsers cap fast playback ~16x
+  // If the offset puts the clip before its first frame (negative) or past its last,
+  // it's "not started yet / already over" relative to the map -> HOLD it paused at
+  // the nearest frame. Without this, a negative offset seeks back to 0 while it
+  // plays forward, every frame -> the jumpy loop.
+  let inRange = true
   if (Number.isFinite(v.duration)) {
-    const t = Math.max(0, Math.min(currentTime.value + videoOffset.value, v.duration))
+    const raw = videoOffset.value + currentTime.value * ratio
+    inRange = raw >= 0 && raw <= v.duration
+    const t = Math.max(0, Math.min(raw, v.duration))
     if (Math.abs(v.currentTime - t) > 0.34) v.currentTime = t
   }
-  if (playing.value) { if (v.paused) v.play().catch(() => {}) }
+  if (playing.value && inRange) { if (v.paused) v.play().catch(() => {}) }
   else if (!v.paused) v.pause()
 }
 watch([speed, videoOffset], syncVideo)
@@ -562,7 +601,7 @@ async function signIn() {
                    on every manual pause/seek.) -->
               <polyline
                 v-if="progress === 0"
-                :points="sel.route.map(p => p.x + ',' + p.y).join(' ')"
+                :points="sel.route.map(p => (MIRROR_X * p.x) + ',' + p.y).join(' ')"
                 fill="none" stroke="#9aa1ad" stroke-width="1.5"
                 vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"
               />
@@ -607,6 +646,7 @@ async function signIn() {
           <video ref="videoEl" :src="videoUrl || undefined" muted playsinline preload="auto"
                  @loadedmetadata="syncVideo"></video>
           <button class="rb-video-x" @click="clearVideo" title="Remove clip" aria-label="Remove clip">×</button>
+          <p class="rb-video-note"><strong>Actual footage:</strong> The game moves at the map's speed, which is constant because the robot stores the route but not the pace.</p>
         </div>
       </section>
     </div>
@@ -660,7 +700,7 @@ async function signIn() {
               title="Load a 3rd-person clip of the real robot, synced to playback">+ Robot Clip</button>
       <label v-else class="rb-tx-ctl" title="Nudge the clip's alignment vs the route (seconds)">
         <span>Clip</span>
-        <input type="number" v-model.number="videoOffset" step="1" /><span class="mono">s</span>
+        <input type="number" v-model.number="videoOffset" step="0.1" /><span class="mono">s</span>
       </label>
     </footer>
   </div>
@@ -801,8 +841,15 @@ async function signIn() {
   padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); cursor: pointer;
 }
 .rb-chip.off { opacity: 0.7; }
-.rb-video { width: 50%; position: relative; border-left: 1px solid var(--line); background: #000; padding: var(--sp-3); }
-.rb-video video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.rb-video { width: 50%; position: relative; display: flex; flex-direction: column; gap: var(--sp-2); border-left: 1px solid var(--line); background: #000; padding: var(--sp-3); }
+.rb-video video { flex: 1; min-height: 0; width: 100%; object-fit: contain; display: block; }
+.rb-video-note {
+  flex-shrink: 0; margin: 0; padding-top: var(--sp-2);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);   /* set apart from the footage */
+  font-size: 11px; line-height: 1.45; text-align: left;
+  color: rgba(255, 255, 255, 0.65);                  /* muted but legible, not hidden */
+}
+.rb-video-note strong { color: rgba(255, 255, 255, 0.9); font-weight: 600; }
 .rb-video-x {
   position: absolute; top: var(--sp-2); right: var(--sp-2);
   width: 24px; height: 24px; display: grid; place-items: center;

@@ -360,7 +360,8 @@ def node_for_ua(ua):
 # working sink (KeyboardSink) needs pynput + macOS Accessibility -- so this whole
 # feature degrades to a clean JSON error anywhere but the dev Mac.
 _drive_lock  = threading.Lock()
-_drive_state = {"sink": None, "thread": None, "stop": None}
+_drive_state = {"sink": None, "thread": None, "stop": None, "last_seen": 0.0}
+DRIVE_TIMEOUT = 6.0   # stop the drive if the frontend hasn't checked in for this long
 
 
 def _drive_libs(base_dir):
@@ -406,10 +407,26 @@ def _drive_play(controller, events, mapping, sink, t0, speed):
             except Exception:
                 pass
 
+    def watchdog():
+        # Stop the drive (releasing keys) if the frontend stops sending keepalives --
+        # e.g. the browser/tab closed or crashed and no 'pause' reached us. Without
+        # this the route keeps replaying and the character runs away (only an app
+        # with background input, like Dolphin, visibly shows it).
+        while not stop.wait(2.0):
+            with _drive_lock:
+                current = _drive_state.get("stop") is stop
+                last = _drive_state.get("last_seen", 0.0)
+            if not current:
+                return                       # a newer drive took over
+            if time.time() - last > DRIVE_TIMEOUT:
+                _drive_stop()
+                return
+
     th = threading.Thread(target=run, daemon=True)
     with _drive_lock:
-        _drive_state.update(sink=sink, thread=th, stop=stop)
+        _drive_state.update(sink=sink, thread=th, stop=stop, last_seen=time.time())
     th.start()
+    threading.Thread(target=watchdog, daemon=True).start()
 
 
 # ── Request handler ──────────────────────────────────────────────────────────
@@ -756,6 +773,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         action = body.get("action")
         if action in ("pause", "stop"):
             _drive_stop()
+            self._send(200, {"ok": True})
+            return
+        if action == "keepalive":
+            # heartbeat from the playing page; the watchdog stops the drive if these
+            # go silent (browser closed/crashed before a 'pause' reached us).
+            with _drive_lock:
+                _drive_state["last_seen"] = time.time()
             self._send(200, {"ok": True})
             return
         if action != "play":
