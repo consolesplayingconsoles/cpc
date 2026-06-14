@@ -303,7 +303,9 @@ STARTUP_MESSAGES = 50
 
 def _load_recent_messages(limit=STARTUP_MESSAGES):
     """Repopulate the in-memory feed from the tail of the on-disk log, so the chat
-    survives a restart. Resumes the id sequence past the highest loaded id."""
+    survives a restart. A log line needs only `sender` and `text` -- `id` is
+    reassigned and `ts` defaults to now, so history can be hand-fabricated by just
+    typing those two fields per line."""
     global _msg_seq
     if not _log_path or not os.path.exists(_log_path):
         return
@@ -312,6 +314,7 @@ def _load_recent_messages(limit=STARTUP_MESSAGES):
             lines = f.readlines()[-limit:]
     except Exception:
         return
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     loaded = []
     for line in lines:
         line = line.strip()
@@ -321,11 +324,19 @@ def _load_recent_messages(limit=STARTUP_MESSAGES):
             m = json.loads(line)
         except (ValueError, json.JSONDecodeError):
             continue
-        if isinstance(m, dict) and "id" in m and "sender" in m and "text" in m:
+        if isinstance(m, dict) and m.get("sender") and "text" in m:
             loaded.append(m)
     if loaded:
+        # Don't trust ids/timestamps in the log: older runs each restarted numbering
+        # at 1 (so ids aren't unique), and fabricated history may omit them entirely.
+        # Renumber into one clean monotonic sequence (file order = chronological) so
+        # the frontend's keys and since-polling stay correct; backfill missing ts.
+        for i, m in enumerate(loaded, start=1):
+            m["id"] = i
+            if not m.get("ts"):
+                m["ts"] = now
         _messages[:] = loaded
-        _msg_seq = max(m.get("id", 0) for m in loaded)
+        _msg_seq = len(loaded)
 
 
 # ── Shared helpers ───────────────────────────────────────────────────────────

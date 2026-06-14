@@ -87,6 +87,43 @@ function formatTime(ts: string) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
+// Full date + time, for the timestamp's hover tooltip.
+function formatFull(ts: string) {
+  return new Date(ts).toLocaleString([], {
+    weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  })
+}
+
+const sameDay = (a: Date, b: Date) =>
+  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+
+// Friendly day label for a date divider: Today / Yesterday / "Mon, Jun 9"
+// (with the year once it's not the current one).
+function formatDay(ts: string) {
+  const d = new Date(ts)
+  const now = new Date()
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1)
+  if (sameDay(d, now)) return 'Today'
+  if (sameDay(d, yesterday)) return 'Yesterday'
+  const opts: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric' }
+  if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric'
+  return d.toLocaleDateString([], opts)
+}
+
+// The date label to show ABOVE group `gi`, or null if it's the same calendar day
+// as the previous group. Now that the feed survives restarts it can span days.
+function dayDivider(gi: number): string | null {
+  const groups = messageGroups.value
+  const cur = groups[gi]?.messages[0]?.ts
+  if (!cur) return null
+  if (gi === 0) return formatDay(cur)
+  const prevMsgs = groups[gi - 1]?.messages
+  const prevTs = prevMsgs?.[prevMsgs.length - 1]?.ts
+  if (prevTs && sameDay(new Date(prevTs), new Date(cur))) return null
+  return formatDay(cur)
+}
+
 function formatMsg(text: string): Array<{ mention: boolean; text: string }> {
   return text.split(/(@\w+)/g).map((part, i) => ({ mention: i % 2 === 1, text: part }))
 }
@@ -419,7 +456,11 @@ function onKeydown(e: KeyboardEvent) {
       <!-- Right: feed + input -->
       <div class="chat-col">
         <div ref="feedEl" class="feed">
-          <div v-for="g in messageGroups" :key="g.key" class="msg-group">
+          <template v-for="(g, gi) in messageGroups" :key="g.key">
+            <div v-if="dayDivider(gi)" class="day-divider">
+              <span class="day-divider-label">{{ dayDivider(gi) }}</span>
+            </div>
+            <div class="msg-group">
             <ConsoleAvatar
               :id="g.sender"
               :icon="iconFor(g.sender)"
@@ -433,7 +474,7 @@ function onKeydown(e: KeyboardEvent) {
                 <span class="msg-name" :style="{ color: nameColor(g.sender) }">
                   {{ displayName(g.sender) }}
                 </span>
-                <span class="msg-time">{{ formatTime(g.messages[0].ts) }}</span>
+                <span class="msg-time" :title="formatFull(g.messages[0].ts)">{{ formatTime(g.messages[0].ts) }}</span>
               </div>
               <p v-for="m in g.messages" :key="m.id" class="msg-text">
                 <template v-for="(seg, si) in formatMsg(m.text)" :key="si">
@@ -441,7 +482,8 @@ function onKeydown(e: KeyboardEvent) {
                 </template>
               </p>
             </div>
-          </div>
+            </div>
+          </template>
 
           <div v-if="messageGroups.length === 0" class="feed-empty">
             No messages yet &mdash; say something
@@ -782,6 +824,29 @@ function onKeydown(e: KeyboardEvent) {
   display: flex;
   gap: 14px;
   padding: 7px 0;
+}
+
+/* date separator between days — a hairline rule with a centred day label */
+.day-divider {
+  display: flex;
+  align-items: center;
+  margin: 14px 0 6px;
+}
+.day-divider::before,
+.day-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.day-divider-label {
+  padding: 0 12px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 .msg-avatar  { flex-shrink: 0; margin-top: 2px; }
 
