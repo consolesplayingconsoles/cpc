@@ -196,7 +196,7 @@ class KeyboardSink(Sink):
     keyboard, but for 'just move' that reads as walking in the heading direction.
 
     pynput is imported lazily (Mac-dev only), so this module still imports on the
-    constrained consoles -- same pattern as dreame_wii's lazy miio. Needs
+    constrained consoles -- the same lazy-import pattern used for optional deps. Needs
     `pip install pynput`, macOS Accessibility permission for the sending process,
     and the emulator window focused.
     """

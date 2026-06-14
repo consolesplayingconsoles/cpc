@@ -22,7 +22,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("CPC_DEV", "1")
 
 from cpc_python_core.ui import renderer, menu as menu_mod, input as input_mod, actions
-from cpc_python_core.bridges import dreame_wii
 
 
 def _resolve_console() -> str:
@@ -71,10 +70,6 @@ def _build_dev_menu(config):
     if config.get("PLUTO_IP", "").strip():
         items.append("Chat")
         action_map["Chat"] = actions.chat_view
-
-    # dev: always offer the bridge so its view can be previewed locally
-    items.append("Dreame -> Wii")
-    action_map["Dreame -> Wii"] = actions.dreame_wii_view
 
     return items, action_map
 

@@ -1,0 +1,25 @@
+{
+  "_comment": "Network-diagram geometry -- hand-edited, like connections.json. The gateway is the origin everything hangs off (assumed 0,0; its spot on the canvas is set in NetworkDiagram.vue). The cloud hub sits directly below it (same x) at `cloudDy`. Every other node is an [dx, dy] pixel offset from its anchor: fromGateway (the LAN) or fromCloud (the cloud cluster). Add a node here + an icon in useIcons + (optionally) an edge in connections.json.",
+  "cloudDy": 300,
+  "fromGateway": {
+    "pi":        [-300,    0],
+    "pluto":     [ 250,    0],
+    "vmu":       [-150, -235],
+    "dc":        [ 150, -235],
+    "gba":       [-500, -230],
+    "wii":       [-320, -230],
+    "ws":        [-500,  -50],
+    "ps3":       [ 350, -230],
+    "birdbuddy": [-180,  160],
+    "dreame":    [ 150,  160],
+    "batocera":  [ 345,  160],
+    "saturn":    [-500,  120],
+    "megadrive": [-350,  215]
+  },
+  "fromCloud": {
+    "cloud_storage": [-250, 40],
+    "dreamehome":    [-100, 100],
+    "claude":        [ 100, 100],
+    "substack":      [ 250, 40]
+  }
+}

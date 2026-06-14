@@ -8,7 +8,7 @@
   { "from": "gba",      "to": "wii",     "label": "GBA Link"           },
   { "from": "gba",      "to": "pi",     "label": "GBA Link / Pico"     },
   { "from": "ws",       "to": "pi",      "label": "Serial / Pico"      },
-  { "from": "dreame",   "to": "gateway",  "label": "WiFi / Cloud"      },
+  { "from": "dreame",   "to": "gateway",  "label": "WiFi"              },
   { "from": "birdbuddy","to": "gateway", "label": "WiFi"               },
   { "from": "pi",       "to": "gateway", "label": "WiFi"               },
   { "from": "pi",       "to": "wii",     "label": "USB / Pico"         },
@@ -17,5 +17,7 @@
   { "from": "megadrive","to": "pi",      "label": "Serial / Pico"      },
   { "from": "gateway",  "to": "cloud",         "label": "Internet"     },
   { "from": "cloud",    "to": "cloud_storage", "label": "Sync"         },
-  { "from": "cloud",    "to": "claude",        "label": "API"          }
+  { "from": "cloud",    "to": "claude",        "label": "API"          },
+  { "from": "cloud",    "to": "dreamehome",    "label": "Robot"        },
+  { "from": "cloud",    "to": "substack",      "label": "Publish"      }
 ]

@@ -10,43 +10,30 @@ import DeployTerminal from './DeployTerminal.vue'
 import AchievementToast from './AchievementToast.vue'
 
 import { ICONS } from '../composables/useIcons'
+import layout from '../../config/layout.json'
 
 const props = defineProps<{ nodes: NodeMap; connections: Connection[] }>()
 
-// Two anchors drive the whole map; every other node is placed RELATIVE to one of
-// them, so moving an anchor slides its entire cluster (and keeps the geometry easy
-// to reason about). GATEWAY anchors the LAN — the hub everything fans out from,
-// with Pi/Pluto as sub-hubs flanking it and the consoles around the rim. CLOUD
-// anchors the cloud "solar system": a separate subgraph that hangs off the gateway
-// (one trunk down) and fans out to the off-network service buddies. Tune these two
-// points (and the dx/dy offsets) to reflow the diagram.
-const GATEWAY = { x: 500, y: 350 }
-const CLOUD   = { x: 500, y: 700 }
+// Diagram geometry lives in layout.json (hand-edited, like connections.json). The
+// gateway is the origin everything hangs off — only its spot on the canvas is fixed
+// here (assumed 0,0 from the config's side). The cloud hub sits directly below it
+// (same x) at layout.cloudDy; every other node is an [dx, dy] offset from its anchor.
+const ORIGIN = { x: 500, y: 350 }
+const CLOUD  = { x: ORIGIN.x, y: ORIGIN.y + layout.cloudDy }
 
-const fromGw    = (dx: number, dy: number) => ({ x: GATEWAY.x + dx, y: GATEWAY.y + dy })
-const fromCloud = (dx: number, dy: number) => ({ x: CLOUD.x + dx,   y: CLOUD.y + dy })
-
-const LAYOUT: Record<string, { x: number; y: number }> = {
-  // LAN — relative to the gateway hub
-  gateway:  GATEWAY,
-  pi:       fromGw(-300,    0),   // sub-hub, left of the gateway
-  pluto:    fromGw( 250,    0),   // control-plane host, right of the gateway
-  vmu:      fromGw(-150, -235),
-  dc:       fromGw( 150, -235),
-  gba:      fromGw(-500, -230),
-  wii:      fromGw(-320, -230),
-  ws:       fromGw(-500,  -50),
-  ps3:      fromGw( 350, -230),
-  birdbuddy:fromGw(-180,  175),
-  dreame:   fromGw( 150,  175),
-  batocera: fromGw( 345,  175),
-  saturn:   fromGw(-500,  120),   // Sega retro — bridged via the Pi, like the WonderSwan
-  megadrive:fromGw(-350,  215),   // the older sister
-  // cloud subgraph — relative to the cloud hub
-  cloud:         CLOUD,
-  cloud_storage: fromCloud(-200, 25),
-  claude:        fromCloud( 200, 25),
+function buildLayout(): Record<string, { x: number; y: number }> {
+  const out: Record<string, { x: number; y: number }> = { gateway: ORIGIN, cloud: CLOUD }
+  for (const [id, off] of Object.entries(layout.fromGateway)) {
+    const [dx, dy] = off as [number, number]
+    out[id] = { x: ORIGIN.x + dx, y: ORIGIN.y + dy }
+  }
+  for (const [id, off] of Object.entries(layout.fromCloud)) {
+    const [dx, dy] = off as [number, number]
+    out[id] = { x: CLOUD.x + dx, y: CLOUD.y + dy }
+  }
+  return out
 }
+const LAYOUT = buildLayout()
 
 const {
   deploying, deployOutput, lastDurations,

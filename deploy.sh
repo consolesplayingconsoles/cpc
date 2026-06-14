@@ -73,8 +73,8 @@ echo "deploying ${NODE_NAME} (${CUSTOM_SSH_ALIAS:-${SSH_USER}@${HOST_IP}})"
 
 # ── Pluto host deploy ─────────────────────────────────────────
 # Pluto is pure-stdlib Python (api/) + a pre-built static SPA (dist/). The API
-# reads connections.json and src/chat.json at runtime, so ship those too. No
-# vendoring, no pip — the box only needs python3 to serve.
+# reads its config/ JSON (connections.json, chat.json) at runtime, so ship that
+# dir too. No vendoring, no pip — the box only needs python3 to serve.
 if [[ "$CONSOLE_DIR" == "pluto" ]]; then
   REMOTE_PLUTO="/opt/pluto"
 
@@ -88,11 +88,10 @@ if [[ "$CONSOLE_DIR" == "pluto" ]]; then
   # (api/), the runtime data, the starter, and the systemd unit. No src/, no
   # node_modules. --strip-components=1 drops the leading 'pluto/'.
   tar --no-xattrs --no-fflags --no-mac-metadata \
-      -cf - pluto/api pluto/dist pluto/connections.json pluto/serve.sh pluto/deploy/pluto.service \
+      -cf - pluto/api pluto/dist pluto/config pluto/serve.sh pluto/deploy/pluto.service \
       | $SSH "tar -xf - --strip-components=1 -C ${REMOTE_PLUTO}"
-  # chat.json lives under src/ in the repo; flatten it to the root so we never
-  # ship the whole src/ tree (api.py looks for it at the root first).
-  $SSH "cat > ${REMOTE_PLUTO}/chat.json" < pluto/src/chat.json
+  # config/ carries the runtime JSON the API reads (connections.json, chat.json);
+  # layout.json rides along too (frontend-only, already bundled in dist — harmless).
   $SSH "cat > ${REMOTE_PLUTO}/.env"      < "$ENV_FILE"
   $SSH "chmod +x ${REMOTE_PLUTO}/serve.sh"
   # Mappings are CONFIG/DATA that PLUTO reads to translate vacuum events -> ops and
