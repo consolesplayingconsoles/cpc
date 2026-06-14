@@ -18,6 +18,10 @@ data-store glyph, not derived from any provider's trademark.
 
 claude.svg — the Claude mark, used to identify the LLM-agent cloud node.
 
+substack.svg — original work, part of this project. A generic feed/blog glyph in
+the style of the open RSS feed mark, for the content-sink connector. Deliberately
+NOT any provider's logo. (The DreameHome cloud node reuses dreame.png.)
+
 ../tux.png — "Tux" the Linux mascot by Larry Ewing (lewing@isc.tamu.edu) and The GIMP.
 Used as the Linux-runtime badge on Pluto node bubbles. Acknowledgement per the
 image's permission terms.

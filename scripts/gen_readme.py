@@ -7,9 +7,6 @@ Scans the repo root for console node directories (any folder containing a
 block between the CONSOLES markers in README.md. Adding or removing a console
 folder is all it takes — the table maintains itself.
 
-Optional per-console `DESCRIPTION=` in `.env.sample` adds a prose blurb to the
-node cell; omit it and the node just shows its name.
-
 Usage:
     python3 scripts/gen_readme.py          # rewrite README.md in place
     python3 scripts/gen_readme.py --check   # exit 1 if README is stale (CI)
@@ -59,7 +56,6 @@ def discover_consoles():
             "folder": name,
             "node": node,
             "manufacturer": mfr,
-            "description": env.get("DESCRIPTION", "").strip(),
         })
     return consoles
 

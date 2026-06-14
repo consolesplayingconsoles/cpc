@@ -7,7 +7,6 @@ import threading
 
 from cpc_python_core.ui import renderer
 from cpc_python_core import chat as chat_mod
-from cpc_python_core.bridges import dreame_wii
 
 # ── Game library ─────────────────────────────────────────────────────────────
 
@@ -296,57 +295,6 @@ def chat_view(config: dict):
                 pass
 
     finally:
-        termios.tcsetattr(fd_tty, termios.TCSADRAIN, old)
-        tty_f.close()
-
-    return None
-
-
-def dreame_wii_view(config):
-    """Live Dreame L40 -> Wii bridge: the vacuum's motion drives a Wii game.
-
-    Runs the bridge loop in a daemon thread while this view is open, streaming
-    status to the screen. q / ESC stops it and returns to the menu.
-    """
-    wii_mac, vac_ip, vac_token = dreame_wii.config_summary()
-
-    status_lines = []
-    stop = threading.Event()
-
-    def on_status(text):
-        status_lines.append(text)
-        del status_lines[:-8]   # keep the last 8
-
-    if not dreame_wii.miio_installed():
-        status_lines.append("miio not installed on this node -- bridge unavailable.")
-    elif not (wii_mac and vac_ip and vac_token):
-        status_lines.append("missing config: need wii BT_MAC + dreame HOST_IP/TOKEN.")
-    else:
-        status_lines.append("connecting to L40 at %s ..." % vac_ip)
-        threading.Thread(
-            target=dreame_wii.run,
-            args=(wii_mac, vac_ip, vac_token, stop.is_set, on_status),
-            daemon=True,
-        ).start()
-
-    tty_f  = open("/dev/tty", "rb", buffering=0)
-    fd_tty = tty_f.fileno()
-    old    = termios.tcgetattr(fd_tty)
-    try:
-        tty.setraw(fd_tty)
-        last = None
-        while True:
-            snap = tuple(status_lines)
-            if snap != last:
-                renderer.render_bridge(config, "Dreame L40 -> Wii", list(snap))
-                last = snap
-            r, _, _ = select.select([fd_tty], [], [], 0.2)
-            if r:
-                ch = os.read(fd_tty, 1)
-                if ch in (b'q', b'\x1b', b'\x03'):
-                    break
-    finally:
-        stop.set()
         termios.tcsetattr(fd_tty, termios.TCSADRAIN, old)
         tty_f.close()
 

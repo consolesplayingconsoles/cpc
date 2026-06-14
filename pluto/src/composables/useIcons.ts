@@ -1,19 +1,20 @@
-import imgWii      from '../assets/consoles/wii.png'
-import imgDc       from '../assets/consoles/dc.png'
-import imgVmu      from '../assets/consoles/vmu.png'
-import imgPs3      from '../assets/consoles/ps3.png'
-import imgGba      from '../assets/consoles/gba.png'
-import imgWs       from '../assets/consoles/ws.png'
-import imgBatocera from '../assets/consoles/batocera.png'
-import imgDreame   from '../assets/consoles/dreame.png'
-import imgHost     from '../assets/consoles/host.png'
-import imgClaude   from '../assets/consoles/claude.svg'
-import imgBird     from '../assets/consoles/birdbuddy.png'
-import imgPi       from '../assets/consoles/pi.svg'
-import imgCloud    from '../assets/consoles/cloud.svg'
-import imgCloudStorage from '../assets/consoles/cloud-storage.svg'
-import imgSaturn    from '../assets/consoles/saturn.png'
-import imgMegadrive from '../assets/consoles/megadrive.png'
+import imgWii      from '../assets/avatars/wii.png'
+import imgDc       from '../assets/avatars/dc.png'
+import imgVmu      from '../assets/avatars/vmu.png'
+import imgPs3      from '../assets/avatars/ps3.png'
+import imgGba      from '../assets/avatars/gba.png'
+import imgWs       from '../assets/avatars/ws.png'
+import imgBatocera from '../assets/avatars/batocera.png'
+import imgDreame   from '../assets/avatars/dreame.png'
+import imgHost     from '../assets/avatars/host.png'
+import imgClaude   from '../assets/avatars/claude.svg'
+import imgBird     from '../assets/avatars/birdbuddy.png'
+import imgPi       from '../assets/avatars/pi.svg'
+import imgCloud    from '../assets/avatars/cloud.svg'
+import imgCloudStorage from '../assets/avatars/cloud-storage.svg'
+import imgSaturn    from '../assets/avatars/saturn.png'
+import imgMegadrive from '../assets/avatars/megadrive.png'
+import imgSubstack  from '../assets/avatars/substack.svg'
 
 export const ICONS: Record<string, string> = {
   wii:       imgWii,
@@ -32,4 +33,6 @@ export const ICONS: Record<string, string> = {
   pi:            imgPi,
   cloud:         imgCloud,
   cloud_storage: imgCloudStorage,
+  dreamehome:    imgDreame,    // the vacuum's cloud — reuses the Dreame mark
+  substack:      imgSubstack,
 }

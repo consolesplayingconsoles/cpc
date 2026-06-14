@@ -125,6 +125,11 @@ def _cloud_nodes(cfg):
     if _bot_enabled():
         services.append(_buddy(BOT_ID, cfg.get("LLM_AGENT_NAME", "").strip() or "Claude",
                                cfg.get("LLM_AGENT_COLOR", "").strip() or "#d97757"))
+    # DreameHome (the vacuum's cloud) and Substack (the publish target) are fixed
+    # services, not swappable backends, so there's no name to configure -- their
+    # nodes are always drawn.
+    services.append(_buddy("dreamehome", "DreameHome", None))
+    services.append(_buddy("substack", "Substack", None))
 
     if not services:
         return []
@@ -681,12 +686,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         another machine. Credentials are used once and never stored or logged.
         Caveat: the API is plain HTTP, so they cross the LAN in the clear.
 
-        A host without the dreamehome client (the deployed prod box -- it ships only
-        with the dev checkout) can't log in at all, so it says so plainly instead of
-        failing on the import."""
-        if not os.path.isdir(self._dreame_repo()):
+        A host where the dreamehome client isn't importable (not installed and no
+        checkout) can't log in, so it says so plainly instead of failing later."""
+        if not dreame_session.available(self._dreame_repo()):
             self._send(503, {"authenticated": False,
-                             "error": "Dreame login isn't available on this host (no dreamehome client)."})
+                             "error": "the dreamehome client isn't installed on this host."})
             return
         if not _is_lan_ip(self.client_address[0]):
             self._send(403, {"authenticated": False,
@@ -841,10 +845,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         def work():
-            # Route through the cloud session the Robutek tab holds. The local-miio
-            # path (vacuum.run) is dead on the L40 -- DreameHome disables the local
-            # API. Read verbs ('status') work; control verbs report that the cloud
-            # command endpoint isn't wired yet (only the read APIs are decoded).
+            # Route through the cloud session the Robutek tab holds (the L40 disables
+            # its local API, so there's no local path). Read verbs ('status') work;
+            # control verbs report that the cloud command endpoint isn't decoded yet.
             ok, msg = dreame_session.command(verb)
             print("  [vacuum] %s by %s -> %s (%s)" % (verb, sender, "ok" if ok else "fail", msg))
             _new_message("dreame", msg)
@@ -1086,7 +1089,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _build_connections(self):
         base_dir = self.__class__.base_dir
-        connections_path = os.path.join(base_dir, "connections.json")
+        connections_path = os.path.join(base_dir, "config", "connections.json")
         if not os.path.exists(connections_path):
             return []
         with open(connections_path) as f:
@@ -1125,12 +1128,9 @@ def run():
         print("  chat: restored %d recent message(s) from the log" % len(_messages))
 
     # Shared client-side chat config (commands, mention tokens) — one source of
-    # truth, also imported by the Vue app; inlined into the /retro page.
-    # Dev runs from the repo (src/chat.json); a deploy flattens it to the root so
-    # the box never needs the whole src/ tree shipped — just dist/ + this file.
-    chat_path = os.path.join(parent_dir, "chat.json")
-    if not os.path.exists(chat_path):
-        chat_path = os.path.join(parent_dir, "src", "chat.json")
+    # truth in config/, also imported by the Vue app; inlined into the /retro page.
+    # Lives at config/chat.json in both the repo and the deploy (deploy ships config/).
+    chat_path = os.path.join(parent_dir, "config", "chat.json")
     try:
         with open(chat_path) as f:
             Handler.chat_config = json.load(f)

@@ -5,7 +5,7 @@ import { API_BASE } from '../composables/useNodes'
 import { ICONS } from '../composables/useIcons'
 import { useMessages } from '../composables/useMessages'
 import ConsoleAvatar from './ConsoleAvatar.vue'
-import chatConfig from '../chat.json'
+import chatConfig from '../../config/chat.json'
 
 const props = defineProps<{
   nodes:       NodeMap

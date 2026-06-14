@@ -36,7 +36,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from cpc_python_core.ui import renderer, menu as menu_mod, input as input_mod, actions
 from cpc_python_core.ui.config import loader
-from cpc_python_core.bridges import dreame_wii
 
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -80,11 +79,6 @@ def _build_menu(config):
     if config.get("PLUTO_IP", "").strip():
         items.append("Chat")
         action_map["Chat"] = actions.chat_view
-
-    # Only on a node that can actually run it: miio installed + peer envs present.
-    if dreame_wii.ready():
-        items.append("Dreame -> Wii")
-        action_map["Dreame -> Wii"] = actions.dreame_wii_view
 
     return items, action_map
 

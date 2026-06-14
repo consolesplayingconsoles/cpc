@@ -21,21 +21,41 @@ _dh = None              # the imported dreamehome module (lazy)
 _import_error = None
 
 
-def _ensure_import(repo_path):
-    """Import dreamehome (adding the repo to sys.path). Cached. Returns the
-    module or None (with _import_error set)."""
+def _ensure_import(repo_path=None):
+    """Import the dreamehome client. Cached. Returns the module or None.
+
+    Prefer it as a normally installed package (pip install / on PYTHONPATH); only
+    if that fails do we fall back to a repo checkout on sys.path (DREAME_CLIENT_PATH).
+    So once the lib is installed -- or published -- no path config is needed."""
     global _dh, _import_error
     if _dh is not None:
         return _dh
-    try:
-        if repo_path and repo_path not in sys.path:
-            sys.path.insert(0, repo_path)
+    try:                       # installed package (the normal, no-config path)
         import dreamehome
         _dh = dreamehome
         _import_error = None
-    except Exception as exc:
-        _import_error = "could not import dreamehome from %r: %s" % (repo_path, exc)
-    return _dh
+        return _dh
+    except ImportError:
+        pass
+    if repo_path:              # dev fallback: an uninstalled checkout on disk
+        try:
+            if repo_path not in sys.path:
+                sys.path.insert(0, repo_path)
+            import dreamehome
+            _dh = dreamehome
+            _import_error = None
+            return _dh
+        except Exception as exc:
+            _import_error = "could not import dreamehome from %r: %s" % (repo_path, exc)
+            return None
+    _import_error = ("the dreamehome client isn't installed -- pip install it, or "
+                     "set DREAME_CLIENT_PATH to a local checkout.")
+    return None
+
+
+def available(repo_path=None):
+    """True if the dreamehome client can be imported (installed, or via repo_path)."""
+    return _ensure_import(repo_path) is not None
 
 
 def is_authenticated():
