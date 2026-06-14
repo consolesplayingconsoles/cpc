@@ -34,8 +34,9 @@ const hoveredBtn = ref<'code' | 'deploy' | 'folder' | null>(null)
 
 const bubbleR     = computed(() => props.isActive ? BUBBLE_OPEN : props.isHovered ? BUBBLE_HOV : BUBBLE_R)
 const statusColor = computed(() => {
-  if (props.node.status === 'up') return 'var(--color-up)'
-  if (props.isUnconfigured)       return 'var(--color-secondary)'
+  if (props.node.status === 'up')    return 'var(--color-up)'
+  if (props.node.status === 'cloud') return props.node.color ?? 'var(--color-secondary)'
+  if (props.isUnconfigured)          return 'var(--color-secondary)'
   return 'var(--color-down)'
 })
 const borderColor  = computed(() => props.node.color ?? '#ccccca')
@@ -50,7 +51,7 @@ const bubbleFill   = computed(() => props.isUnconfigured ? '#fbfbfa' : '#e8e8e6'
 const bubbleStroke = computed(() => props.isUnconfigured ? '#b4b4b0' : borderColor.value)
 const bubbleDash   = computed(() => props.isUnconfigured ? '5 5' : undefined)
 const iconOpacity  = computed(() => {
-  if (isUp.value)            return 0.92
+  if (isUp.value || props.node.status === 'cloud') return 0.92
   if (props.isUnconfigured)  return 0.7
   return 0.5 // configured but down
 })
@@ -97,7 +98,8 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
   />
 
   <g :transform="isActive ? 'translate(0,-35)' : ''">
-    <g v-if="!isUnconfigured">
+    <!-- cloud buddies are linked, not pinged — no status LED at all -->
+    <g v-if="!isUnconfigured && node.status !== 'cloud'">
       <circle cx="24" cy="-24" r="7" :fill="node.status === 'up' ? '#00ff55' : '#ff2222'" class="status-dot"/>
       <circle cx="24" cy="-24" r="4" fill="white" opacity="0.35"/>
       <circle cx="22" cy="-26" r="2" fill="white" opacity="0.5"/>

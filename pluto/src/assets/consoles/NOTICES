@@ -1,4 +1,4 @@
-Console icons (wii.png=RVL-001 WT, dc.png, ps3.png, gba.png, ws.png, batocera.png=MAME arcade cabinet, host.png=Apple Macintosh) sourced from RetroArch Assets (libretro/retroarch-assets)
+Console icons (wii.png=RVL-001 WT, dc.png, ps3.png, gba.png, ws.png, batocera.png=MAME arcade cabinet, host.png=Apple Macintosh, saturn.png=Sega Saturn, megadrive.png=Sega Mega Drive/Genesis) sourced from RetroArch Assets (libretro/retroarch-assets)
 Licensed under CC BY 4.0 — https://creativecommons.org/licenses/by/4.0/
 https://github.com/libretro/retroarch-assets
 
@@ -9,6 +9,14 @@ gateway.svg — original work, part of this project.
 
 pi.svg — original work, part of this project. A stylised single-board computer
 (Raspberry Pi), not derived from any trademarked logo.
+
+cloud.svg — original work, part of this project. A generic cloud glyph (the
+cloud-subgraph hub), not derived from any provider's trademark.
+
+cloud-storage.svg — original work, part of this project. A generic stacked
+data-store glyph, not derived from any provider's trademark.
+
+claude.svg — the Claude mark, used to identify the LLM-agent cloud node.
 
 ../tux.png — "Tux" the Linux mascot by Larry Ewing (lewing@isc.tamu.edu) and The GIMP.
 Used as the Linux-runtime badge on Pluto node bubbles. Acknowledgement per the

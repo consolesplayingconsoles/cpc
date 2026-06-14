@@ -60,7 +60,7 @@ watch(activeTab, (tab) => {
 const displayNodes = computed(() => {
   const src = error.value
     ? Object.fromEntries(Object.entries(nodes.value).map(
-        ([k, n]) => [k, n.status === 'unconfigured' ? n : { ...n, status: 'down' as const }]))
+        ([k, n]) => [k, (n.status === 'unconfigured' || n.status === 'cloud') ? n : { ...n, status: 'down' as const }]))
     : nodes.value
   if (showOffline.value) return src
   return Object.fromEntries(

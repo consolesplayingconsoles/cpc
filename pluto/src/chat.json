@@ -1,11 +1,11 @@
 {
-  "_comment": "Shared CLIENT-SIDE chat config -- single source of truth. Imported by the Vue app (build-time) and read by api.py, which inlines the relevant slice into the barebones Wii page at serve time. NON-SECRET ONLY: API keys and the vacuum sender allowlist (the security gate) live server-side in api.py / .env, never here.",
+  "_comment": "Shared CLIENT-SIDE chat config -- single source of truth. Imported by the Vue app (build-time) and read by api.py, which inlines the relevant slice into the barebones Wii page at serve time. NON-SECRET ONLY: secrets like API keys live server-side in api.py / .env, never here. (@l40 verbs are open on the LAN -- no sender gate.)",
   "commands": [
     { "cmd": "/post-to-substack",  "desc": "write & broadcast to substack",   "multiline": true, "done": false },
-    { "cmd": "/send-saved-games",  "desc": "push saved games to a console",   "param": { "label": "console", "type": "console" }, "done": false },
-    { "cmd": "/steal-saved-games", "desc": "pull saved games from a console",  "param": { "label": "console", "type": "console" }, "done": false }
+    { "cmd": "/sync-saved-games",  "desc": "sync saved games with a console",  "param": { "label": "console", "type": "console" }, "done": false }
   ],
   "vacuumVerbs": [
+    { "verb": "status", "desc": "report state (read-only)" },
     { "verb": "locate", "desc": "beep so you can find it" },
     { "verb": "clean",  "desc": "start cleaning" },
     { "verb": "dock",   "desc": "return to charge" },

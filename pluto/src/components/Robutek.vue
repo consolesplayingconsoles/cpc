@@ -11,6 +11,7 @@ interface Device {
   firmware: string | null
   activity: string
   status_label: string
+  status_human?: string   // friendly label from the API (single source; see dreame_session.py)
   status_int: number | null
   battery: number | null
   online: boolean
@@ -82,6 +83,8 @@ const sel = computed<Session | null>(() => visible.value[selIdx.value] ?? null)
 const collapsed = ref(false)   // table collapse-to-left
 
 // ── status labels ─────────────────────────────────────────────────
+// Defensive fallback only: the API now sends `status_human` (single source in
+// dreame_session.py, shared with the @l40 chat status). Used if that's absent.
 const STATUS_HUMAN: Record<string, string> = {
   SWEEPING: 'Sweeping', IDLE: 'Idle', PAUSED: 'Paused', ERROR: 'Error',
   RETURNING: 'Returning', CHARGING: 'Charging', MOPPING: 'Mopping',
@@ -486,7 +489,7 @@ async function signIn() {
 
       <div class="rb-status">
         <template v-if="connected && dev">
-          <span class="rb-pill" :class="actClass">{{ humanStatus(dev.status_label) }}</span>
+          <span class="rb-pill" :class="actClass">{{ dev.status_human ?? humanStatus(dev.status_label) }}</span>
           <span v-if="dev.battery !== null" class="rb-bat">
             <span class="rb-bat-shell"><span class="rb-bat-fill" :style="{ width: dev.battery + '%', background: batColor }" /></span>
             <span class="mono" :style="{ color: batColor }">{{ dev.battery }}%</span>

@@ -331,7 +331,15 @@ function onKeydown(e: KeyboardEvent) {
     if (e.key === 'ArrowDown') { e.preventDefault(); highlight.value = (clampedHl() + 1) % n; return }
     if (e.key === 'ArrowUp')   { e.preventDefault(); highlight.value = (clampedHl() - 1 + n) % n; return }
     if (e.key === 'Tab')                   { e.preventDefault(); applyHighlighted(); return }
-    if (e.key === 'Enter' && !e.shiftKey)  { e.preventDefault(); applyHighlighted(); return }
+    if (e.key === 'Enter' && !e.shiftKey)  {
+      e.preventDefault()
+      // If the draft is already the completed value (e.g. "@l40 status"), applying
+      // is a no-op — that means the user is done, so send instead of re-completing.
+      const before = draft.value
+      applyHighlighted()
+      if (draft.value === before) send()
+      return
+    }
   }
 
   // Textarea in multiline mode: Enter sends, Shift+Enter inserts newline
@@ -848,7 +856,6 @@ function onKeydown(e: KeyboardEvent) {
 
 .input-field {
   width: 100%;
-  background: var(--surface-2);   /* recessed — distinct from the white chat bg */
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
   padding: 9px 12px;
