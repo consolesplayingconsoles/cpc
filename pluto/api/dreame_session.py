@@ -69,6 +69,27 @@ def logout():
         _client = None
 
 
+# Friendly status labels. This is the single source of truth shared by BOTH the
+# Robutek tab (it renders the `status_human` field below) and the @l40 chat status
+# reply, so they can never drift. Mirrors the raw status_label enum from the
+# dreamehome lib; unknown labels fall back to a generic prettify.
+_STATUS_HUMAN = {
+    "SWEEPING": "Sweeping", "IDLE": "Idle", "PAUSED": "Paused", "ERROR": "Error",
+    "RETURNING": "Returning", "CHARGING": "Charging", "MOPPING": "Mopping",
+    "DRYING": "Drying", "WASHING": "Washing", "RETURNING_WASHING": "Returning to wash",
+    "BUILDING_MAP": "Building map", "SWEEPING_AND_MOPPING": "Sweep + mop",
+    "CHARGING_COMPLETED": "Charged", "UPGRADING": "Updating", "UNKNOWN": "Unknown",
+}
+
+
+def human_status(label):
+    """A friendly status string for a raw status_label enum (e.g.
+    CHARGING_COMPLETED -> 'Charged'). Generic prettify for anything unmapped."""
+    if not label:
+        return "Unknown"
+    return _STATUS_HUMAN.get(label) or label.replace("_", " ").capitalize()
+
+
 def state():
     """{name, model, firmware, activity, ...} or None if not authed / unreachable."""
     with _lock:
@@ -86,6 +107,7 @@ def state():
         "firmware": st.get("firmware"),
         "activity": st.get("activity"),
         "status_label": st.get("status_label"),
+        "status_human": human_status(st.get("status_label")),
         "status_int": st.get("status_int"),
         "battery": st.get("battery"),
         "online": st.get("online"),
@@ -131,3 +153,30 @@ def sync_history(out_path):
     except Exception:
         pass
     return sessions
+
+
+# read-only chat verbs the cloud session can answer without commanding the robot
+_READ_VERBS = {"status"}
+
+
+def command(verb):
+    """Run an @l40 chat verb against the cloud session. Returns (ok, message).
+
+    READ verbs ('status') report live state via the same cloud read the Robutek
+    tab already uses -- no command is sent to the robot. CONTROL verbs (locate/
+    clean/dock/stop) are NOT wired: the cloud command endpoint was never reverse-
+    engineered (only the read APIs are), so they return a clear note instead of
+    firing a guessed request at a physical robot."""
+    if verb in _READ_VERBS:
+        st = state()
+        if st is None:
+            return False, "not signed into Dreamehome. Open the Dreame tab and sign in first."
+        # same friendly label the Robutek tab shows (via status_human)
+        act = st.get("status_human") or st.get("activity") or "Unknown"
+        bat = st.get("battery")
+        batstr = ("%d%%" % bat) if isinstance(bat, (int, float)) else "?"
+        net = "online" if st.get("online") else "offline"
+        return True, "status: %s, battery %s, %s." % (act, batstr, net)
+    return False, ("i can read the vacuum (try '@l40 status'), but sending commands "
+                   "isn't wired yet: the cloud control endpoint isn't decoded, only "
+                   "the read apis are.")

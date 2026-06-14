@@ -26,13 +26,14 @@ _VERBS = {
 
 # keyword -> canonical verb (first match in the message wins)
 _KEYWORDS = {
-    "locate": "locate", "find": "locate", "where": "locate", "ping": "locate",
+    "status": "status", "state": "status", "battery": "status", "where": "status",
+    "locate": "locate", "find": "locate", "ping": "locate",
     "clean": "clean", "start": "clean", "go": "clean", "vacuum": "clean", "mop": "clean",
     "dock": "dock", "home": "dock", "charge": "dock", "back": "dock", "return": "dock",
     "stop": "stop", "halt": "stop", "pause": "stop",
 }
 
-VERB_HINT = "try: @l40 locate | clean | dock | stop"
+VERB_HINT = "try: @l40 status | locate | clean | dock | stop"
 
 
 def parse_command(text):

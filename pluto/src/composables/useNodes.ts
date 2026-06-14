@@ -1,6 +1,8 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 
-export type NodeStatus = 'up' | 'down' | 'unconfigured'
+// 'cloud' = an off-network service buddy (cloud drive / LLM agent): present when
+// configured, linked rather than pinged, so it never reports up/down.
+export type NodeStatus = 'up' | 'down' | 'unconfigured' | 'cloud'
 
 export interface NodeData {
   id:     string
@@ -15,6 +17,7 @@ export interface NodeData {
   folder: boolean         // FILES button — open the node's SMB share
   code?:  boolean         // CODE button — open the source in the IDE (pluto only)
   os?:    string | null   // declared runtime; 'linux' shows a Tux on the bubble
+  cloud?: boolean         // a cloud-cluster service buddy, not a pinged LAN node
 }
 
 export type NodeMap = Record<string, NodeData>

@@ -41,9 +41,6 @@ def open_path(path):
 
 PORT = 7700
 
-# Chat senders allowed to drive the @l40 vacuum (a shared chat surface controls a
-# physical robot, so default to the operator's own surfaces). Overridable via env.
-_vacuum_senders = {"pluto", "host"}
 
 # ── @claude bot (Anthropic API) ──────────────────────────────────────────────
 # Claude as a guest in the chat, running on the operator's own Anthropic API key.
@@ -97,6 +94,44 @@ def _bot_online():
 def _bot_enabled():
     """The @claude member shows up for a real key OR for the keyless gag."""
     return bool(_bot_key) or _bot_broke
+
+
+def _cloud_nodes(cfg):
+    """Pluto's cloud 'solar system' -- its off-network service buddies, drawn as a
+    separate cluster on the diagram. NOT network infrastructure: no console dir and
+    no ping. A node is present iff configured in pluto/.env (namespaced CLOUD_STORAGE_*
+    / LLM_AGENT_* so another backend could be hooked later without a code change),
+    and renders with the 'cloud' status -- linked, never pinged, never up/down.
+
+    Topology: the gateway links to a single 'cloud' hub, and the hub fans out to
+    the service buddies -- one trunk crosses into the cluster instead of a line per
+    service. Brandless in committed code (CLAUDE.md): the storage name comes from
+    the operator's own .env, not a hardcoded provider."""
+    def _buddy(node_id, name, color):
+        return {
+            "id": node_id, "name": name, "ip": "", "color": color,
+            "status": "cloud", "cloud": True,
+            "smb": None, "deploy": False, "folder": False, "os": None,
+        }
+
+    services = []
+    storage_name = cfg.get("CLOUD_STORAGE_NAME", "").strip()
+    if storage_name:
+        services.append(_buddy("cloud_storage", storage_name,
+                               cfg.get("CLOUD_STORAGE_COLOR", "").strip() or None))
+    # The LLM agent is the same assistant that answers @claude in chat, so it's
+    # enabled by the bot credential (ANTHROPIC_API_KEY / broke-mode); LLM_AGENT_*
+    # only rebrands its node here.
+    if _bot_enabled():
+        services.append(_buddy(BOT_ID, cfg.get("LLM_AGENT_NAME", "").strip() or "Claude",
+                               cfg.get("LLM_AGENT_COLOR", "").strip() or "#d97757"))
+
+    if not services:
+        return []
+    # the hub the gateway connects to. Default (uncoloured) -- only Claude keeps an
+    # identity colour, since it's a real chat participant; storage/hub stay neutral.
+    hub = _buddy("cloud", "Cloud", None)
+    return [hub] + services
 
 
 def _bot_reply(messages_snapshot):
@@ -197,9 +232,24 @@ def _is_allowed_origin(origin):
     return False
 
 
+def _is_lan_ip(ip):
+    """True for loopback or an RFC-1918 private address -- i.e. a request from the
+    trusted local network. Used to gate the Dreame login: on a home LAN it's
+    reasonable to sign in from a phone or another machine, not just the box itself."""
+    ip = ip.replace("::ffff:", "")   # unwrap IPv4-mapped IPv6
+    if ip in ("127.0.0.1", "::1"):
+        return True
+    return bool(re.match(
+        r'^(192\.168\.\d{1,3}\.\d{1,3}'
+        r'|10\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+        r'|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})$',
+        ip
+    ))
+
+
 REQUIRED_VARS = ["GATEWAY_IP"]
 
-NODE_IDS = ["wii", "dc", "ps3", "gba", "ws", "batocera", "dreame", "birdbuddy", "pi", "pluto", "vmu"]
+NODE_IDS = ["wii", "dc", "ps3", "gba", "ws", "batocera", "dreame", "birdbuddy", "pi", "pluto", "vmu", "saturn", "megadrive"]
 
 # Consoles whose OS is fixed by definition — used as the badge default so it shows
 # even when the node is offline (TTL detection only works on a live reply).
@@ -245,17 +295,47 @@ def _log_message(msg):
             pass
 
 
+# How many recent messages to restore from the log on boot. The feed is otherwise
+# in-memory (cleared on restart/deploy); this just rehydrates the tail so a deploy
+# doesn't wipe the conversation. No pagination -- older history lives in the log.
+STARTUP_MESSAGES = 50
+
+
+def _load_recent_messages(limit=STARTUP_MESSAGES):
+    """Repopulate the in-memory feed from the tail of the on-disk log, so the chat
+    survives a restart. Resumes the id sequence past the highest loaded id."""
+    global _msg_seq
+    if not _log_path or not os.path.exists(_log_path):
+        return
+    try:
+        with open(_log_path) as f:
+            lines = f.readlines()[-limit:]
+    except Exception:
+        return
+    loaded = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            m = json.loads(line)
+        except (ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(m, dict) and "id" in m and "sender" in m and "text" in m:
+            loaded.append(m)
+    if loaded:
+        _messages[:] = loaded
+        _msg_seq = max(m.get("id", 0) for m in loaded)
+
+
 # ── Shared helpers ───────────────────────────────────────────────────────────
 
 def console_env_path(base_dir, node_id):
-    """Path to a console's env file. Prefer the real .env; fall back to the
-    committed .env.sample so a node that has a blueprint but no .env yet still
-    surfaces on the map as 'unconfigured' (empty HOST_IP) instead of vanishing
-    — e.g. a device staged ahead of the hardware arriving."""
-    real = os.path.normpath(os.path.join(base_dir, "..", node_id, ".env"))
-    if os.path.exists(real):
-        return real
-    return os.path.normpath(os.path.join(base_dir, "..", node_id, ".env.sample"))
+    """Path to a console's real .env -- the only config source. .env.sample is
+    dev-facing documentation, never production config, so there is NO fallback to
+    it. A node with no .env simply has no config and renders as 'unconfigured'
+    (the roster is NODE_IDS, not whichever files happen to exist on the box)."""
+    return os.path.normpath(os.path.join(base_dir, "..", node_id, ".env"))
 
 
 def probe(ip):
@@ -292,6 +372,24 @@ def probe(ip):
     if ttl <= 128:
         return True, "windows"
     return True, None            # ~255 = routers / network gear, no badge
+
+
+def probe_many(ips):
+    """Probe several hosts at once. Each probe() blocks up to ~2s on a down host,
+    so doing them in series made /nodes take (down-hosts x 2s) -- the slow first
+    render. One thread per ip collapses that to a single ~2s wait. Pure-stdlib
+    threads (fine on the constrained nodes). Returns {ip: (up, os)}."""
+    results = {}
+    threads = []
+    for ip in set(filter(None, ips)):
+        def work(ip=ip):
+            results[ip] = probe(ip)
+        t = threading.Thread(target=work)
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
+    return results
 
 
 def _detect_os(env, fallback=None):
@@ -544,9 +642,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return []
         return []
 
-    def _is_loopback(self):
-        return self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
-
     def _serve_dreame(self):
         """Robutek tab state: live device state + history. History is the cached
         routes.json on a plain load; on ?sync=1 (the refresh button) it's re-pulled
@@ -570,9 +665,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_dreame_login(self):
         """POST /dreame/login {region, username, password | secondary_key}.
-        Loopback-only. Credentials are used once and never stored or logged."""
-        if not self._is_loopback():
-            self._send(403, {"error": "login is only allowed from the local machine"})
+        Allowed from the local network (loopback + RFC-1918), not just the box
+        itself -- on a trusted home LAN it's reasonable to sign in from a phone or
+        another machine. Credentials are used once and never stored or logged.
+        Caveat: the API is plain HTTP, so they cross the LAN in the clear.
+
+        A host without the dreamehome client (the deployed prod box -- it ships only
+        with the dev checkout) can't log in at all, so it says so plainly instead of
+        failing on the import."""
+        if not os.path.isdir(self._dreame_repo()):
+            self._send(503, {"authenticated": False,
+                             "error": "Dreame login isn't available on this host (no dreamehome client)."})
+            return
+        if not _is_lan_ip(self.client_address[0]):
+            self._send(403, {"authenticated": False,
+                             "error": "login is allowed only from your local network"})
             return
         try:
             length = int(self.headers.get("Content-Length", 0))
@@ -599,8 +706,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, {"authenticated": True, "device": dreame_session.state()})
 
     def _handle_dreame_logout(self):
-        if not self._is_loopback():
-            self._send(403, {"error": "only from the local machine"})
+        if not _is_lan_ip(self.client_address[0]):
+            self._send(403, {"error": "only from your local network"})
             return
         dreame_session.logout()
         self._send(200, {"authenticated": False})
@@ -711,30 +818,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._maybe_vacuum(sender, text)
 
     def _maybe_vacuum(self, sender, text):
-        """Handle an @l40 chat command: run a safe verb, reply as the vacuum.
+        """Handle an @l40 chat command: run a verb, reply as the vacuum ('dreame').
 
-        Gated to an allowlist of senders because the chat is a shared surface
-        and the target is a physical robot. The vacuum 'replies' as 'dreame'.
+        No sender gating: this is a LAN tool for a young project (the operator is
+        a 'guest' too), status is read-only, and the control verbs aren't wired
+        yet anyway. Reintroduce an allowlist if this ever leaves the local network.
         """
         verb = vacuum.parse_command(text)
         if not verb:
             _new_message("dreame", vacuum.VERB_HINT)
             return
-        if sender.lower() not in _vacuum_senders:
-            _new_message("dreame", "nice try -- '%s' is not on the vacuum allowlist." % sender)
-            return
-
-        env_path = console_env_path(self.__class__.base_dir, "dreame")
-        env      = load_env(env_path)
-        ip       = env.get("HOST_IP", "").strip()
-        token    = env.get("TOKEN", "").strip()
-        if not ip or not token:
-            _new_message("dreame", "vacuum not configured (HOST_IP/TOKEN missing in dreame/.env).")
-            return
 
         def work():
-            ok, msg = vacuum.run(verb, ip, token)
-            print("  [vacuum] %s -> %s (%s)" % (verb, "ok" if ok else "fail", msg))
+            # Route through the cloud session the Robutek tab holds. The local-miio
+            # path (vacuum.run) is dead on the L40 -- DreameHome disables the local
+            # API. Read verbs ('status') work; control verbs report that the cloud
+            # command endpoint isn't wired yet (only the read APIs are decoded).
+            ok, msg = dreame_session.command(verb)
+            print("  [vacuum] %s by %s -> %s (%s)" % (verb, sender, "ok" if ok else "fail", msg))
             _new_message("dreame", msg)
 
         threading.Thread(target=work, daemon=True).start()
@@ -906,9 +1007,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # else — no phantom localhost entry. It's built by the NODE_IDS loop below
         # from pluto/.env, which adds its CODE/DEPLOY/FILES buttons.
 
+        # First pass: load every node's .env (cheap) and collect the IPs. Second
+        # pass pings them all in parallel, so the slow part (down hosts timing out)
+        # happens once concurrently rather than once per node in series.
         gateway_ip = cfg.get("GATEWAY_IP", "").strip()
+        cfgs = {node_id: load_env(console_env_path(base_dir, node_id)) for node_id in NODE_IDS}
+        ips  = [gateway_ip] + [c.get("HOST_IP", "").strip() for c in cfgs.values()]
+        pinged = probe_many(ips)
+
         if gateway_ip:
-            gw_up, _ = probe(gateway_ip)
+            gw_up, _ = pinged.get(gateway_ip, (False, None))
             nodes["gateway"] = {
                 "id":     "gateway",
                 "name":   "gateway",
@@ -923,10 +1031,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             }
 
         for node_id in NODE_IDS:
-            full_path = console_env_path(base_dir, node_id)
-            if not os.path.exists(full_path):
-                continue
-            console_cfg = load_env(full_path)
+            # NODE_IDS is the authoritative roster. A node with no real .env (e.g.
+            # every console on the prod box, where only pluto/.env ships) still
+            # surfaces as 'unconfigured' so "show unconfigured" reveals it, instead
+            # of vanishing. load_env returns {} for a missing file.
+            console_cfg = cfgs[node_id]
             ip    = console_cfg.get("HOST_IP", "").strip()
             name  = console_cfg.get("NODE_NAME", node_id)
             color = console_cfg.get("UI_PRIMARY_COLOR") or None
@@ -940,7 +1049,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # false on the deployed headless box. Deterministic (no build flag).
             ws         = os.path.expanduser(console_cfg.get("WORKSPACE_PATH", "").strip())
             has_code   = bool(ws) and os.path.isdir(ws)
-            up, det_os = probe(ip) if ip else (False, None)
+            up, det_os = pinged.get(ip, (False, None)) if ip else (False, None)
             status = ("up" if up else "down") if ip else "unconfigured"
             nodes[node_id] = {
                 "id":     node_id,
@@ -957,17 +1066,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "os":     _detect_os(console_cfg, KNOWN_OS.get(node_id) or det_os),
             }
 
-        if _bot_enabled():
-            nodes[BOT_ID] = {
-                "id":     BOT_ID,
-                "name":   "Claude",
-                "ip":     "",
-                "color":  "#d97757",
-                "status": "up" if _bot_online() else "down",
-                "smb":    None,
-                "deploy": False,
-                "folder": False,
-            }
+        # Cloud solar system: Pluto's service buddies (cloud drive + LLM agent),
+        # configured in pluto/.env, never pinged. Stripped when not configured.
+        for cloud in _cloud_nodes(cfg):
+            nodes[cloud["id"]] = cloud
 
         return nodes
 
@@ -1006,6 +1108,10 @@ def run():
 
     # Optional log file — stored alongside the env
     _log_path = os.path.join(parent_dir, "messages.log")
+    # Rehydrate the recent feed from the log so a restart/deploy doesn't wipe chat.
+    _load_recent_messages()
+    if _messages:
+        print("  chat: restored %d recent message(s) from the log" % len(_messages))
 
     # Shared client-side chat config (commands, mention tokens) — one source of
     # truth, also imported by the Vue app; inlined into the /retro page.
@@ -1032,12 +1138,6 @@ def run():
         print("  @claude bot: BROKE MODE (no key, no cost -- always broke, for laughs)")
     else:
         print("  @claude bot: disabled (set ANTHROPIC_API_KEY, or CLAUDE_BROKE_MODE=1 for the gag)")
-
-    global _vacuum_senders
-    senders = config.get("VACUUM_SENDERS", "").strip()
-    if senders:
-        _vacuum_senders = {s.strip().lower() for s in senders.split(",") if s.strip()}
-    print("  @l40 vacuum: senders allowed -> %s" % ", ".join(sorted(_vacuum_senders)))
 
     Handler.config   = config
     Handler.base_dir = parent_dir

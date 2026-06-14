@@ -6,10 +6,16 @@
   { "from": "dc",       "to": "gateway", "label": "Ethernet"           },
   { "from": "dc",       "to": "vmu",     "label": "Maple"              },
   { "from": "gba",      "to": "wii",     "label": "GBA Link"           },
-  { "from": "ws",       "to": "pi",      "label": "Serial / Pico / USB"},
+  { "from": "gba",      "to": "pi",     "label": "GBA Link / Pico"     },
+  { "from": "ws",       "to": "pi",      "label": "Serial / Pico"      },
   { "from": "dreame",   "to": "gateway",  "label": "WiFi / Cloud"      },
   { "from": "birdbuddy","to": "gateway", "label": "WiFi"               },
   { "from": "pi",       "to": "gateway", "label": "WiFi"               },
   { "from": "pi",       "to": "wii",     "label": "USB / Pico"         },
-  { "from": "pi",       "to": "dc",      "label": "USB / Pico / Maple" }
+  { "from": "pi",       "to": "dc",      "label": "USB / Pico / Maple" },
+  { "from": "saturn",   "to": "pi",      "label": "Serial / Pico"      },
+  { "from": "megadrive","to": "pi",      "label": "Serial / Pico"      },
+  { "from": "gateway",  "to": "cloud",         "label": "Internet"     },
+  { "from": "cloud",    "to": "cloud_storage", "label": "Sync"         },
+  { "from": "cloud",    "to": "claude",        "label": "API"          }
 ]

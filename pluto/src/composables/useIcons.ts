@@ -10,6 +10,10 @@ import imgHost     from '../assets/consoles/host.png'
 import imgClaude   from '../assets/consoles/claude.svg'
 import imgBird     from '../assets/consoles/birdbuddy.png'
 import imgPi       from '../assets/consoles/pi.svg'
+import imgCloud    from '../assets/consoles/cloud.svg'
+import imgCloudStorage from '../assets/consoles/cloud-storage.svg'
+import imgSaturn    from '../assets/consoles/saturn.png'
+import imgMegadrive from '../assets/consoles/megadrive.png'
 
 export const ICONS: Record<string, string> = {
   wii:       imgWii,
@@ -21,7 +25,11 @@ export const ICONS: Record<string, string> = {
   batocera:  imgBatocera,
   dreame:    imgDreame,
   pluto:     imgHost,
-  claude:    imgClaude,
-  birdbuddy: imgBird,
-  pi:        imgPi,
+  saturn:    imgSaturn,
+  megadrive: imgMegadrive,
+  claude:        imgClaude,
+  birdbuddy:     imgBird,
+  pi:            imgPi,
+  cloud:         imgCloud,
+  cloud_storage: imgCloudStorage,
 }
