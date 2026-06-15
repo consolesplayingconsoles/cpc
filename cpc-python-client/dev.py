@@ -48,7 +48,7 @@ def _load_dev_config(console: str) -> dict:
                     if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
                         v = v[1:-1]
                     config[k.strip()] = v
-            config.setdefault("SHORT_NAME", console)
+            config.setdefault("NODE_KEY", console)
             return config
 
     print(f"Error: no env file found for '{console}' (checked {console}/.env)")
@@ -59,7 +59,7 @@ def _build_dev_menu(config):
     items = []
     action_map = {}
 
-    if config.get("SHORT_NAME") == "wii":
+    if config.get("NODE_KEY") == "wii":
         if config.get("GC_GAMES_PATH"):
             items.append("GameCube Games")
             action_map["GameCube Games"] = actions.list_gc_games

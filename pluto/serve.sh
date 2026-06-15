@@ -29,8 +29,8 @@ if [[ ! -d "$HERE/dist" ]]; then
   exit 1
 fi
 
-# Mappings (event->controller-op config) ship with Pluto; point the core at them.
-[[ -d "$HERE/mappings" ]] && export CPC_MAPPINGS="$HERE/mappings"
+# Mappings (event->controller-op config) ship inside config/; point the core there.
+[[ -d "$HERE/config/mappings" ]] && export CPC_MAPPINGS="$HERE/config/mappings"
 
 python3 "$HERE/api/api.py"                              & API_PID=$!
 python3 -m http.server "$SPA_PORT" --directory "$HERE/dist"  > /dev/null 2>&1 & SPA_PID=$!

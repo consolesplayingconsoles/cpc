@@ -4,8 +4,8 @@
 #
 #  Usage: ./deploy.sh <path-to-env-file>
 #  Examples:
-#    ./deploy.sh wii/.env          # console node
-#    ./deploy.sh pluto/.env        # Pluto host (ships api/ + dist/)
+#    ./deploy.sh nodes/wii/.env    # console node (consoles live under nodes/)
+#    ./deploy.sh pluto/.env        # Pluto host (ships api/ + dist/ + config/)
 #
 #  Lines starting with ##STEP:<name> are parsed by the Pluto API
 #  to emit structured SSE step events. Keep them on their own line.
@@ -90,17 +90,12 @@ if [[ "$CONSOLE_DIR" == "pluto" ]]; then
   tar --no-xattrs --no-fflags --no-mac-metadata \
       -cf - pluto/api pluto/dist pluto/config pluto/serve.sh pluto/deploy/pluto.service \
       | $SSH "tar -xf - --strip-components=1 -C ${REMOTE_PLUTO}"
-  # config/ carries the runtime JSON the API reads (connections.json, chat.json);
-  # layout.json rides along too (frontend-only, already bundled in dist — harmless).
+  # config/ carries everything the API reads: connections.json, chat.json, the
+  # drive mappings/ (serve.sh points CPC_MAPPINGS at config/mappings), and the
+  # layout.json (frontend-only, already in dist — harmless). Node dirs are NOT
+  # shipped: prod has no console .envs, so the diagram shows pluto/gateway/cloud.
   $SSH "cat > ${REMOTE_PLUTO}/.env"      < "$ENV_FILE"
   $SSH "chmod +x ${REMOTE_PLUTO}/serve.sh"
-  # Mappings are CONFIG/DATA that PLUTO reads to translate vacuum events -> ops and
-  # hand them to the Pi. They ship WITH Pluto (single source of truth) and live at
-  # /opt/pluto/mappings (serve.sh points CPC_MAPPINGS there). Deliberately NOT in
-  # the cpc-python-client console deploy -- shipping them to the Pi too would drift.
-  # (No --strip-components: keep the mappings/ dir intact.)
-  tar --no-xattrs --no-fflags --no-mac-metadata -cf - mappings \
-      | $SSH "tar -xf - -C ${REMOTE_PLUTO}"
   echo "sync ok"
 
   # Restart so the new code takes effect. If pluto.service is installed under a
@@ -148,13 +143,13 @@ echo "sync ok"
 ENV_DEPS="$(_env_get DEPLOY_ENV_DEPS)"
 if [[ -n "$ENV_DEPS" ]]; then
   for dep in $ENV_DEPS; do
-    dep_env="${dep}/.env"
-    if [[ -f "$dep_env" ]]; then
+    src="nodes/${dep}/.env"              # peer node envs now live under nodes/
+    if [[ -f "$src" ]]; then
       $SSH "mkdir -p ${REMOTE_PATH}/${dep}"
-      $SSH "cat > ${REMOTE_PATH}/${dep_env}" < "$dep_env"
-      echo "env dep: ${dep_env}"
+      $SSH "cat > ${REMOTE_PATH}/${dep}/.env" < "$src"
+      echo "env dep: ${src}"
     else
-      echo "[WARN] ${dep_env} not found, skipping"
+      echo "[WARN] ${src} not found, skipping"
     fi
   done
 fi

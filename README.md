@@ -8,7 +8,7 @@ In 1996, Sega built a Saturn with built-in networking. They called it Pluto. Onl
 
 This project started while waiting for a Saturn to arrive from Japan. Reading about Pluto sent me down a rabbit hole. This is where I ended up.
 
-consolesplayingconsoles is a distributed network connecting retro consoles from different manufacturers and generations, giving internet access to hardware that predates the web and enabling cross-console experiences that were never designed to exist. The dashboard is called Pluto. This time it will ship.
+consolesplayingconsoles is an asymmetric private cloud project connecting retro consoles from different manufacturers and generations, giving internet access to hardware that predates the web and enabling cross-console experiences that were never designed to exist. The dashboard is called Pluto. This time it will ship.
 
 ---
 
@@ -16,25 +16,12 @@ consolesplayingconsoles is a distributed network connecting retro consoles from 
 
 Shared infrastructure:
 
-| Folder             | What's inside                                                                                     |
-|--------------------|---------------------------------------------------------------------------------------------------|
+| Folder                                     | What's inside                                                                                           |
+|--------------------------------------------|---------------------------------------------------------------------------------------------------------|
 | [cpc-python-client/](./cpc-python-client/) | Python console client: the shared `cpc_python_core` package (UI, env, chat), entrypoints, vendored deps |
-| [pluto/](./pluto/) | Network dashboard: node status, cloud sync client, distributed messaging, distributed deployments |
+| [pluto/](./pluto/)                         | The C2 heart of CPC                                                                                     |
 
-Console nodes — auto-generated from each folder's `.env.sample`, do not edit by
-hand (run `python3 scripts/gen_readme.py`):
-
-<!-- CONSOLES:START -->
-| Folder | Node | Manufacturer |
-|--------|------|--------------|
-| [batocera/](./batocera/) | Batocera | Linux |
-| [dc/](./dc/) | Dreamcast | Sega |
-| [dreame/](./dreame/) | L40 Ultra | Dreame |
-| [gba/](./gba/) | Game Boy Advance | Nintendo |
-| [ps3/](./ps3/) | PlayStation 3 | Sony |
-| [wii/](./wii/) | Wii | Nintendo |
-| [ws/](./ws/) | WonderSwan | Bandai |
-<!-- CONSOLES:END -->
+The [./nodes](./nodes) dir contains the definition of each potential node in the network. Any new dir with a valid .env file will be picked at startup.
 
 ---
 

@@ -9,7 +9,6 @@ from cpc_python_core.env import load_env
 # TUI on the console itself, so they are intentionally not listed here.
 REQUIRED_KEYS = [
     "NODE_NAME",
-    "SHORT_NAME",
     "MANUFACTURER",
     "UI_PRIMARY_COLOR",
     "UI_SECONDARY_COLOR"
@@ -28,6 +27,8 @@ def load(env_path: str) -> dict:
     if missing:
         _fatal_missing(missing, env_path)
 
+    # The node key is the dir name (replaces the old SHORT_NAME var).
+    config["NODE_KEY"] = os.path.basename(os.path.dirname(os.path.abspath(env_path)))
     return config
 
 
