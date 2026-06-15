@@ -4,8 +4,8 @@
 #
 #  Usage: ./deploy.sh <path-to-env-file>
 #  Examples:
-#    ./deploy.sh nodes/wii/.env    # console node (consoles live under nodes/)
-#    ./deploy.sh pluto/.env        # Pluto host (ships api/ + dist/ + config/)
+#    ./deploy.sh nodes/local/wii/.env  # console node (consoles live under nodes/local/)
+#    ./deploy.sh pluto/.env            # Pluto host (ships api/ + dist/ + config/ + cloud samples)
 #
 #  Lines starting with ##STEP:<name> are parsed by the Pluto API
 #  to emit structured SSE step events. Keep them on their own line.
@@ -92,10 +92,18 @@ if [[ "$CONSOLE_DIR" == "pluto" ]]; then
       | $SSH "tar -xf - --strip-components=1 -C ${REMOTE_PLUTO}"
   # config/ carries everything the API reads: connections.json, chat.json, the
   # drive mappings/ (serve.sh points CPC_MAPPINGS at config/mappings), and the
-  # layout.json (frontend-only, already in dist — harmless). Node dirs are NOT
-  # shipped: prod has no console .envs, so the diagram shows pluto/gateway/cloud.
+  # layout.json (frontend-only, already in dist — harmless). Local node dirs are
+  # NOT shipped: prod has no console .envs, so the LAN diagram shows pluto/gateway.
   $SSH "cat > ${REMOTE_PLUTO}/.env"      < "$ENV_FILE"
   $SSH "chmod +x ${REMOTE_PLUTO}/serve.sh"
+
+  # The cloud connectors (nodes/cloud/*) ARE discovered nodes, so ship their
+  # .env.sample (identity only — no real .env, no secrets) to /opt/nodes/cloud/,
+  # where discover_nodes() looks (base_dir/../nodes). That keeps the cloud cluster
+  # on the prod diagram even though no local consoles are deployed.
+  $SSH "rm -rf /opt/nodes/cloud && mkdir -p /opt/nodes"
+  tar --no-xattrs --no-fflags --no-mac-metadata -cf - nodes/cloud/*/.env.sample \
+      | $SSH "tar -xf - -C /opt/nodes"
   echo "sync ok"
 
   # Restart so the new code takes effect. If pluto.service is installed under a
@@ -116,8 +124,8 @@ fi
 
 # ── Step 1: vendor ────────────────────────────────────────────
 echo "##STEP:vendor"
-rm -rf cpc-python-client/vendor/
-pip install --disable-pip-version-check -r cpc-python-client/requirements.txt --target=cpc-python-client/vendor/ --quiet
+rm -rf pluto-python-tui/vendor/
+pip install --disable-pip-version-check -r pluto-python-tui/requirements.txt --target=pluto-python-tui/vendor/ --quiet
 echo "vendor ok"
 
 # ── Step 2: sync ──────────────────────────────────────────────
@@ -127,7 +135,7 @@ $SSH "rm -rf ${REMOTE_PATH}/* && mkdir -p ${REMOTE_PATH}/logs"
 # Allowlist: ship ONLY the python client dir (code + vendored deps). No
 # .deployignore to babysit — anything else at the repo root (pluto/, birdbuddy/,
 # scripts/, start-pluto.sh, *.md, other consoles, ...) can't leak; it's not listed.
-INCLUDE=( cpc-python-client )
+INCLUDE=( pluto-python-tui )
 
 tar --no-xattrs --no-fflags --no-mac-metadata \
     -cf - "${INCLUDE[@]}" | $SSH "tar -xf - -C ${REMOTE_PATH}"
@@ -139,26 +147,11 @@ $SSH "cat > ${REMOTE_PATH}/${CONSOLE_DIR}/.env" < "$ENV_FILE"
 
 echo "sync ok"
 
-# ── Step 2b: peer env files ───────────────────────────────────
-ENV_DEPS="$(_env_get DEPLOY_ENV_DEPS)"
-if [[ -n "$ENV_DEPS" ]]; then
-  for dep in $ENV_DEPS; do
-    src="nodes/${dep}/.env"              # peer node envs now live under nodes/
-    if [[ -f "$src" ]]; then
-      $SSH "mkdir -p ${REMOTE_PATH}/${dep}"
-      $SSH "cat > ${REMOTE_PATH}/${dep}/.env" < "$src"
-      echo "env dep: ${src}"
-    else
-      echo "[WARN] ${src} not found, skipping"
-    fi
-  done
-fi
-
 # ── Step 3: linux deps ────────────────────────────────────────
-if grep -qvE '^[[:space:]]*(#|$)' cpc-python-client/requirements-linux.txt; then
+if grep -qvE '^[[:space:]]*(#|$)' pluto-python-tui/requirements-linux.txt; then
   echo "##STEP:deps"
-  RL="${REMOTE_PATH}/cpc-python-client/requirements-linux.txt"
-  RV="${REMOTE_PATH}/cpc-python-client/vendor/"
+  RL="${REMOTE_PATH}/pluto-python-tui/requirements-linux.txt"
+  RV="${REMOTE_PATH}/pluto-python-tui/vendor/"
   $SSH "pip3 install --disable-pip-version-check -r ${RL} --target=${RV} --quiet 2>/dev/null \
         || pip install --disable-pip-version-check -r ${RL} --target=${RV} --quiet" || true
   echo "deps ok"

@@ -1,9 +1,9 @@
 """
-cpc_python_core/controller.py -- configurable action-trigger -> controller translator.
+controller.py -- configurable action-trigger -> controller translator.
 
 The generic, console-agnostic CONSUMER half of the vacuum-plays-a-console pipeline.
-A declarative MAPPING (the "translation logic", defined per node -- see
-pi/mapping.json) binds dreame_events action triggers to controller ops; a SINK
+A declarative MAPPING (the "translation logic" -- see pluto/config/mappings/)
+binds dreame_events action triggers to controller ops; a SINK
 renders those ops to a target. The same events + mapping drive any sink, so the
 console/transport is swappable:
 

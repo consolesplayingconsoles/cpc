@@ -1,5 +1,5 @@
 """
-cpc_python_core/bridges/dreame_events.py -- Dreame L40 -> action-trigger events.
+dreame_events.py -- Dreame L40 -> action-trigger events.
 
 The console-agnostic SPINE of the "vacuum plays a console" build. It turns vacuum
 data into a stream of typed ACTION TRIGGERS -- discrete, timestamped events that a
@@ -210,12 +210,12 @@ def iter_realtime(events, speed=1.0):
 # -- Demo: capture the event stream from a real captured clean -----------------
 
 if __name__ == "__main__":
-    # python3 -m cpc_python_core.bridges.dreame_events <routes.json> [session_id]
+    # python3 -m drive.dreame_events <routes.json> [session_id]
     import sys
     import json
 
     if len(sys.argv) < 2:
-        print("usage: python3 -m cpc_python_core.bridges.dreame_events "
+        print("usage: python3 -m drive.dreame_events "
               "<routes.json> [session_id]")
         sys.exit(1)
 

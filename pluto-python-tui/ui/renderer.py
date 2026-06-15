@@ -294,7 +294,7 @@ def render_controller(config: dict, device_name: str, events: list):
 
 
 def render_bridge(config: dict, title: str, lines: list):
-    """Render a live device-bridge view (generic across cpc_python_core.bridges).
+    """Render a live device-bridge view (generic across bridges).
     title: e.g. "Dreame L40 -> Wii".  lines: status strings, newest last."""
     primary     = hex_fg(config["UI_PRIMARY_COLOR"])
     secondary   = hex_fg(config["UI_SECONDARY_COLOR"])

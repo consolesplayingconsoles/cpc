@@ -4,7 +4,7 @@
 The network is monitored and administered from **Pluto**, a web dashboard that channels a highly functional, dense, and hyper-reliable router console aesthetic — optimized for pure engineering utility rather than flashy corporate web design.
 
 ### 2. Unified Environment Configuration (.env)
-Environment configuration files live inside each node's own directory under `nodes/` (e.g. `nodes/wii/.env`, `nodes/wii/dev.env`); `pluto/` is the dashboard app and also the host node (its own `pluto/.env`). They are the single source of truth for branding, networking, and security credentials across both the web and terminal interfaces. The API discovers the node roster from `nodes/*/` at startup — every dir is a node, **keyed by its dir name** (the display name lives in the node's `.env` as `NODE_NAME`). Never create a flat `console/` dir for env files — each node owns its own under `nodes/`.
+Environment configuration files live inside each node's own directory under `nodes/`, split into two kinds: pinged LAN nodes under `nodes/local/` (e.g. `nodes/local/wii/.env`, `nodes/local/wii/dev.env`) and off-network connectors under `nodes/cloud/` (e.g. `nodes/cloud/cloud_storage/`, `nodes/cloud/claude/`); `pluto/` is the dashboard app and also the host node (its own `pluto/.env`). They are the single source of truth for branding, networking, and security credentials across both the web and terminal interfaces. The API discovers the node roster from `nodes/local/*/` and `nodes/cloud/*/` at startup — every dir is a node, **keyed by its dir name** (the display name lives in the node's `.env` as `NODE_NAME`). Local nodes are pinged (up / down / unconfigured); cloud nodes carry the `cloud` status — never pinged, always shown (the dir IS the declaration). Never create a flat `console/` dir for env files — each node owns its own under `nodes/`.
 
 * **Sandboxing**: Variables must remain strictly sandboxed to their specific deployment runtime contexts.
 * **Unified Template (`.env.sample`)**: Each console directory includes a `.env.sample` template file containing zero real data. This file is the strict structural blueprint. Never commit `*.env` files — only `*.env.sample`.
@@ -65,7 +65,7 @@ The Python application features a terminal-based administrative interface for di
 * **Input Model**: Displays interactive text input fields dynamically at the exact time and place user configuration is required.
 * **Config Printing**: Capable of reading and printing raw configuration files (such as controller mappings) directly into the terminal window for instant inspection.
 * **Title format**: ASCII header always renders as `CPC MANUFACTURER CONSOLENAME` using pyfiglet. CPC + manufacturer on one line (secondary color), console name large below (primary color).
-* **Dependencies**: managed via `cpc-python-client/requirements.txt`, vendored into `cpc-python-client/vendor/`, deployed via `deploy.sh nodes/<console>/.env`.
+* **Dependencies**: managed via `pluto-python-tui/requirements.txt`, vendored into `pluto-python-tui/vendor/`, deployed via `deploy.sh nodes/local/<console>/.env`.
 
 ### 7. Cross-Platform Topology & Dynamic Availability
 The core Python interface executes natively on a **master** Linux console. However, its management scope extends beyond the host machine to coordinate specialized **client** devices directly from the master interface.
@@ -92,8 +92,8 @@ Pluto itself is never loaded on a console browser. However, consumer-facing bypr
 ### 9. Local Development & Interface Testing
 To keep production application logic perfectly clean and free of testing conditionals, the platform utilizes separate execution scripts for live deployments versus local development environments.
 
-* **Production Entrypoint (`cpc-python-client/main.py`)**: Runs the strict live logic. It parses the namespace-targeted `.env` file, evaluates real host infrastructure, executes live pings, and dynamically hides/strips UI menus based on physical hardware availability.
-* **Development Entrypoint (`cpc-python-client/dev.py`)**: A dedicated wrapper script used solely for local interface testing (the python equivalent to running `yarn dev`). It completely bypasses the live infrastructure pipeline and force-feeds a complete layout matrix directly into the UI engine. This ensures all menus and text inputs remain visible and editable locally without requiring a production host context or physical devices attached.
+* **Production Entrypoint (`pluto-python-tui/main.py`)**: Runs the strict live logic. It parses the namespace-targeted `.env` file, evaluates real host infrastructure, executes live pings, and dynamically hides/strips UI menus based on physical hardware availability.
+* **Development Entrypoint (`pluto-python-tui/dev.py`)**: A dedicated wrapper script used solely for local interface testing (the python equivalent to running `yarn dev`). It completely bypasses the live infrastructure pipeline and force-feeds a complete layout matrix directly into the UI engine. This ensures all menus and text inputs remain visible and editable locally without requiring a production host context or physical devices attached.
 
 ### 10. Device Access Discipline
 Connecting to a physical console or device (e.g. `ssh wii ...`) is an explicit, per-command action — **never** a standing grant. See [`SECURITY.md`](./SECURITY.md) for the full policy.

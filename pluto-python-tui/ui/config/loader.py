@@ -1,7 +1,7 @@
 import os
 import sys
 
-from cpc_python_core.env import load_env
+from env import load_env
 
 # Keys the local console interface needs to render and brand itself.
 # Networking / SSH fields (HOST_IP, SSH_USER, SSH_KEY_PATH, CUSTOM_SSH_ALIAS)

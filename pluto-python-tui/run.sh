@@ -16,7 +16,7 @@ set -euo pipefail
 [ -f ~/.profile ] && source ~/.profile 2>/dev/null || true
 
 # Remember where we were invoked from (to resolve relative env-file args), then
-# run relative to this script's own dir (cpc-python-client/) so client paths hold.
+# run relative to this script's own dir (pluto-python-tui/) so client paths hold.
 ORIG_PWD="$PWD"
 cd "$(dirname "$0")"
 
