@@ -32,7 +32,7 @@ export const ICONS: Record<string, string> = {
   birdbuddy:     imgBird,
   pi:            imgPi,
   cloud:         imgCloud,
-  cloud_storage: imgCloudStorage,
+  dropbox:       imgCloudStorage,   // operator-named storage node; generic brandless glyph
   dreamehome:    imgDreame,    // the vacuum's cloud — reuses the Dreame mark
   substack:      imgSubstack,
 }

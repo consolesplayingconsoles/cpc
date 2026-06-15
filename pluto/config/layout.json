@@ -17,7 +17,7 @@
     "megadrive": [-350,  215]
   },
   "fromCloud": {
-    "cloud_storage": [-250, 40],
+    "dropbox":       [-250, 40],
     "dreamehome":    [-100, 100],
     "claude":        [ 100, 100],
     "substack":      [ 250, 40]
