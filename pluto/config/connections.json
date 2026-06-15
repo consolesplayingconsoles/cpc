@@ -1,23 +1,107 @@
 [
-  { "from": "pluto",    "to": "gateway", "label": "USB Eth"            },
-  { "from": "wii",      "to": "gateway", "label": "WiFi"               },
-  { "from": "batocera", "to": "gateway", "label": "WiFi"               },
-  { "from": "ps3",      "to": "gateway", "label": "WiFi"               },
-  { "from": "dc",       "to": "gateway", "label": "Ethernet"           },
-  { "from": "dc",       "to": "vmu",     "label": "Maple"              },
-  { "from": "gba",      "to": "wii",     "label": "GBA Link"           },
-  { "from": "gba",      "to": "pi",     "label": "GBA Link / Pico"     },
-  { "from": "ws",       "to": "pi",      "label": "Serial / Pico"      },
-  { "from": "dreame",   "to": "gateway",  "label": "WiFi"              },
-  { "from": "birdbuddy","to": "gateway", "label": "WiFi"               },
-  { "from": "pi",       "to": "gateway", "label": "WiFi"               },
-  { "from": "pi",       "to": "wii",     "label": "USB / Pico"         },
-  { "from": "pi",       "to": "dc",      "label": "USB / Pico / Maple" },
-  { "from": "saturn",   "to": "pi",      "label": "Serial / Pico"      },
-  { "from": "megadrive","to": "pi",      "label": "Serial / Pico"      },
-  { "from": "gateway",  "to": "cloud",         "label": "Internet"     },
-  { "from": "cloud",    "to": "dropbox",       "label": "Sync"         },
-  { "from": "cloud",    "to": "claude",        "label": "API"          },
-  { "from": "cloud",    "to": "dreamehome",    "label": "Robot"        },
-  { "from": "cloud",    "to": "substack",      "label": "Publish"      }
+  {
+    "from": "pluto",
+    "to": "gateway",
+    "label": "USB Eth"
+  },
+  {
+    "from": "wii",
+    "to": "gateway",
+    "label": "WiFi"
+  },
+  {
+    "from": "batocera",
+    "to": "gateway",
+    "label": "WiFi"
+  },
+  {
+    "from": "ps3",
+    "to": "gateway",
+    "label": "WiFi"
+  },
+  {
+    "from": "dc",
+    "to": "gateway",
+    "label": "Ethernet"
+  },
+  {
+    "from": "dc",
+    "to": "vmu",
+    "label": "Maple"
+  },
+  {
+    "from": "gba",
+    "to": "wii",
+    "label": "GBA Link"
+  },
+  {
+    "from": "gba",
+    "to": "pi",
+    "label": "GBA Link / Pico"
+  },
+  {
+    "from": "ws",
+    "to": "pi",
+    "label": "Serial / Pico"
+  },
+  {
+    "from": "dreame",
+    "to": "gateway",
+    "label": "WiFi"
+  },
+  {
+    "from": "birdbuddy",
+    "to": "gateway",
+    "label": "WiFi"
+  },
+  {
+    "from": "pi",
+    "to": "gateway",
+    "label": "WiFi"
+  },
+  {
+    "from": "pi",
+    "to": "wii",
+    "label": "USB / Pico"
+  },
+  {
+    "from": "pi",
+    "to": "dc",
+    "label": "USB / Pico / Maple"
+  },
+  {
+    "from": "saturn",
+    "to": "pi",
+    "label": "Serial / Pico"
+  },
+  {
+    "from": "megadrive",
+    "to": "pi",
+    "label": "Serial / Pico"
+  },
+  {
+    "from": "gateway",
+    "to": "cloud",
+    "label": "Internet"
+  },
+  {
+    "from": "cloud",
+    "to": "dropbox",
+    "label": "Sync Saved Games"
+  },
+  {
+    "from": "cloud",
+    "to": "claude",
+    "label": "API"
+  },
+  {
+    "from": "cloud",
+    "to": "dreamehome",
+    "label": "Services"
+  },
+  {
+    "from": "cloud",
+    "to": "substack",
+    "label": "Publish"
+  }
 ]
