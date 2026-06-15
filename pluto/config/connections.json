@@ -16,7 +16,7 @@
   { "from": "saturn",   "to": "pi",      "label": "Serial / Pico"      },
   { "from": "megadrive","to": "pi",      "label": "Serial / Pico"      },
   { "from": "gateway",  "to": "cloud",         "label": "Internet"     },
-  { "from": "cloud",    "to": "cloud_storage", "label": "Sync"         },
+  { "from": "cloud",    "to": "dropbox",       "label": "Sync"         },
   { "from": "cloud",    "to": "claude",        "label": "API"          },
   { "from": "cloud",    "to": "dreamehome",    "label": "Robot"        },
   { "from": "cloud",    "to": "substack",      "label": "Publish"      }
