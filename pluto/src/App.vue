@@ -1,11 +1,29 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useNodes } from './composables/useNodes'
 import { useConnections } from './composables/useConnections'
 import { useMessages } from './composables/useMessages'
 import NetworkDiagram from './components/NetworkDiagram.vue'
 import GroupChat from './components/GroupChat.vue'
 import Robutek from './components/Robutek.vue'
+
+const route = useRoute()
+const router = useRouter()
+
+// The visible panel is driven by the current route name. The router table maps
+// '/' → network, '/chat' → chat, '/dreame' → the Dreame/Robutek view.
+const activeTab = computed<'network' | 'chat' | 'robutek'>(() => {
+  if (route.name === 'chat') return 'chat'
+  if (route.name === 'dreame') return 'robutek'
+  return 'network'
+})
+
+// open-tab key (and the switcher buttons) → path
+function goToTab(tab: 'network' | 'chat' | 'robutek' | 'dreame') {
+  const path = tab === 'chat' ? '/chat' : (tab === 'robutek' || tab === 'dreame') ? '/dreame' : '/'
+  if (route.path !== path) router.push(path)
+}
 
 const { nodes, loading, error } = useNodes()
 const { connections } = useConnections()
@@ -25,7 +43,6 @@ const dreameConfigured = computed(() =>
 const isDev = import.meta.env.DEV
 
 const showOffline    = ref(false)
-const activeTab      = ref<'network' | 'chat' | 'robutek'>('network')
 const lastSeenMsgId  = ref(0)
 const baselined      = ref(false)
 
@@ -52,22 +69,15 @@ watch(messages, () => {
   if (activeTab.value === 'chat') lastSeenMsgId.value = latestId()
 }, { deep: true, immediate: true })
 
-onMounted(() => {
-  const tab = new URLSearchParams(window.location.search).get('tab')
-  if (tab === 'chat' || tab === 'network' || tab === 'robutek') activeTab.value = tab
-})
-
+// Mark chat read whenever the chat route becomes active (including on direct load).
 watch(activeTab, (tab) => {
   if (tab === 'chat') lastSeenMsgId.value = latestId()
-  const url = new URL(window.location.href)
-  url.searchParams.set('tab', tab)
-  history.replaceState(null, '', url.toString())
-})
+}, { immediate: true })
 
-// Never strand the user on a hidden Dreame tab — covers both a ?tab=robutek deep
-// link and the roster loading async after mount. Bounce back to Network.
+// Never strand the user on a hidden Dreame tab — covers both a /dreame deep
+// link and the roster loading async after mount. Redirect back to Network.
 watch(dreameConfigured, (ok) => {
-  if (!ok && activeTab.value === 'robutek') activeTab.value = 'network'
+  if (!ok && activeTab.value === 'robutek') router.replace('/')
 }, { immediate: true })
 
 const displayNodes = computed(() => {
@@ -116,32 +126,28 @@ const displayNodes = computed(() => {
     </header>
 
     <main class="main">
-      <!-- Floating tab switcher -->
-      <div class="tab-switcher">
+      <!-- Floating tab switcher — top-level Pluto surfaces only. A per-node module
+           drill-in (Dreame) hides it and carries its own Back affordance instead,
+           so we never sit in a tab bar with nothing selected. -->
+      <div v-if="activeTab !== 'robutek'" class="tab-switcher">
         <button
           class="tab"
           :class="{ 'tab--active': activeTab === 'network' }"
-          @click="activeTab = 'network'"
+          @click="goToTab('network')"
         >Network</button>
         <button
           class="tab"
           :class="{ 'tab--active': activeTab === 'chat' }"
-          @click="activeTab = 'chat'"
+          @click="goToTab('chat')"
         >
           Chat
           <span v-if="unreadCount > 0" class="tab-badge">{{ unreadCount }}</span>
         </button>
-        <button
-          v-if="dreameConfigured"
-          class="tab"
-          :class="{ 'tab--active': activeTab === 'robutek' }"
-          @click="activeTab = 'robutek'"
-        >Dreame</button>
       </div>
 
       <div v-show="activeTab === 'network'" class="network-view">
         <div v-if="loading" class="state-msg">Scanning network…</div>
-        <NetworkDiagram v-show="!loading" :nodes="displayNodes" :connections="connections" @open-tab="activeTab = $event as 'network' | 'chat' | 'robutek'" />
+        <NetworkDiagram v-show="!loading" :nodes="displayNodes" :connections="connections" @open-tab="goToTab($event as 'network' | 'chat' | 'robutek' | 'dreame')" />
       </div>
 
       <GroupChat
@@ -150,7 +156,7 @@ const displayNodes = computed(() => {
         :show-offline="showOffline"
       />
 
-      <Robutek v-show="activeTab === 'robutek'" :name="dreameName" :active="activeTab === 'robutek'" :nodes="nodes" />
+      <Robutek v-show="activeTab === 'robutek'" :name="dreameName" :active="activeTab === 'robutek'" :nodes="nodes" @back="goToTab('network')" />
     </main>
 
     <footer class="footer">

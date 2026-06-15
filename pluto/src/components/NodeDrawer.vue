@@ -1,13 +1,21 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { NodeData } from '../composables/useNodes'
+import type { NodeData, NodeMap } from '../composables/useNodes'
 import type { DeployResult } from '../composables/useDeploy'
+import { API_BASE } from '../composables/useNodes'
 import NodeBubble from './NodeBubble.vue'
 import DeployTerminal from './DeployTerminal.vue'
+import NodeCommand from './NodeCommand.vue'
+import chatConfig from '../../config/chat.json'
+
+interface Cmd { verb: string; desc?: string; target?: string; multiline?: boolean; done?: boolean }
+const NODE_ACTIONS = (chatConfig.nodeActions ?? {}) as Record<string, Cmd[]>
+const HANDLES      = (chatConfig.mentions.handles ?? {}) as Record<string, string>
 
 const props = defineProps<{
   id:        string
   node:      NodeData
+  nodes:     NodeMap
   icon?:     string
   output:    DeployResult | null
   deploying: boolean
@@ -32,9 +40,28 @@ const offline = computed(() => props.node.status === 'down' || props.node.status
 const unconfigured = computed(() => props.node.status === 'unconfigured')
 // Host vs console: deploying a console ships the Pluto python client to it.
 const deployLabel = computed(() => props.id === 'pluto' ? 'Deploy Pluto' : 'Deploy Pluto Client')
-// The vacuum has its own control surface — its commands live in the Dreame tab.
-const isVacuum = computed(() => props.id === 'dreame')
+// The vacuum has its own control surface — its commands live in the Dreame view.
+// Both vacuum nodes open it: `dreame` (the L40 on the LAN) and `dreamehome` (its cloud).
+const isVacuum = computed(() => props.id === 'dreame' || props.id === 'dreamehome')
 const hasInfra = computed(() => props.node.deploy || props.node.folder || !!props.node.code)
+
+// Node commands (the chat verbs) surface here too — DRY: same chat.json registry,
+// same dispatch. Each posts "@handle verb [arg]" to /messages (logged in the chat
+// feed AND messages.log). The vacuum is the exception: its commands live in the tab.
+const handle   = computed(() => '@' + (HANDLES[props.id] ?? props.id))
+const commands = computed(() => isVacuum.value ? [] : (NODE_ACTIONS[props.id] ?? []))
+const targets  = computed(() => [
+  { label: 'Everyone', value: '@everyone' },
+  ...Object.entries(props.nodes)
+    .filter(([id, n]) => id !== 'gateway' && id !== 'cloud' && id !== 'pluto' && id !== props.id && !n.cloud)
+    .map(([id, n]) => ({ label: n.name, value: '@' + (HANDLES[id] ?? id) })),
+])
+function postCommand(text: string) {
+  fetch(`${API_BASE}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  }).catch(() => { /* best-effort; the chat feed reflects it on next poll */ })
+}
 </script>
 
 <template>
@@ -72,6 +99,15 @@ const hasInfra = computed(() => props.node.deploy || props.node.folder || !!prop
         <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 8l-4 4 4 4M16 8l4 4-4 4"/></svg>
         <span>Code</span>
       </button>
+    </section>
+
+    <section v-if="commands.length" class="nd__sec">
+      <p class="nd__lbl">Commands</p>
+      <NodeCommand
+        v-for="c in commands" :key="c.verb"
+        :handle="handle" :cmd="c" :targets="targets"
+        @run="postCommand"
+      />
     </section>
 
     <section v-if="output" class="nd__sec nd__sec--term">
