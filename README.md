@@ -16,12 +16,12 @@ consolesplayingconsoles is an asymmetric private cloud project connecting retro 
 
 Shared infrastructure:
 
-| Folder                                     | What's inside                                                                                           |
-|--------------------------------------------|---------------------------------------------------------------------------------------------------------|
-| [cpc-python-client/](./cpc-python-client/) | Python console client: the shared `cpc_python_core` package (UI, env, chat), entrypoints, vendored deps |
-| [pluto/](./pluto/)                         | The C2 heart of CPC                                                                                     |
+| Folder                                   | What's inside                             |
+|------------------------------------------|-------------------------------------------|
+| [pluto-python-tui/](./pluto-python-tui/) | Pluto's Python client/TUI for Linux nodes |
+| [pluto/](./pluto/)                       | The C2 heart of CPC                       |
 
-The [./nodes](./nodes) dir contains the definition of each potential node in the network. Any new dir with a valid .env file will be picked at startup.
+The [./nodes](./nodes) dir contains the definition of each potential node in the network. Any dir (existing or new) with a valid `.env` file will be picked at startup.
 
 ---
 

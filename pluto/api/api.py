@@ -98,49 +98,6 @@ def _bot_enabled():
     return bool(_bot_key) or _bot_broke
 
 
-def _cloud_nodes(cfg):
-    """Pluto's cloud 'solar system' -- its off-network service buddies, drawn as a
-    separate cluster on the diagram. NOT network infrastructure: no console dir and
-    no ping. A node is present iff configured in pluto/.env (namespaced CLOUD_STORAGE_*
-    / LLM_AGENT_* so another backend could be hooked later without a code change),
-    and renders with the 'cloud' status -- linked, never pinged, never up/down.
-
-    Topology: the gateway links to a single 'cloud' hub, and the hub fans out to
-    the service buddies -- one trunk crosses into the cluster instead of a line per
-    service. Brandless in committed code (CLAUDE.md): the storage name comes from
-    the operator's own .env, not a hardcoded provider."""
-    def _buddy(node_id, name, color):
-        return {
-            "id": node_id, "name": name, "ip": "", "color": color,
-            "status": "cloud", "cloud": True,
-            "smb": None, "deploy": False, "folder": False, "os": None,
-        }
-
-    services = []
-    storage_name = cfg.get("CLOUD_STORAGE_NAME", "").strip()
-    if storage_name:
-        services.append(_buddy("cloud_storage", storage_name,
-                               cfg.get("CLOUD_STORAGE_COLOR", "").strip() or None))
-    # The LLM agent is the same assistant that answers @claude in chat, so it's
-    # enabled by the bot credential (ANTHROPIC_API_KEY / broke-mode); LLM_AGENT_*
-    # only rebrands its node here.
-    if _bot_enabled():
-        services.append(_buddy(BOT_ID, cfg.get("LLM_AGENT_NAME", "").strip() or "Claude",
-                               cfg.get("LLM_AGENT_COLOR", "").strip() or "#d97757"))
-    # DreameHome (the vacuum's cloud) and Substack (the publish target) are fixed
-    # services, not swappable backends, so there's no name to configure -- their
-    # nodes are always drawn.
-    services.append(_buddy("dreamehome", "DreameHome", None))
-    services.append(_buddy("substack", "Substack", None))
-
-    if not services:
-        return []
-    # the hub the gateway connects to. Default (uncoloured) -- only Claude keeps an
-    # identity colour, since it's a real chat participant; storage/hub stay neutral.
-    hub = _buddy("cloud", "Cloud", None)
-    return [hub] + services
-
-
 def _bot_reply(messages_snapshot):
     """Dispatch a mention to the real Claude, or the keyless broke-mode gag."""
     if not _bot_key:
@@ -256,9 +213,11 @@ def _is_lan_ip(ip):
 
 REQUIRED_VARS = ["GATEWAY_IP"]
 
-# The node roster is DISCOVERED at startup from <repo>/nodes/*/ (every dir is a
-# node, key = dir name), plus 'pluto' the host. See discover_nodes(). No hardcoded
-# list, no per-request rescans -- the startup snapshot is the single source of truth.
+# The node roster is DISCOVERED at startup from <repo>/nodes/local/*/ (pinged LAN
+# nodes) and <repo>/nodes/cloud/*/ (off-network connectors: status 'cloud', never
+# pinged, always shown), keyed by dir name, plus 'pluto' the host. See
+# discover_nodes(). No hardcoded list, no per-request rescans -- the startup
+# snapshot is the single source of truth.
 
 # Consoles whose OS is fixed by definition — used as the badge default so it shows
 # even when the node is offline (TTL detection only works on a live reply).
@@ -353,35 +312,52 @@ def _load_recent_messages(limit=STARTUP_MESSAGES):
 def console_env_path(base_dir, node_id):
     """Path to a node's REAL .env -- used where the live config file is needed
     (e.g. the deploy stream). pluto is the host: its .env is pluto/.env (base_dir
-    itself). Every other node lives under <repo>/nodes/<name>/.env."""
+    itself). Deployable consoles live under <repo>/nodes/local/<name>/.env. (Cloud
+    connectors aren't deployed, so they never reach here.)"""
     if node_id == "pluto":
         return os.path.join(base_dir, ".env")
-    return os.path.normpath(os.path.join(base_dir, "..", "nodes", node_id, ".env"))
+    return os.path.normpath(os.path.join(base_dir, "..", "nodes", "local", node_id, ".env"))
 
 
 def discover_nodes(base_dir):
-    """Discover the node roster ONCE at startup: every dir under <repo>/nodes/ is a
-    node, keyed by its dir name. Its config comes from the dir's .env (a configured
-    node) or, if absent, its .env.sample (an unconfigured placeholder slot). A dir
-    with NEITHER is malformed -> fail fast. Returns {name: config}. (pluto, the host,
-    is added by the caller from the main pluto/.env -- it doesn't live under nodes/.)
-    This snapshot is the single source of truth; nothing rescans the filesystem after."""
+    """Discover the node roster ONCE at startup from <repo>/nodes/, keyed by dir name:
+
+      nodes/local/<name>/  -- a pinged LAN node (console/host). Tagged _kind='local'.
+      nodes/cloud/<name>/  -- an off-network connector (cloud drive, LLM agent,
+                              DreameHome, Substack). Tagged _kind='cloud': never
+                              pinged. Configured (a real .env present) -> shown;
+                              placeholder (only .env.sample) -> 'unconfigured', so
+                              it hides behind the same toggle as placeholder LAN
+                              nodes. (The 'cloud' hub is virtual, synthesised in
+                              _build_nodes -- no dir, like 'gateway'.)
+
+    Each node's config comes from its dir's .env (configured) or, if absent, its
+    .env.sample (an unconfigured placeholder slot). A dir with NEITHER is malformed
+    -> fail fast. Returns {name: config} with cfg['_kind'] and cfg['_has_env']
+    tagged. (pluto, the host, is added by the caller from the main pluto/.env.) This
+    snapshot is the single source of truth; nothing rescans the filesystem after."""
     roster = {}
     nodes_root = os.path.normpath(os.path.join(base_dir, "..", "nodes"))
-    if not os.path.isdir(nodes_root):
-        return roster
-    for name in sorted(os.listdir(nodes_root)):
-        d = os.path.join(nodes_root, name)
-        if name.startswith(".") or not os.path.isdir(d):
+    for kind in ("local", "cloud"):
+        kind_root = os.path.join(nodes_root, kind)
+        if not os.path.isdir(kind_root):
             continue
-        env_f, sample_f = os.path.join(d, ".env"), os.path.join(d, ".env.sample")
-        if os.path.exists(env_f):
-            roster[name] = load_env(env_f)
-        elif os.path.exists(sample_f):
-            roster[name] = load_env(sample_f)   # placeholder identity; unconfigured (no HOST_IP)
-        else:
-            print("\n  ERROR: node dir has no .env or .env.sample: %s\n" % d)
-            sys.exit(1)
+        for name in sorted(os.listdir(kind_root)):
+            d = os.path.join(kind_root, name)
+            if name.startswith(".") or not os.path.isdir(d):
+                continue
+            env_f, sample_f = os.path.join(d, ".env"), os.path.join(d, ".env.sample")
+            has_env = os.path.exists(env_f)
+            if has_env:
+                cfg = load_env(env_f)
+            elif os.path.exists(sample_f):
+                cfg = load_env(sample_f)   # placeholder identity; unconfigured
+            else:
+                print("\n  ERROR: node dir has no .env or .env.sample: %s\n" % d)
+                sys.exit(1)
+            cfg["_kind"]    = kind
+            cfg["_has_env"] = has_env
+            roster[name]    = cfg
     return roster
 
 
@@ -499,8 +475,8 @@ def node_for_ua(ua):
 
 
 # ── Robutek drive: dev-only vacuum-replay -> emulator/console output ──────────
-# The Pluto playback clock drives a controller Sink via cpc_python_core. Lazy
-# everything: cpc-python-client isn't on the deployed headless box, and the one
+# The Pluto playback clock drives a controller Sink. The engine lives in api/drive/
+# (controller + the dreame route->event adapter); it's imported lazily because the one
 # working sink (KeyboardSink) needs pynput + macOS Accessibility -- so this whole
 # feature degrades to a clean JSON error anywhere but the dev Mac.
 _drive_lock  = threading.Lock()
@@ -508,14 +484,11 @@ _drive_state = {"sink": None, "thread": None, "stop": None, "last_seen": 0.0}
 DRIVE_TIMEOUT = 6.0   # stop the drive if the frontend hasn't checked in for this long
 
 
-def _drive_libs(base_dir):
-    """Import the bridge libs from the sibling cpc-python-client (dev checkout)."""
-    repo_root = os.path.dirname(base_dir)
-    cpc = os.path.join(repo_root, "cpc-python-client")
-    if cpc not in sys.path:
-        sys.path.insert(0, cpc)
-    from cpc_python_core import controller
-    from cpc_python_core.bridges import dreame_events
+def _drive_libs():
+    """Import the drive engine (generic controller + the dreame route->event adapter)
+    from api/drive/. Imported lazily so the pynput/macOS dependency only loads when
+    the drive is actually used (dev Mac), never at API startup on a headless box."""
+    from drive import controller, dreame_events
     return controller, dreame_events
 
 
@@ -798,7 +771,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _handle_mappings(self):
         """List available mapping stems from the root mappings store (dev-only)."""
         try:
-            controller, _ = _drive_libs(self.__class__.base_dir)
+            controller, _ = _drive_libs()
             self._send(200, {"mappings": controller.list_mappings()})
         except Exception:
             self._send(200, {"mappings": []})
@@ -942,7 +915,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         try:
-            controller, dreame_events = _drive_libs(self.__class__.base_dir)
+            controller, dreame_events = _drive_libs()
         except Exception as exc:
             self._send(200, {"ok": False, "error": "drive libs unavailable: %s" % exc})
             return
@@ -1071,6 +1044,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             }
 
         for node_id, console_cfg in roster.items():
+            # Cloud connectors (nodes/cloud/*): off-network service buddies drawn as
+            # the diagram's 'solar system'. Never pinged. A real .env means the
+            # operator wired it up -> 'cloud' (shown); a bare .env.sample is a
+            # placeholder -> 'unconfigured', hidden behind the same toggle as
+            # placeholder LAN nodes. Identity (name/colour) comes from the dir's .env.
+            if console_cfg.get("_kind") == "cloud":
+                nodes[node_id] = {
+                    "id":     node_id,
+                    "name":   console_cfg.get("NODE_NAME", node_id),
+                    "ip":     "",
+                    "color":  console_cfg.get("UI_PRIMARY_COLOR") or None,
+                    "status": "cloud" if console_cfg.get("_has_env") else "unconfigured",
+                    "cloud":  True,
+                    "smb":    None,
+                    "deploy": False,
+                    "folder": False,
+                    "os":     None,
+                }
+                continue
             # A node configured without a HOST_IP (e.g. a placeholder loaded from
             # .env.sample) renders 'unconfigured' so "show unconfigured" reveals it.
             ip    = console_cfg.get("HOST_IP", "").strip()
@@ -1103,10 +1095,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "os":     _detect_os(console_cfg, KNOWN_OS.get(node_id) or det_os),
             }
 
-        # Cloud solar system: Pluto's service buddies (cloud drive + LLM agent),
-        # configured in pluto/.env, never pinged. Stripped when not configured.
-        for cloud in _cloud_nodes(cfg):
-            nodes[cloud["id"]] = cloud
+        # The 'cloud' hub is virtual -- like 'gateway' it has no config dir. Draw it
+        # whenever >=1 cloud connector exists, and let it track their state: 'cloud'
+        # (shown) when any connector is configured, else 'unconfigured' so the whole
+        # cluster tucks behind the same "show unconfigured" toggle as placeholder nodes.
+        cloud_satellites = [n for n in nodes.values() if n.get("cloud")]
+        if cloud_satellites:
+            any_configured = any(n["status"] == "cloud" for n in cloud_satellites)
+            nodes["cloud"] = {
+                "id": "cloud", "name": "Cloud", "ip": "", "color": None,
+                "status": "cloud" if any_configured else "unconfigured",
+                "cloud": True, "smb": None, "deploy": False, "folder": False, "os": None,
+            }
 
         return nodes
 
@@ -1176,14 +1176,16 @@ def run():
     Handler.config   = config
     Handler.base_dir = parent_dir
 
-    # Discover the node roster ONCE: nodes/*/ dirs + pluto (the host, from this .env).
+    # Discover the node roster ONCE: nodes/local + nodes/cloud dirs + pluto (the host).
     roster = discover_nodes(parent_dir)
     roster["pluto"] = config
     Handler.node_roster = roster
-    print("  nodes: %d discovered (%s)" % (len(roster), ", ".join(sorted(roster))))
+    n_cloud = sum(1 for c in roster.values() if c.get("_kind") == "cloud")
+    print("  nodes: %d discovered (%d local + %d cloud): %s" % (
+        len(roster), len(roster) - n_cloud, n_cloud, ", ".join(sorted(roster))))
 
     # Drive mappings live in config/mappings (shipped as part of config/). Point the
-    # cpc_python_core controller there unless the env already set CPC_MAPPINGS.
+    # the controller there unless the env already set CPC_MAPPINGS.
     os.environ.setdefault("CPC_MAPPINGS", os.path.join(parent_dir, "config", "mappings"))
 
     host_ip = config.get("HOST_IP", "").strip()

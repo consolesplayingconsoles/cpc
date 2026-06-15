@@ -3,7 +3,7 @@
 # This powers the "drive an emulator" feature (Robutek → Output → Local Emulator
 # (Virtual Keyboard)): the KeyboardSink synthesizes controller input as keystrokes
 # via pynput. Console nodes (PowerPC/ARM/MIPS) never run this — their runtime deps
-# are the pure-stdlib set in cpc-python-client/requirements.txt, and pynput is NOT
+# are the pure-stdlib set in pluto-python-tui/requirements.txt, and pynput is NOT
 # deployed to them.
 #
 # Homebrew's python3 is externally-managed (PEP 668), so install into a venv:

@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # unset and only colors when the terminal explicitly reports support.
 os.environ.setdefault("CPC_DEV", "1")
 
-from cpc_python_core.ui import renderer, menu as menu_mod, input as input_mod, actions
+from ui import renderer, menu as menu_mod, input as input_mod, actions
 
 
 def _resolve_console() -> str:
@@ -32,7 +32,7 @@ def _resolve_console() -> str:
 
 
 def _load_dev_config(console: str) -> dict:
-    # console dirs live one level up from this client dir (cpc-python-client/)
+    # console dirs live one level up from this client dir (pluto-python-tui/)
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     for filename in (".env",):
         path = os.path.join(root, console, filename)

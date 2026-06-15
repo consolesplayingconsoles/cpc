@@ -5,8 +5,8 @@ import tty
 import time
 import threading
 
-from cpc_python_core.ui import renderer
-from cpc_python_core import chat as chat_mod
+from ui import renderer
+import chat as chat_mod
 
 # ── Game library ─────────────────────────────────────────────────────────────
 
