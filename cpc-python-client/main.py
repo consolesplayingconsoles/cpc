@@ -65,7 +65,7 @@ def _build_menu(config):
     items = []
     action_map = {}
 
-    if config.get("SHORT_NAME") == "wii":
+    if config.get("NODE_KEY") == "wii":
         if config.get("GC_GAMES_PATH"):
             items.append("GameCube Games")
             action_map["GameCube Games"] = actions.list_gc_games

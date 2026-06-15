@@ -24,8 +24,10 @@ from datetime import datetime
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 
-import vacuum
-import dreame_session
+# Feature APIs live under modules/ (one package per integration). Aliased so the
+# rest of this file keeps calling dreame_session.* / vacuum.* unchanged.
+from modules.dreame import session as dreame_session
+from modules.dreame import commands as vacuum
 
 
 def open_path(path):
@@ -254,7 +256,9 @@ def _is_lan_ip(ip):
 
 REQUIRED_VARS = ["GATEWAY_IP"]
 
-NODE_IDS = ["wii", "dc", "ps3", "gba", "ws", "batocera", "dreame", "birdbuddy", "pi", "pluto", "vmu", "saturn", "megadrive"]
+# The node roster is DISCOVERED at startup from <repo>/nodes/*/ (every dir is a
+# node, key = dir name), plus 'pluto' the host. See discover_nodes(). No hardcoded
+# list, no per-request rescans -- the startup snapshot is the single source of truth.
 
 # Consoles whose OS is fixed by definition — used as the badge default so it shows
 # even when the node is offline (TTL detection only works on a live reply).
@@ -347,11 +351,38 @@ def _load_recent_messages(limit=STARTUP_MESSAGES):
 # ── Shared helpers ───────────────────────────────────────────────────────────
 
 def console_env_path(base_dir, node_id):
-    """Path to a console's real .env -- the only config source. .env.sample is
-    dev-facing documentation, never production config, so there is NO fallback to
-    it. A node with no .env simply has no config and renders as 'unconfigured'
-    (the roster is NODE_IDS, not whichever files happen to exist on the box)."""
-    return os.path.normpath(os.path.join(base_dir, "..", node_id, ".env"))
+    """Path to a node's REAL .env -- used where the live config file is needed
+    (e.g. the deploy stream). pluto is the host: its .env is pluto/.env (base_dir
+    itself). Every other node lives under <repo>/nodes/<name>/.env."""
+    if node_id == "pluto":
+        return os.path.join(base_dir, ".env")
+    return os.path.normpath(os.path.join(base_dir, "..", "nodes", node_id, ".env"))
+
+
+def discover_nodes(base_dir):
+    """Discover the node roster ONCE at startup: every dir under <repo>/nodes/ is a
+    node, keyed by its dir name. Its config comes from the dir's .env (a configured
+    node) or, if absent, its .env.sample (an unconfigured placeholder slot). A dir
+    with NEITHER is malformed -> fail fast. Returns {name: config}. (pluto, the host,
+    is added by the caller from the main pluto/.env -- it doesn't live under nodes/.)
+    This snapshot is the single source of truth; nothing rescans the filesystem after."""
+    roster = {}
+    nodes_root = os.path.normpath(os.path.join(base_dir, "..", "nodes"))
+    if not os.path.isdir(nodes_root):
+        return roster
+    for name in sorted(os.listdir(nodes_root)):
+        d = os.path.join(nodes_root, name)
+        if name.startswith(".") or not os.path.isdir(d):
+            continue
+        env_f, sample_f = os.path.join(d, ".env"), os.path.join(d, ".env.sample")
+        if os.path.exists(env_f):
+            roster[name] = load_env(env_f)
+        elif os.path.exists(sample_f):
+            roster[name] = load_env(sample_f)   # placeholder identity; unconfigured (no HOST_IP)
+        else:
+            print("\n  ERROR: node dir has no .env or .env.sample: %s\n" % d)
+            sys.exit(1)
+    return roster
 
 
 def probe(ip):
@@ -445,18 +476,17 @@ _UA_NODE_SIGNATURES = [
 ]
 
 
-def ip_to_node(base_dir, config):
-    """Build {ip: node_id}. Localhost + pluto's own HOST_IP map to 'pluto' so
-    the operator can QA the client from the Mac."""
+def ip_to_node(roster, config):
+    """Build {ip: node_id} from the discovered roster. Localhost maps to 'pluto'
+    so the operator can QA from the Mac; the roster already carries pluto's HOST_IP."""
     mapping = {"127.0.0.1": "pluto", "::1": "pluto"}
     host_ip = config.get("HOST_IP", "").strip()
     if host_ip:
         mapping[host_ip] = "pluto"
-    for node_id in NODE_IDS:
-        env = load_env(console_env_path(base_dir, node_id))
-        ip  = env.get("HOST_IP", "").strip()
+    for name, cfg in roster.items():
+        ip = cfg.get("HOST_IP", "").strip()
         if ip:
-            mapping[ip] = node_id
+            mapping[ip] = name
     return mapping
 
 
@@ -549,6 +579,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     config      = {}
     base_dir    = ""
     chat_config = {}
+    node_roster = {}   # {name: cfg} discovered once at startup; the source of truth
 
     def log_message(self, format, *args):
         if "/deploy" in self.path or "/messages" in self.path:
@@ -580,7 +611,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _identify(self):
         """Resolve the requester's chat identity: source IP -> known node, else
         User-Agent signature, else 'guest'. Server-authoritative."""
-        mapping = ip_to_node(self.__class__.base_dir, self.__class__.config)
+        mapping = ip_to_node(self.__class__.node_roster, self.__class__.config)
         ip = self.client_address[0]
         if ip in mapping:
             return mapping[ip]
@@ -590,7 +621,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """The named node bound to the requester's source IP, or None for a
         guest. This is the authoritative half of identity -- it can't be spoofed
         by a client-supplied name."""
-        mapping = ip_to_node(self.__class__.base_dir, self.__class__.config)
+        mapping = ip_to_node(self.__class__.node_roster, self.__class__.config)
         return mapping.get(self.client_address[0])
 
     def _handle_whoami(self):
@@ -1016,17 +1047,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         base_dir = self.__class__.base_dir
         nodes    = {}
 
-        # Pluto itself is just another discovered node: it carries a real HOST_IP
-        # (the box the dashboard is deployed to) and is pinged like everything
-        # else — no phantom localhost entry. It's built by the NODE_IDS loop below
-        # from pluto/.env, which adds its CODE/DEPLOY/FILES buttons.
-
-        # First pass: load every node's .env (cheap) and collect the IPs. Second
-        # pass pings them all in parallel, so the slow part (down hosts timing out)
-        # happens once concurrently rather than once per node in series.
+        # The roster was discovered once at startup (nodes/*/ + pluto the host); we
+        # never rescan. Per request we only re-ping: collect every IP and probe them
+        # in parallel, so down hosts time out once concurrently, not once per node.
+        roster     = self.__class__.node_roster
         gateway_ip = cfg.get("GATEWAY_IP", "").strip()
-        cfgs = {node_id: load_env(console_env_path(base_dir, node_id)) for node_id in NODE_IDS}
-        ips  = [gateway_ip] + [c.get("HOST_IP", "").strip() for c in cfgs.values()]
+        ips = [gateway_ip] + [c.get("HOST_IP", "").strip() for c in roster.values()]
         pinged = probe_many(ips)
 
         if gateway_ip:
@@ -1044,12 +1070,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "os":     None,   # network gear — no OS badge
             }
 
-        for node_id in NODE_IDS:
-            # NODE_IDS is the authoritative roster. A node with no real .env (e.g.
-            # every console on the prod box, where only pluto/.env ships) still
-            # surfaces as 'unconfigured' so "show unconfigured" reveals it, instead
-            # of vanishing. load_env returns {} for a missing file.
-            console_cfg = cfgs[node_id]
+        for node_id, console_cfg in roster.items():
+            # A node configured without a HOST_IP (e.g. a placeholder loaded from
+            # .env.sample) renders 'unconfigured' so "show unconfigured" reveals it.
             ip    = console_cfg.get("HOST_IP", "").strip()
             name  = console_cfg.get("NODE_NAME", node_id)
             color = console_cfg.get("UI_PRIMARY_COLOR") or None
@@ -1152,6 +1175,16 @@ def run():
 
     Handler.config   = config
     Handler.base_dir = parent_dir
+
+    # Discover the node roster ONCE: nodes/*/ dirs + pluto (the host, from this .env).
+    roster = discover_nodes(parent_dir)
+    roster["pluto"] = config
+    Handler.node_roster = roster
+    print("  nodes: %d discovered (%s)" % (len(roster), ", ".join(sorted(roster))))
+
+    # Drive mappings live in config/mappings (shipped as part of config/). Point the
+    # cpc_python_core controller there unless the env already set CPC_MAPPINGS.
+    os.environ.setdefault("CPC_MAPPINGS", os.path.join(parent_dir, "config", "mappings"))
 
     host_ip = config.get("HOST_IP", "").strip()
 

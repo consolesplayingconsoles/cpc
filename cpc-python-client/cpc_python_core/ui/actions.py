@@ -165,7 +165,7 @@ def chat_view(config: dict):
     """
     pluto_ip  = config.get("PLUTO_IP", "").strip()
     pluto_url = "http://%s:7700" % pluto_ip
-    sender    = config.get("NODE_NAME", config.get("SHORT_NAME", "console")).lower()
+    sender    = config.get("NODE_NAME", config.get("NODE_KEY", "console")).lower()
 
     tty_f  = open("/dev/tty", "rb", buffering=0)
     fd_tty = tty_f.fileno()

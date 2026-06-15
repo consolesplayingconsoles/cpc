@@ -4,7 +4,7 @@
 The network is monitored and administered from **Pluto**, a web dashboard that channels a highly functional, dense, and hyper-reliable router console aesthetic — optimized for pure engineering utility rather than flashy corporate web design.
 
 ### 2. Unified Environment Configuration (.env)
-Environment configuration files live inside each console's own directory (e.g. `wii/.env`, `wii/dev.env`). They act as the single source of truth for branding, networking, and security credentials across both the web and terminal interfaces. Never create a flat `console/` directory for env files — each console owns its own.
+Environment configuration files live inside each node's own directory under `nodes/` (e.g. `nodes/wii/.env`, `nodes/wii/dev.env`); `pluto/` is the dashboard app and also the host node (its own `pluto/.env`). They are the single source of truth for branding, networking, and security credentials across both the web and terminal interfaces. The API discovers the node roster from `nodes/*/` at startup — every dir is a node, **keyed by its dir name** (the display name lives in the node's `.env` as `NODE_NAME`). Never create a flat `console/` dir for env files — each node owns its own under `nodes/`.
 
 * **Sandboxing**: Variables must remain strictly sandboxed to their specific deployment runtime contexts.
 * **Unified Template (`.env.sample`)**: Each console directory includes a `.env.sample` template file containing zero real data. This file is the strict structural blueprint. Never commit `*.env` files — only `*.env.sample`.
@@ -24,7 +24,7 @@ Data synchronization relies on an integrated **commercial cloud storage provider
 ### 4. Repository Tidy Rules & Dynamic Scaffolding
 To prevent platform collisions, all assets, firmware, and executables are encapsulated into console-specific root application directories. 
 
-* **On-Demand Initialization**: The development pipeline monitors the repository root for empty directories matching the designated console codenames listed in the parent README. When a matched empty directory is created, the system initializes it with the single in-repo storage convention below:
+* **On-Demand Initialization**: The development pipeline monitors `nodes/` for empty directories matching the designated console codenames listed in the parent README. When a matched empty directory is created, the system initializes it with the single in-repo storage convention below:
   * **`/share`**: Shared media, document templates, and static external resources that are architecture-independent (aligns with the Linux `/usr/share` convention) — a clean storage dir.
 
   ROMs and binaries are **not** committed to the repo. Game/ROM files are referenced live over SMB and the per-console `*_GAMES_PATH` env vars, so a `/roms` dir is obsolete. Native console code (e.g. Wii homebrew) lives in the console's own `homebrew/` directory and builds to a bootable artifact, so a `/bin` dir is obsolete too.
@@ -65,7 +65,7 @@ The Python application features a terminal-based administrative interface for di
 * **Input Model**: Displays interactive text input fields dynamically at the exact time and place user configuration is required.
 * **Config Printing**: Capable of reading and printing raw configuration files (such as controller mappings) directly into the terminal window for instant inspection.
 * **Title format**: ASCII header always renders as `CPC MANUFACTURER CONSOLENAME` using pyfiglet. CPC + manufacturer on one line (secondary color), console name large below (primary color).
-* **Dependencies**: managed via `cpc-python-client/requirements.txt`, vendored into `cpc-python-client/vendor/`, deployed via `deploy.sh <console>/.env`.
+* **Dependencies**: managed via `cpc-python-client/requirements.txt`, vendored into `cpc-python-client/vendor/`, deployed via `deploy.sh nodes/<console>/.env`.
 
 ### 7. Cross-Platform Topology & Dynamic Availability
 The core Python interface executes natively on a **master** Linux console. However, its management scope extends beyond the host machine to coordinate specialized **client** devices directly from the master interface.

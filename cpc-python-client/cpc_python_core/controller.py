@@ -349,8 +349,10 @@ class KeyboardSink(Sink):
 
 def mappings_dir(base=None):
     """The mapping store. Mappings are CONFIG/DATA, not engine code, so they live
-    in a root-level `mappings/` dir (the CPC "database"), NOT inside this package.
-    Override with the CPC_MAPPINGS env var, or pass an explicit base."""
+    with Pluto (pluto/config/mappings), NOT inside this package. Pluto sets the
+    CPC_MAPPINGS env var to point here; pass an explicit base, or set CPC_MAPPINGS,
+    when running the engine elsewhere. (The legacy package-relative fallback below
+    no longer exists on disk, so set CPC_MAPPINGS.)"""
     if base:
         return base
     return os.environ.get("CPC_MAPPINGS") or os.path.normpath(
