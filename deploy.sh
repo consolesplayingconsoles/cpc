@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────
-#  deploy.sh — build locally and ship to a console node via SSH
+#  deploy.sh — the deploy ENGINE: build locally and ship ONE node over SSH.
+#
+#  Pluto owns deployment ("Pluto self-deploys everywhere"). You normally don't run
+#  this by hand: the Pluto UI's DEPLOY button streams it per node -- the API shells
+#  out to this script and parses the ##STEP:<name> lines into SSE progress events.
+#  It lives at the repo root as the one-time DEV BOOTSTRAP too: run it manually to
+#  stand Pluto up the first time, before Pluto can redeploy itself and the rest.
+#  It always targets a SINGLE node; batch / multi-node deploys are a Pluto UI
+#  concern, not this script's.
 #
 #  Usage: ./deploy.sh <path-to-env-file>
-#  Examples:
-#    ./deploy.sh nodes/local/wii/.env  # console node (consoles live under nodes/local/)
-#    ./deploy.sh pluto/.env            # Pluto host (ships api/ + dist/ + config/ + cloud samples)
-#
-#  Lines starting with ##STEP:<name> are parsed by the Pluto API
-#  to emit structured SSE step events. Keep them on their own line.
+#    ./deploy.sh pluto/.env            # the Pluto host (first-deploy bootstrap)
+#    ./deploy.sh nodes/local/wii/.env  # a console node (normally driven via the UI)
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 

@@ -13,6 +13,13 @@ const { messages } = useMessages()
 
 const dreameName = computed(() => nodes.value['dreame']?.name ?? 'dreame')
 
+// The Dreame tab only makes sense when the vacuum node is configured (a real .env;
+// an unconfigured placeholder reads status 'unconfigured'). Hide the tab otherwise.
+// (The vacuum's modules will fold into the UI properly later; this tab is fine for now.)
+const dreameConfigured = computed(() =>
+  !!nodes.value['dreame'] && nodes.value['dreame'].status !== 'unconfigured'
+)
+
 // True under `vite dev` (the dev starter), compiled to false in the built dist
 // shipped to the box — drives the DEV badge and the dev-only CODE button.
 const isDev = import.meta.env.DEV
@@ -56,6 +63,12 @@ watch(activeTab, (tab) => {
   url.searchParams.set('tab', tab)
   history.replaceState(null, '', url.toString())
 })
+
+// Never strand the user on a hidden Dreame tab — covers both a ?tab=robutek deep
+// link and the roster loading async after mount. Bounce back to Network.
+watch(dreameConfigured, (ok) => {
+  if (!ok && activeTab.value === 'robutek') activeTab.value = 'network'
+}, { immediate: true })
 
 const displayNodes = computed(() => {
   const src = error.value
@@ -119,6 +132,7 @@ const displayNodes = computed(() => {
           <span v-if="unreadCount > 0" class="tab-badge">{{ unreadCount }}</span>
         </button>
         <button
+          v-if="dreameConfigured"
           class="tab"
           :class="{ 'tab--active': activeTab === 'robutek' }"
           @click="activeTab = 'robutek'"

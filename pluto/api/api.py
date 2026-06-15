@@ -874,22 +874,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         verbs  = [a.get("verb", "") for a in actions]
         tokens = text.lower().split()
-        if any(v and v in tokens for v in verbs):
-            # tried a command -> out-of-office (not wired up / not configured yet)
-            _new_message(node_id, self._node_ooo(node_id))
+        hit    = next((v for v in verbs if v and v in tokens), None)
+        if hit:
+            # A real command. This branch is the server-side hook where each handler
+            # will live (modular: route (node_id, hit) into api/modules/<service>/ as
+            # it's built). Until then, reply not-implemented -- no UX needed, the chat
+            # message IS the response.
+            _new_message(node_id, "'%s' is not implemented yet." % hit)
         else:
             # tagged with no command -> list what this node can do (discoverable,
             # mirrors @l40's verb hint -- a friendly defence against a bare mention)
             _new_message(node_id, "I can: %s. Tag me with one." % ", ".join(verbs))
-
-    def _node_ooo(self, node_id):
-        """A tagged node that can't act yet 'replies' like claude's broke gag -- an
-        out-of-office line, or a tip to configure it. Posted as the node itself."""
-        cfg = self.__class__.node_roster.get(node_id, {})
-        configured = bool(cfg.get("_has_env")) or bool(cfg.get("HOST_IP", "").strip())
-        if not configured:
-            return "not set up yet -- drop a .env in my node dir and I'll come online."
-        return "that's not wired up yet -- soon. (out-of-office auto-reply)"
 
     def _maybe_vacuum(self, sender, text):
         """Handle an @l40 chat command: run a verb, reply as the vacuum ('dreame').
