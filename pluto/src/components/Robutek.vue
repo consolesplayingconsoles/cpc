@@ -43,6 +43,7 @@ interface DreameData {
 }
 
 const props = defineProps<{ name: string; active: boolean; nodes?: NodeMap }>()
+const emit = defineEmits<{ back: [] }>()
 const API = `http://${window.location.hostname}:7700`
 
 // Output target: where the playback clock is sent. 'none' = just animate the map.
@@ -483,6 +484,13 @@ async function signIn() {
 
     <!-- ── top bar: live tile (cache-first; needs session) + actions ── -->
     <header class="rb-bar">
+      <button class="rb-back" title="Back to Network" @click="emit('back')">
+        <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>Network</span>
+      </button>
+      <span class="rb-back-sep" aria-hidden="true"></span>
       <div class="rb-id">
         <span class="rb-dot" :class="status" :title="dev?.online ? 'online' : 'offline'"/>
         <span class="rb-id-name">{{ dev?.name ?? name ?? 'Robutek' }}</span>
@@ -724,6 +732,18 @@ async function signIn() {
   padding: var(--sp-3) var(--sp-4); background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
+.rb-back {
+  display: inline-flex; align-items: center; gap: 5px;
+  font: inherit; font-size: 13px; font-weight: 600;
+  padding: 5px 11px 5px 8px; margin: 0;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--text-muted); cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.rb-back:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.rb-back:focus { outline: none; }
+.rb-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rb-back-sep { width: 1px; align-self: stretch; margin: 4px 0; background: var(--line); }
 .rb-id { display: flex; align-items: baseline; gap: var(--sp-2); }
 .rb-id-name { font-weight: 600; font-size: 15px; }
 .rb-id-model { font-size: 11px; color: var(--text-muted); }

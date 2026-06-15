@@ -33,7 +33,27 @@ fi
 [[ -d "$HERE/config/mappings" ]] && export CPC_MAPPINGS="$HERE/config/mappings"
 
 python3 "$HERE/api/api.py"                              & API_PID=$!
-python3 -m http.server "$SPA_PORT" --directory "$HERE/dist"  > /dev/null 2>&1 & SPA_PID=$!
+# SPA static server with history-fallback: serves real files from dist/, and
+# falls back to dist/index.html for any path that doesn't resolve (so deep
+# links / refreshes on /chat and /dreame work). Pure stdlib, Python 3.6-safe.
+python3 -c '
+import os, sys
+try:
+    from http.server import SimpleHTTPRequestHandler, HTTPServer
+except ImportError:
+    from BaseHTTPServer import HTTPServer
+    from SimpleHTTPServer import SimpleHTTPRequestHandler
+root = sys.argv[1]
+port = int(sys.argv[2])
+os.chdir(root)
+class Handler(SimpleHTTPRequestHandler):
+    def send_head(self):
+        path = self.translate_path(self.path)
+        if not (os.path.isfile(path) or os.path.isdir(path)):
+            self.path = "/index.html"
+        return SimpleHTTPRequestHandler.send_head(self)
+HTTPServer(("", port), Handler).serve_forever()
+' "$HERE/dist" "$SPA_PORT"  > /dev/null 2>&1 & SPA_PID=$!
 
 echo "  pluto up — API :7700, SPA :${SPA_PORT}  (ctrl-c to stop)"
 wait
