@@ -141,7 +141,7 @@ const displayNodes = computed(() => {
 
       <div v-show="activeTab === 'network'" class="network-view">
         <div v-if="loading" class="state-msg">Scanning network…</div>
-        <NetworkDiagram v-show="!loading" :nodes="displayNodes" :connections="connections" />
+        <NetworkDiagram v-show="!loading" :nodes="displayNodes" :connections="connections" @open-tab="activeTab = $event as 'network' | 'chat' | 'robutek'" />
       </div>
 
       <GroupChat
