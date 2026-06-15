@@ -1,18 +1,19 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { NodeMap } from '../composables/useNodes'
 import type { Connection } from '../composables/useConnections'
 import { useDeploy } from '../composables/useDeploy'
 import { API_BASE } from '../composables/useNodes'
-import { BUBBLE_R, BUBBLE_OPEN } from '../composables/bubbleConstants'
+import { BUBBLE_R } from '../composables/bubbleConstants'
 import NodeBubble from './NodeBubble.vue'
-import DeployTerminal from './DeployTerminal.vue'
+import NodeDrawer from './NodeDrawer.vue'
 import AchievementToast from './AchievementToast.vue'
 
 import { ICONS } from '../composables/useIcons'
 import layout from '../../config/layout.json'
 
 const props = defineProps<{ nodes: NodeMap; connections: Connection[] }>()
+const emit = defineEmits<{ 'open-tab': [tab: string] }>()
 
 // Diagram geometry lives in layout.json (hand-edited, like connections.json). The
 // gateway is the origin everything hangs off — only its spot on the canvas is fixed
@@ -136,11 +137,14 @@ const visibleEdges = computed(() =>
 
 function isUnconfigured(id: string) { return props.nodes[id]?.status === 'unconfigured' }
 function isClickable(id: string) {
-  if (id === 'gateway') return false
-  const n = props.nodes[id]
-  // Only up nodes are expandable, and only when they have at least one button.
-  return !!n && n.status === 'up' && (n.deploy || n.folder || !!n.code)
+  // Every real node opens its drawer (even down/unconfigured, and the gateway —
+  // it carries the same IP/status data worth inspecting). Only the virtual cloud
+  // hub is excluded (no IP, pure topology anchor).
+  return id !== 'cloud' && !!props.nodes[id]
 }
+
+const STATUS_LABEL: Record<string, string> = { up: 'Online', down: 'Offline', cloud: 'Linked', unconfigured: 'Not configured' }
+const peekNode = computed(() => hoveredNode.value ? props.nodes[hoveredNode.value] : null)
 
 function openSmb(id: string) {
   // Open the share on THIS machine — the one viewing the dashboard — not on the
@@ -173,57 +177,30 @@ function toggleMenu(id: string) {
   activeMenu.value === id ? closeMenu() : (activeMenu.value = id)
 }
 
-// ── Terminal card positioning ────────────────────────────────────────────────
+// ── Hover peek positioning ───────────────────────────────────────────────────
+// The read-only peek is anchored to the hovered node, reusing getScreenCTM so it
+// lands right at any pan/zoom. You don't pan mid-hover, so position once when the
+// hovered node changes rather than tracking continuously.
 const wrapEl    = ref<HTMLDivElement | null>(null)
 const svgEl     = ref<SVGSVGElement | null>(null)
-const cardStyle = ref<Record<string, string>>({ display: 'none' })
-const CARD_W    = 460
-const TUCK      = 28
+const peekStyle = ref<Record<string, string>>({ display: 'none' })
+const PEEK_W    = 196
 
-const consoleId = computed(() => {
-  const id = activeMenu.value
-  return id && deployOutput.value[id] ? id : null
-})
-
-function updateCardPos() {
-  const id   = activeMenu.value
-  const svg  = svgEl.value
-  const wrap = wrapEl.value
-  if (!id || !svg || !wrap || !deployOutput.value[id] || !LAYOUT[id]) return
-
-  const ctm = svg.getScreenCTM()
-  if (!ctm) return
-  const pt = svg.createSVGPoint()
-  pt.x = LAYOUT[id].x
-  pt.y = LAYOUT[id].y
-  const sp = pt.matrixTransform(ctm)
-  const wr = wrap.getBoundingClientRect()
-
-  const nodeX   = sp.x - wr.left
-  const nodeY   = sp.y - wr.top
-  const bubblePx = BUBBLE_OPEN * ctm.a
-  const half     = CARD_W / 2
-
-  const left       = Math.max(half + 8, Math.min(wr.width - half - 8, nodeX))
-  const belowTop   = nodeY + bubblePx - TUCK
-  const aboveBot   = nodeY - bubblePx + TUCK
-  const spaceBelow = wr.height - belowTop - 12
-  const spaceAbove = aboveBot - 12
-
-  const style: Record<string, string> = { left: `${left}px`, width: `${CARD_W}px`, transform: 'translateX(-50%)' }
-  if (spaceBelow >= 180 || spaceBelow >= spaceAbove) {
-    style.top       = `${belowTop}px`
-    style.maxHeight = `${Math.max(150, spaceBelow)}px`
-  } else {
-    style.bottom    = `${wr.height - aboveBot}px`
-    style.maxHeight = `${Math.max(150, spaceAbove)}px`
-  }
-  cardStyle.value = style
+function updatePeekPos() {
+  const id = hoveredNode.value
+  const svg = svgEl.value, wrap = wrapEl.value
+  if (!id || id === activeMenu.value || !svg || !wrap || !LAYOUT[id]) { peekStyle.value = { display: 'none' }; return }
+  const ctm = svg.getScreenCTM(); if (!ctm) return
+  const pt = svg.createSVGPoint(); pt.x = LAYOUT[id].x; pt.y = LAYOUT[id].y
+  const sp = pt.matrixTransform(ctm), wr = wrap.getBoundingClientRect()
+  const nodeX = sp.x - wr.left, nodeY = sp.y - wr.top
+  const bubblePx = BUBBLE_R * ctm.a
+  let left = nodeX + bubblePx + 10
+  if (left + PEEK_W > wr.width - 8) left = nodeX - bubblePx - 10 - PEEK_W
+  peekStyle.value = { left: `${Math.max(8, left)}px`, top: `${Math.max(8, nodeY - 18)}px`, width: `${PEEK_W}px` }
 }
 
-watch([activeMenu, deployOutput], () => nextTick(updateCardPos), { deep: true })
-onMounted(()   => window.addEventListener('resize', updateCardPos))
-onUnmounted(() => window.removeEventListener('resize', updateCardPos))
+watch(hoveredNode, () => nextTick(updatePeekPos))
 </script>
 
 <template>
@@ -274,7 +251,6 @@ onUnmounted(() => window.removeEventListener('resize', updateCardPos))
       </g>
       <g
         v-for="id in presentNodes" :key="id"
-        v-show="id !== activeMenu"
         :transform="`translate(${LAYOUT[id].x}, ${LAYOUT[id].y})`"
         :class="['node', isClickable(id) ? 'node--clickable' : '']"
         @mouseenter="isClickable(id) && (hoveredNode = id)"
@@ -284,57 +260,48 @@ onUnmounted(() => window.removeEventListener('resize', updateCardPos))
           :id="id"
           :node="nodes[id]"
           :icon="ICONS[id]"
-          :is-active="false"
           :is-hovered="hoveredNode === id"
-          :is-deploying="deploying === id"
           :is-unconfigured="isUnconfigured(id)"
           @toggle="toggleMenu(id)"
-          @deploy="deploy(id)"
-          @open-workspace="openWorkspace(id)"
-          @open-smb="openSmb(id)"
         />
       </g>
     </svg>
 
-    <!-- z-2: deploy terminal -->
-    <DeployTerminal
-      v-if="consoleId"
-      :console-id="consoleId"
-      :output="deployOutput[consoleId]!"
-      :last-ms="lastDurations[consoleId] ?? null"
-      :card-style="cardStyle"
-      @close="clearOutput(consoleId)"
-    />
-
-    <!-- z-3: active (expanded) node — floats above terminal -->
-    <svg
-      v-if="activeMenu && LAYOUT[activeMenu]"
-      viewBox="0 0 1000 820"
-      :style="zoomStyle"
-      xmlns="http://www.w3.org/2000/svg"
-      class="diagram diagram--active"
-      preserveAspectRatio="xMidYMid meet"
+    <!-- hover peek: read-only status, anchored to the node (no actions) -->
+    <div
+      v-if="peekNode && hoveredNode !== activeMenu"
+      class="peek"
+      :style="peekStyle"
     >
-      <g
-        :transform="`translate(${LAYOUT[activeMenu].x}, ${LAYOUT[activeMenu].y})`"
-        class="node node--clickable"
-        @click.stop="toggleMenu(activeMenu)"
-      >
-        <NodeBubble
-          :id="activeMenu"
-          :node="nodes[activeMenu]"
-          :icon="ICONS[activeMenu]"
-          :is-active="true"
-          :is-hovered="false"
-          :is-deploying="deploying === activeMenu"
-          :is-unconfigured="isUnconfigured(activeMenu)"
-          @toggle="toggleMenu(activeMenu)"
-          @deploy="deploy(activeMenu)"
-          @open-workspace="openWorkspace(activeMenu)"
-          @open-smb="openSmb(activeMenu)"
-        />
-      </g>
-    </svg>
+      <div class="peek__name">{{ peekNode.name }}</div>
+      <div class="peek__status">
+        <span class="peek__dot" :class="'peek__dot--' + peekNode.status"></span>
+        {{ STATUS_LABEL[peekNode.status] ?? peekNode.status }}
+      </div>
+      <div v-if="hoveredNode && lastDurations[hoveredNode]" class="peek__last">
+        Last deploy ~{{ Math.round(lastDurations[hoveredNode] / 1000) }}s
+      </div>
+      <div class="peek__hint">Click to manage &rarr;</div>
+    </div>
+
+    <!-- node drawer (click): full C2 — status + actions + deploy terminal -->
+    <Transition name="drawer">
+      <NodeDrawer
+        v-if="activeMenu && nodes[activeMenu]"
+        :id="activeMenu"
+        :node="nodes[activeMenu]"
+        :icon="ICONS[activeMenu]"
+        :output="deployOutput[activeMenu] ?? null"
+        :deploying="deploying === activeMenu"
+        :last-ms="lastDurations[activeMenu] ?? null"
+        @close="closeMenu"
+        @clear="clearOutput(activeMenu)"
+        @deploy="deploy(activeMenu)"
+        @open-smb="openSmb(activeMenu)"
+        @open-workspace="openWorkspace(activeMenu)"
+        @open-tab="emit('open-tab', 'robutek')"
+      />
+    </Transition>
 
     <AchievementToast
       :show="showToast"
@@ -426,4 +393,28 @@ onUnmounted(() => window.removeEventListener('resize', updateCardPos))
 @keyframes pipePacketDash {
   to { stroke-dashoffset: -20; }
 }
+
+/* hover peek — read-only, anchored, never intercepts pointer events */
+.peek {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 6px 22px rgba(26, 34, 51, 0.10);
+  padding: 10px 12px;
+}
+.peek__name   { font-size: 13px; font-weight: 600; color: var(--text); }
+.peek__status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.peek__dot    { width: 7px; height: 7px; border-radius: 50%; background: var(--color-secondary); }
+.peek__dot--up    { background: var(--color-up); }
+.peek__dot--down  { background: var(--color-down); }
+.peek__dot--cloud { background: var(--accent); }
+.peek__last { font-size: 11px; color: var(--text-faint); margin-top: 4px; }
+.peek__hint { font-size: 11px; color: var(--text-faint); margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line); }
+
+/* drawer slide-in */
+.drawer-enter-active, .drawer-leave-active { transition: transform 0.22s ease; }
+.drawer-enter-from, .drawer-leave-to       { transform: translateX(100%); }
 </style>

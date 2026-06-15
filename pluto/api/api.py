@@ -1097,7 +1097,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             gw_up, _ = pinged.get(gateway_ip, (False, None))
             nodes["gateway"] = {
                 "id":     "gateway",
-                "name":   "gateway",
+                "name":   "Gateway",
                 "ip":     gateway_ip,
                 "color":  None,
                 "status": "up" if gw_up else "down",

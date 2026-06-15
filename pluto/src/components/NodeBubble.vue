@@ -1,38 +1,22 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import type { NodeData } from '../composables/useNodes'
-import { BUBBLE_R, BUBBLE_HOV, BUBBLE_OPEN } from '../composables/bubbleConstants'
+import { BUBBLE_R, BUBBLE_HOV } from '../composables/bubbleConstants'
 import tuxImg from '../assets/tux.png'
 
+// The whole bubble is one button: click to open its drawer (emits 'toggle'); it
+// just grows on hover. Actions live in the drawer now, not on the bubble.
 const props = defineProps<{
   id:             string
   node:           NodeData
   icon?:          string
-  isActive:       boolean
   isHovered:      boolean
-  isDeploying:    boolean
   isUnconfigured: boolean
 }>()
 
-const emit = defineEmits<{
-  toggle:           []
-  deploy:           []
-  'open-workspace': []
-  'open-smb':       []
-}>()
+const emit = defineEmits<{ toggle: [] }>()
 
-// Each action button renders only when its feature is configured (signalled by
-// the API). DEPLOY ships code over SSH; FILES opens the node's SMB share. CODE
-// opens the source in the IDE on the API host — the API only sets `code` when
-// that checkout actually exists on the host, so it's present on the dev box and
-// absent on the deployed headless one. Deterministic, no build-flag dependence.
-const showCodeBtn   = computed(() => !!props.node.code)
-const showDeployBtn = computed(() => props.node.deploy)
-const showFolderBtn = computed(() => props.node.folder)
-
-const hoveredBtn = ref<'code' | 'deploy' | 'folder' | null>(null)
-
-const bubbleR     = computed(() => props.isActive ? BUBBLE_OPEN : props.isHovered ? BUBBLE_HOV : BUBBLE_R)
+const bubbleR     = computed(() => props.isHovered ? BUBBLE_HOV : BUBBLE_R)
 const statusColor = computed(() => {
   if (props.node.status === 'up')    return 'var(--color-up)'
   if (props.node.status === 'cloud') return props.node.color ?? 'var(--color-secondary)'
@@ -56,22 +40,6 @@ const iconOpacity  = computed(() => {
   return 0.5 // configured but down
 })
 
-// Centre the visible action buttons as a group so the layout stays symmetric
-// whether one or two buttons are showing, regardless of which ones.
-const BTN_SPACING = 28
-const visibleBtns = computed(() => {
-  const arr: string[] = []
-  if (showCodeBtn.value)   arr.push('code')
-  if (showDeployBtn.value) arr.push('deploy')
-  if (showFolderBtn.value) arr.push('folder')
-  return arr
-})
-const btnX = (kind: string) => {
-  const i = visibleBtns.value.indexOf(kind)
-  const n = visibleBtns.value.length
-  return (i - (n - 1) / 2) * BTN_SPACING
-}
-
 const nameLines = computed(() => {
   const words = props.node.name.split(' ')
   if (words.length <= 1) return [props.node.name]
@@ -81,9 +49,6 @@ const nameLines = computed(() => {
 
 const labelStartY = computed(() => nameLines.value.length > 1 ? 48 : 52)
 const ipY         = computed(() => nameLines.value.length > 1 ? 78 : 65)
-
-function tooltipW(label: string) { return label.length * 6.5 + 14 }
-function tooltipX(label: string) { return -tooltipW(label) / 2 }
 </script>
 
 <template>
@@ -94,10 +59,11 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
     :stroke-dasharray="bubbleDash"
     stroke-width="2.5"
     class="bubble"
-    style="pointer-events:none"
+    style="cursor:pointer"
+    @click.stop="emit('toggle')"
   />
 
-  <g :transform="isActive ? 'translate(0,-35)' : ''">
+  <g>
     <!-- cloud buddies are linked, not pinged — no status LED at all -->
     <g v-if="!isUnconfigured && node.status !== 'cloud'">
       <circle cx="24" cy="-24" r="7" :fill="node.status === 'up' ? '#00ff55' : '#ff2222'" class="status-dot"/>
@@ -143,75 +109,6 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
     </text>
 
     <text :y="ipY" text-anchor="middle" class="node-ip" @click.stop="emit('toggle')">{{ node.ip }}</text>
-
-    <g v-if="isActive" @click.stop :transform="nameLines.length > 1 ? 'translate(0,5)' : ''">
-      <!-- CODE — open the source checkout in the IDE (pluto host only) -->
-      <g
-        v-if="showCodeBtn"
-        class="action-btn"
-        :transform="`translate(${btnX('code')}, 0)`"
-        @click.stop="emit('open-workspace')"
-        @mouseenter="hoveredBtn = 'code'"
-        @mouseleave="hoveredBtn = null"
-      >
-        <circle cx="0" cy="90" r="11" fill="var(--color-secondary)"/>
-        <g transform="translate(0,90) scale(0.6)" style="pointer-events:none">
-          <path d="M-2,-6 Q-5,-6 -5,-3 L-5,0 Q-7,1.5 -5,3 L-5,6 Q-5,9 -2,9" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M2,-6 Q5,-6 5,-3 L5,0 Q7,1.5 5,3 L5,6 Q5,9 2,9" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </g>
-        <g v-if="hoveredBtn === 'code'">
-          <rect :x="tooltipX('CODE')" y="108" :width="tooltipW('CODE')" height="14" rx="4" fill="#1a1a1a" opacity="0.85"/>
-          <text x="0" y="119" text-anchor="middle" class="tooltip-label">CODE</text>
-        </g>
-      </g>
-
-      <!-- DEPLOY — ship code to the node over SSH -->
-      <g
-        v-if="showDeployBtn"
-        class="action-btn"
-        :class="{ 'action-btn--busy': isDeploying }"
-        :transform="`translate(${btnX('deploy')}, 0)`"
-        @click.stop="!isDeploying && emit('deploy')"
-        @mouseenter="hoveredBtn = 'deploy'"
-        @mouseleave="hoveredBtn = null"
-      >
-        <circle cx="0" cy="90" r="11" fill="var(--color-up)" :opacity="isDeploying ? 0.4 : 1"/>
-        <g v-if="isDeploying" transform="translate(0,90)" style="pointer-events:none">
-          <circle r="15" fill="none" stroke="var(--color-up)" stroke-width="1.5" stroke-dasharray="20 26" opacity="0.9">
-            <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="0.9s" repeatCount="indefinite"/>
-          </circle>
-        </g>
-        <g transform="translate(0,90) scale(0.6)" style="pointer-events:none">
-          <line x1="0" y1="6" x2="0" y2="-4" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-          <polyline points="-4,0 0,-5 4,0" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-          <line x1="-5" y1="6" x2="5" y2="6" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-        </g>
-        <g v-if="hoveredBtn === 'deploy'">
-          <rect :x="tooltipX('DEPLOY')" y="108" :width="tooltipW('DEPLOY')" height="14" rx="4" fill="#1a1a1a" opacity="0.85"/>
-          <text x="0" y="119" text-anchor="middle" class="tooltip-label">DEPLOY</text>
-        </g>
-      </g>
-
-      <!-- FILES — open the node's SMB share -->
-      <g
-        v-if="showFolderBtn"
-        class="action-btn"
-        :transform="`translate(${btnX('folder')}, 0)`"
-        @click.stop="emit('open-smb')"
-        @mouseenter="hoveredBtn = 'folder'"
-        @mouseleave="hoveredBtn = null"
-      >
-        <circle cx="0" cy="90" r="11" fill="#888884"/>
-        <g transform="translate(0,90) scale(0.75)" style="pointer-events:none">
-          <rect x="-7" y="-3" width="14" height="9" rx="1.5" fill="none" stroke="white" stroke-width="2.5"/>
-          <path d="M-7,-3 L-4,-6 L0,-6 L3,-3" fill="none" stroke="white" stroke-width="2.5" stroke-linejoin="round"/>
-        </g>
-        <g v-if="hoveredBtn === 'folder'">
-          <rect :x="tooltipX('FILES')" y="108" :width="tooltipW('FILES')" height="14" rx="4" fill="#1a1a1a" opacity="0.85"/>
-          <text x="0" y="119" text-anchor="middle" class="tooltip-label">FILES</text>
-        </g>
-      </g>
-    </g>
   </g>
 </template>
 
@@ -223,7 +120,6 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
-  text-transform: lowercase;
 }
 .node-ip {
   font-family: var(--font-mono);
@@ -235,15 +131,5 @@ function tooltipX(label: string) { return -tooltipW(label) / 2 }
   font-size: 24px;
   font-weight: 600;
   fill: #3a3a3a;
-}
-.action-btn        { cursor: pointer; }
-.action-btn--busy  { cursor: not-allowed; }
-.tooltip-label {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  fill: white;
-  pointer-events: none;
 }
 </style>
