@@ -786,19 +786,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif len(parts) == 3 and parts[0] == "deploy" and parts[2] == "stream":
             self._handle_deploy_stream(parts[1])
 
-        elif parsed.path == "/robutek/mappings":
-            self._handle_mappings()
+        elif parts and parts[0] == "mappings":
+            self._handle_mappings(parts)
 
         else:
             self._send(404, {"error": "not found"})
 
-    def _handle_mappings(self):
-        """List available mapping stems from the root mappings store (dev-only)."""
+    def _handle_mappings(self, parts):
+        """RESTful mapping store, organised by event-source dir -- the dir IS the
+        filter (no query params, no DB). Mappings are reusable engine config:
+          GET /mappings                   -> {source: [targets]}   (overview)
+          GET /mappings/<source>          -> {"source":..., "targets":[...]}
+          GET /mappings/<source>/<target> -> the mapping JSON
+        """
         try:
             controller, _ = _drive_libs()
-            self._send(200, {"mappings": controller.list_mappings()})
         except Exception:
-            self._send(200, {"mappings": []})
+            self._send(200, {} if len(parts) < 3 else {"error": "drive libs unavailable"})
+            return
+        if len(parts) == 1:
+            self._send(200, {s: controller.list_targets(s) for s in controller.list_sources()})
+        elif len(parts) == 2:
+            self._send(200, {"source": parts[1], "targets": controller.list_targets(parts[1])})
+        else:
+            try:
+                self._send(200, controller.load_mapping(parts[1], parts[2]))
+            except Exception:
+                self._send(404, {"error": "no mapping %s/%s" % (parts[1], parts[2])})
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -970,7 +984,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"ok": False, "error": "drive libs unavailable: %s" % exc})
             return
         try:
-            mapping = controller.load_mapping(body.get("mapping") or "dreame-to-gamecube")
+            mapping = controller.load_mapping(body.get("source") or "dreame",
+                                              body.get("mapping") or "gamecube")
         except Exception as exc:
             self._send(200, {"ok": False, "error": "mapping: %s" % exc})
             return
