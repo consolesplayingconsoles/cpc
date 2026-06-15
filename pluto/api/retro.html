@@ -16,7 +16,9 @@
   #feed{margin:6px 0}
   .msg{margin:3px 0;word-wrap:break-word}
   .who{color:#888884}
-  #hint{color:#888884;font-size:12px;margin:6px 0}
+  #menu{color:#888884;font-size:11px;line-height:1.5;border-bottom:1px solid #e8e8e6;padding-bottom:8px;margin-bottom:8px}
+  #menu .m-cmd{margin:1px 0;word-wrap:break-word}
+  #menu .m-handle{font-weight:bold;color:#1a1a1a}
   form{margin-top:10px}
   #txt{background:#fff;color:#1a1a1a;border:1px solid #c8c8c4;font-family:inherit;font-size:14px;padding:4px;width:68%}
   #snd{background:#e8e8e6;color:#1a1a1a;border:1px solid #c8c8c4;font-family:inherit;font-size:14px;padding:4px 12px;cursor:pointer}
@@ -24,8 +26,8 @@
 </head>
 <body>
 <div id="hd"><span id="brand">CPC</span> &nbsp;&nbsp; <span id="me"></span></div>
+<div id="menu"></div>
 <div id="feed"></div>
-<div id="hint"></div>
 <form id="f" onsubmit="return doSend()">
 <input id="txt" autocomplete="off" placeholder="message..." onkeyup="upd()">
 <input id="snd" type="submit" value="send">
@@ -34,7 +36,7 @@
 /* Config + identity inlined by the webserver (window.__CPC__): no fetch, no
    build. ES3 only -- runs on the Wii Internet Channel (Opera 9) and the DC
    browser. No fetch, no JSON object, no arrow funcs, no template strings. */
-var CPC = window.__CPC__ || {me:'guest',brand:'CPC',primary:'#1a1a1a',secondary:'#888884',commands:[],mentions:{},messages:[],lastId:0};
+var CPC = window.__CPC__ || {me:'guest',brand:'CPC',primary:'#1a1a1a',secondary:'#888884',handles:[],nodeActions:{},messages:[],lastId:0};
 var lastId = 0;
 var feed = document.getElementById('feed');
 var txt  = document.getElementById('txt');
@@ -49,12 +51,32 @@ function setup(){
   b.innerHTML = esc(CPC.brand); b.style.color = CPC.primary;
   var me = document.getElementById('me');
   me.innerHTML = 'you are: ' + esc(CPC.me); me.style.color = CPC.secondary;
-  var hint = document.getElementById('hint'); hint.style.color = CPC.secondary;
-  var cmds = CPC.commands || [], names = [];
-  for (var i=0;i<cmds.length;i++){ names.push(cmds[i].cmd); }
-  if (names.length){ hint.innerHTML = 'commands: ' + esc(names.join('  ')); }
+  buildMenu();
   upd();          /* set the send button's enabled/disabled look */
   txt.focus();    /* ready to type immediately */
+}
+
+/* The reference panel under the header: the full tag list, then each node's
+   commands (handle + verbs). The TV has the room and there's no autocomplete, so
+   render it all -- every verb is typeable even if not live yet (server replies OOO). */
+function buildMenu(){
+  var menu = document.getElementById('menu');
+  if (!menu){ return; }
+  var html = '', i;
+  var handles = CPC.handles || [];
+  if (handles.length){
+    html += '<div class="m-cmd"><span class="m-handle">tag a node:</span> ' + esc(handles.join('  ')) + '</div>';
+  }
+  var acts = CPC.actions || [];
+  if (acts.length){
+    html += '<div class="m-cmd"><span class="m-handle">then a command:</span></div>';
+    for (i=0;i<acts.length;i++){
+      var a = acts[i], verbs = a.verbs || [];
+      html += '<div class="m-cmd">&nbsp;&nbsp;<span class="m-handle">' + esc(a.handle) + '</span> ' + esc(verbs.join('  ')) + '</div>';
+    }
+  }
+  menu.innerHTML = html;
+  menu.style.color = CPC.secondary;
 }
 
 /* grey the send button while the input is empty (and block the submit) */

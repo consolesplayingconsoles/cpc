@@ -474,6 +474,18 @@ def node_for_ua(ua):
     return None
 
 
+def _mention_index(roster, chat_config):
+    """Chat mention maps from the LIVE roster: every node is taggable. A node's
+    @handle defaults to its key; chat.json mentions.handles overrides it (e.g.
+    dreame -> l40). Returns (by_id, to_node): {node_id: handle} and
+    {'@handle': node_id} (lowercased). gateway/cloud are virtual and not in the
+    roster, so the list is naturally just the real chat participants."""
+    handles = (chat_config or {}).get("mentions", {}).get("handles", {})
+    by_id   = {nid: handles.get(nid, nid) for nid in roster}
+    to_node = {("@" + h).lower(): nid for nid, h in by_id.items()}
+    return by_id, to_node
+
+
 # ── Robutek drive: dev-only vacuum-replay -> emulator/console output ──────────
 # The Pluto playback clock drives a controller Sink. The engine lives in api/drive/
 # (controller + the dreame route->event adapter); it's imported lazily because the one
@@ -615,13 +627,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         cfg  = self.__class__.chat_config or {}
         msgs = _get_messages(None)   # last 200 -- rendered once on load (light SSR)
+        by_id, _ = _mention_index(self.__class__.node_roster, cfg)
+        # The Wii page has no roster fetch / autocomplete, so we inline the full
+        # reference and render it under the header: the flat tag list, and a per-node
+        # command menu (handle + its verbs). Every verb is typeable even if not live
+        # yet -- the server just replies out-of-office.
+        handles = list(cfg.get("mentions", {}).get("base", [])) + \
+                  sorted("@" + h for h in by_id.values())
+        actions = [
+            {"handle": "@" + by_id.get(nid, nid),
+             "verbs":  [v.get("verb", "") for v in verbs]}
+            for nid, verbs in cfg.get("nodeActions", {}).items()
+        ]
         inlined = {
-            "me":       self._identify(),
-            "brand":    self.__class__.config.get("NODE_NAME", "CPC"),
+            "me":        self._identify(),
+            "brand":     self.__class__.config.get("NODE_NAME", "CPC"),
             "primary":   self.__class__.config.get("UI_PRIMARY_COLOR", "") or "#1a1a1a",
             "secondary": self.__class__.config.get("UI_SECONDARY_COLOR", "") or "#888884",
-            "commands":  cfg.get("commands", []),
-            "mentions":  cfg.get("mentions", {}),
+            "handles":   handles,
+            "actions":   actions,
             "messages":  msgs,
             "lastId":    msgs[-1]["id"] if msgs else 0,
         }
@@ -824,17 +848,48 @@ class Handler(http.server.BaseHTTPRequestHandler):
         msg = _new_message(sender, text)
         self._send(201, msg)
 
-        if _bot_enabled() and "@claude" in text.lower():
-            t = threading.Thread(
-                target=_bot_reply,
-                args=(list(_messages),),
-                daemon=True,
-            )
-            t.start()
-
+        # Generalised mention dispatch: EVERY node is taggable (@handle). Each
+        # mentioned node responds per its kind -- claude converses, @l40 runs a
+        # vacuum verb, and any other action-bearing node that isn't wired up yet
+        # posts an out-of-office reply (claude's broke-mode gag, generalised).
+        _, to_node = _mention_index(self.__class__.node_roster, self.__class__.chat_config)
         low = text.lower()
-        if "@l40" in low or "@dreame" in low:
+        for token, node_id in to_node.items():
+            if token in low:
+                self._dispatch_mention(node_id, sender, text)
+
+    def _dispatch_mention(self, node_id, sender, text):
+        """Route a tagged node. claude = conversational bot; dreame = vacuum verbs;
+        any other node with declared nodeActions but no live handler = out-of-office."""
+        if node_id == "claude":
+            if _bot_enabled():
+                threading.Thread(target=_bot_reply, args=(list(_messages),),
+                                 daemon=True).start()
+            return
+        if node_id == "dreame":
             self._maybe_vacuum(sender, text)
+            return
+        actions = (self.__class__.chat_config or {}).get("nodeActions", {}).get(node_id)
+        if not actions:
+            return
+        verbs  = [a.get("verb", "") for a in actions]
+        tokens = text.lower().split()
+        if any(v and v in tokens for v in verbs):
+            # tried a command -> out-of-office (not wired up / not configured yet)
+            _new_message(node_id, self._node_ooo(node_id))
+        else:
+            # tagged with no command -> list what this node can do (discoverable,
+            # mirrors @l40's verb hint -- a friendly defence against a bare mention)
+            _new_message(node_id, "I can: %s. Tag me with one." % ", ".join(verbs))
+
+    def _node_ooo(self, node_id):
+        """A tagged node that can't act yet 'replies' like claude's broke gag -- an
+        out-of-office line, or a tip to configure it. Posted as the node itself."""
+        cfg = self.__class__.node_roster.get(node_id, {})
+        configured = bool(cfg.get("_has_env")) or bool(cfg.get("HOST_IP", "").strip())
+        if not configured:
+            return "not set up yet -- drop a .env in my node dir and I'll come online."
+        return "that's not wired up yet -- soon. (out-of-office auto-reply)"
 
     def _maybe_vacuum(self, sender, text):
         """Handle an @l40 chat command: run a verb, reply as the vacuum ('dreame').
@@ -1157,7 +1212,7 @@ def run():
     try:
         with open(chat_path) as f:
             Handler.chat_config = json.load(f)
-        print("  chat.json: %d commands" % len(Handler.chat_config.get("commands", [])))
+        print("  chat.json: %d nodes with actions" % len(Handler.chat_config.get("nodeActions", {})))
     except Exception as exc:
         print("  chat.json: not loaded (%s)" % exc)
 
