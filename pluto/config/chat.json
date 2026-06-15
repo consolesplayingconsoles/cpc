@@ -1,19 +1,25 @@
 {
-  "_comment": "Shared CLIENT-SIDE chat config -- single source of truth. Imported by the Vue app (build-time) and read by api.py, which inlines the relevant slice into the barebones Wii page at serve time. NON-SECRET ONLY: secrets like API keys live server-side in api.py / .env, never here. (@l40 verbs are open on the LAN -- no sender gate.)",
-  "commands": [
-    { "cmd": "/post-to-substack",  "desc": "write & broadcast to substack",   "multiline": true, "done": false },
-    { "cmd": "/sync-saved-games",  "desc": "sync saved games with a console",  "param": { "label": "console", "type": "console" }, "done": false }
-  ],
-  "vacuumVerbs": [
-    { "verb": "status", "desc": "report state (read-only)" },
-    { "verb": "locate", "desc": "beep so you can find it" },
-    { "verb": "clean",  "desc": "start cleaning" },
-    { "verb": "dock",   "desc": "return to charge" },
-    { "verb": "stop",   "desc": "stop / park in place" }
-  ],
-  "emojis": [":)", ":(", ":|", ":D", ":'(", ">:(", "+1", "-1", "<3", "X_X", "O_O", "\\o/", "gg", "lol", "rip", "ugh", "zzz", "ngl", ":P", "..."],
+  "_comment": "Shared CLIENT-SIDE chat config -- single source of truth. Imported by the Vue app (build-time) and read by api.py, which inlines the relevant slice into the barebones Wii page at serve time. NON-SECRET ONLY: secrets like API keys live server-side in api.py / .env, never here. Model: EVERY node is taggable (@handle, default = node key; `mentions.handles` overrides). A node's `nodeActions` are an explicit verb substep after the tag (consequential actions are never auto-fired). claude is conversational (no verbs -- you just talk to it). Unbuilt or unconfigured actions get an out-of-office reply server-side (api.py), the way claude's broke-mode gag does.",
   "mentions": {
     "base": ["@here", "@everyone"],
-    "byNode": { "claude": "@claude", "dreame": "@l40" }
-  }
+    "handles": { "dreame": "l40" }
+  },
+  "nodeActions": {
+    "dreame": [
+      { "verb": "status", "desc": "report state (read-only)", "done": true },
+      { "verb": "locate", "desc": "beep so you can find it",   "done": true },
+      { "verb": "clean",  "desc": "start cleaning",            "done": true },
+      { "verb": "dock",   "desc": "return to charge",          "done": true },
+      { "verb": "stop",   "desc": "stop / park in place",      "done": true }
+    ],
+    "dropbox": [
+      { "verb": "sync",    "desc": "back up saved games",  "target": "console", "done": false },
+      { "verb": "list",    "desc": "list saved games",     "target": "console", "done": false },
+      { "verb": "restore", "desc": "restore a saved game", "target": "console", "done": false }
+    ],
+    "substack": [
+      { "verb": "post", "desc": "write & broadcast to substack", "multiline": true, "done": false }
+    ]
+  },
+  "emojis": [":)", ":(", ":|", ":D", ":'(", ">:(", "+1", "-1", "<3", "X_X", "O_O", "\\o/", "gg", "lol", "rip", "ugh", "zzz", "ngl", ":P", "..."]
 }

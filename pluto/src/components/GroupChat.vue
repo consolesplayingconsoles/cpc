@@ -157,22 +157,32 @@ function scrollToBottom() {
 }
 watch(messages, scrollToBottom, { deep: true })
 
-// ── Commands ─────────────────────────────────────────────────────────────────
-interface CmdDef {
-  cmd:        string
+// ── Mentions & node actions ──────────────────────────────────────────────────
+// One model: every node is taggable (@handle). Tagging reveals the node's actions
+// as an explicit verb substep (consequential actions are never auto-fired); a node
+// with no actions is a plain mention, and claude is conversational. From the shared
+// chat.json (api.py reads the same file, so client + server agree).
+interface ActionDef {
+  verb:       string
   desc:       string
-  param?:     { label: string; type: string }
+  target?:    string    // 'console' -> a second tag (a console, or @everyone)
   multiline?: boolean
-  done?:      boolean   // implemented? defaults to false = visible but not sendable
+  done?:      boolean    // built? false = still sendable, but the server replies "soon"
 }
+const NODE_ACTIONS: Record<string, ActionDef[]> = chatConfig.nodeActions ?? {}
+const HANDLES: Record<string, string> = chatConfig.mentions.handles ?? {}
 
-// Slash-commands come from the shared chat.json (single source of truth, also
-// read server-side by api.py and inlined into the barebones Wii client page).
-const COMMANDS: CmdDef[] = chatConfig.commands
-
-// @l40 vacuum verbs — autocomplete after "@l40 " when the vacuum is present.
-// From the shared chat.json; api.py reads the same list so client + server agree.
-const VACUUM_VERBS = chatConfig.vacuumVerbs
+// gateway/cloud are virtual infra, not chat participants.
+const taggableIds = computed(() =>
+  Object.keys(props.nodes).filter(id => id !== 'gateway' && id !== 'cloud')
+)
+// @handle for a node (default = its key; chat.json overrides, e.g. dreame -> l40).
+function handleFor(id: string): string { return HANDLES[id] ?? id }
+const nodeByHandle = computed<Record<string, string>>(() => {
+  const m: Record<string, string> = {}
+  for (const id of taggableIds.value) m['@' + handleFor(id)] = id
+  return m
+})
 
 // ── Input state ──────────────────────────────────────────────────────────────
 const draft       = ref('')
@@ -195,99 +205,73 @@ function insertEmoji(e: string) {
   nextTick(() => (inputEl.value ?? textareaEl.value)?.focus())
 }
 
-// Parse what's in the draft
+// Parse the draft into tokens: [ @handle, verb, target, ... ]
 const draftParts = computed(() => draft.value.split(' '))
 
-// Resolved command when the first token exactly matches a command name
-const resolvedCmd = computed(() =>
-  COMMANDS.find(c => c.cmd === draftParts.value[0]) ?? null
+// The tagged node: token 0 is a completed @handle that resolves to a node.
+const taggedNode = computed(() =>
+  nodeByHandle.value[(draftParts.value[0] ?? '').toLowerCase()] ?? null
+)
+const taggedActions = computed<ActionDef[]>(() =>
+  taggedNode.value ? (NODE_ACTIONS[taggedNode.value] ?? []) : []
+)
+// The resolved action: token 1 matches one of the tagged node's verbs.
+const resolvedAction = computed<ActionDef | null>(() =>
+  taggedActions.value.find(a => a.verb === draftParts.value[1]) ?? null
 )
 
-// True when we're still typing the command name (no space yet)
-const showCmdMenu = computed(() =>
-  draft.value.startsWith('/') && !draft.value.includes(' ')
+// (1) Mention menu — typing the @handle at token 0. Every node is taggable.
+const showMentionMenu = computed(() =>
+  draftParts.value.length === 1 && draft.value.startsWith('@')
 )
-
-const filteredCmds = computed(() => {
-  const t = draft.value.toLowerCase()
-  return COMMANDS.filter(c => c.cmd.startsWith(t))
-})
-
-function selectCmd(cmd: string) {
-  // Unimplemented commands are readable & navigable, but cannot be added to the
-  // prompt — selecting one (click / Tab / Enter) is a deliberate no-op.
-  const def = COMMANDS.find(c => c.cmd === cmd)
-  if (def && def.done !== true) {
-    (inputEl.value ?? textareaEl.value)?.focus()
-    return
-  }
-  draft.value = cmd + ' '
-  nextTick(() => (inputEl.value ?? textareaEl.value)?.focus())
-}
-
-// Console param autocomplete: active after a console-param command + space
-const showConsoleMenu = computed(() =>
-  !!resolvedCmd.value?.param && draft.value.includes(' ') && !showCmdMenu.value
-)
-
-const consolePartial = computed(() => (draftParts.value[1] ?? '').toLowerCase())
-
-const consoleCandidates = computed(() => {
-  if (!showConsoleMenu.value) return []
-  const ids = Object.keys(props.nodes).filter(id => id !== 'gateway')
-  return consolePartial.value
-    ? ids.filter(id => id.toLowerCase().startsWith(consolePartial.value))
-    : ids
-})
-
-function pickConsole(id: string) {
-  draft.value = `${draftParts.value[0]} ${id}`
-  nextTick(() => (inputEl.value ?? textareaEl.value)?.focus())
-}
-
-// Mention menu: last word starts with @
-const showMentionMenu = computed(() => {
-  const words = draft.value.split(' ')
-  const last  = words[words.length - 1]
-  return last.startsWith('@') && last.length >= 1 && !showCmdMenu.value
-})
-
-const mentionList = computed(() => {
-  const base = [...chatConfig.mentions.base]
-  for (const [nodeId, token] of Object.entries(chatConfig.mentions.byNode)) {
-    if (props.nodes[nodeId]) base.push(token)
-  }
-  return base
-})
-
+const mentionList = computed(() => [
+  ...chatConfig.mentions.base,
+  ...taggableIds.value.map(id => '@' + handleFor(id)),
+])
 const filteredMentions = computed(() => {
-  const words = draft.value.split(' ')
-  const last  = words[words.length - 1].toLowerCase()
-  return mentionList.value.filter(m => m.startsWith(last))
+  const t = (draftParts.value[0] ?? '').toLowerCase()
+  return mentionList.value.filter(m => m.toLowerCase().startsWith(t))
 })
-
 function selectMention(m: string) {
-  const words = draft.value.split(' ')
-  words[words.length - 1] = m
-  draft.value = words.join(' ') + ' '
+  // Trailing space so a node-with-actions immediately reveals its verb substep.
+  draft.value = m + ' '
   nextTick(() => (inputEl.value ?? textareaEl.value)?.focus())
 }
 
-// Vacuum verb menu: active after "@l40 " when the vacuum node is present.
-const showVacuumMenu = computed(() =>
-  !!props.nodes['dreame'] &&
-  draftParts.value[0]?.toLowerCase() === '@l40' &&
-  draft.value.includes(' ') &&
-  !showCmdMenu.value
+// (2) Action menu — the tagged node's verbs, after "@handle ".
+const showActionMenu = computed(() =>
+  !!taggedNode.value && taggedActions.value.length > 0 &&
+  draftParts.value.length === 2 && !showMentionMenu.value
 )
-const vacuumPartial = computed(() => (draftParts.value[1] ?? '').toLowerCase())
-const vacuumCandidates = computed(() =>
-  showVacuumMenu.value
-    ? VACUUM_VERBS.filter(v => v.verb.startsWith(vacuumPartial.value))
-    : [],
+const actionCandidates = computed(() => {
+  if (!showActionMenu.value) return []
+  const t = (draftParts.value[1] ?? '').toLowerCase()
+  return taggedActions.value.filter(a => a.verb.startsWith(t))
+})
+function pickAction(verb: string) {
+  draft.value = `${draftParts.value[0]} ${verb} `
+  nextTick(() => (inputEl.value ?? textareaEl.value)?.focus())
+}
+
+// (3) Target menu — a console (or @everyone) for an action that takes one.
+const showTargetMenu = computed(() =>
+  resolvedAction.value?.target === 'console' && draftParts.value.length >= 3
 )
-function pickVacuum(verb: string) {
-  draft.value = `@l40 ${verb}`
+const targetOptions = computed(() => [
+  '@everyone',
+  ...taggableIds.value
+    // local consoles only: not cloud connectors (the `cloud` flag holds even when
+    // an unconfigured connector reads status 'unconfigured'), and not the host.
+    .filter(id => !props.nodes[id]?.cloud && id !== 'pluto')
+    .map(id => '@' + handleFor(id)),
+])
+const targetCandidates = computed(() => {
+  if (!showTargetMenu.value) return []
+  const t = (draftParts.value[2] ?? '').toLowerCase()
+  return t ? targetOptions.value.filter(o => o.toLowerCase().startsWith(t)) : targetOptions.value
+})
+function pickTarget(tok: string) {
+  draft.value = `${draftParts.value[0]} ${draftParts.value[1]} ${tok}`
   nextTick(() => (inputEl.value ?? textareaEl.value)?.focus())
 }
 
@@ -300,14 +284,12 @@ interface Suggest { items: string[]; apply: (v: string) => void }
 const highlight = ref(0)
 
 const activeSuggest = computed<Suggest | null>(() => {
-  if (showCmdMenu.value && filteredCmds.value.length)
-    return { items: filteredCmds.value.map(c => c.cmd), apply: selectCmd }
-  if (showConsoleMenu.value && consoleCandidates.value.length)
-    return { items: consoleCandidates.value, apply: pickConsole }
   if (showMentionMenu.value && filteredMentions.value.length)
     return { items: filteredMentions.value, apply: selectMention }
-  if (showVacuumMenu.value && vacuumCandidates.value.length)
-    return { items: vacuumCandidates.value.map(v => v.verb), apply: pickVacuum }
+  if (showActionMenu.value && actionCandidates.value.length)
+    return { items: actionCandidates.value.map(a => a.verb), apply: pickAction }
+  if (showTargetMenu.value && targetCandidates.value.length)
+    return { items: targetCandidates.value, apply: pickTarget }
   return null
 })
 
@@ -334,20 +316,19 @@ function applyHighlighted(): boolean {
   return true
 }
 
-// Multiline mode: the resolved command needs multiline input
-const isMultiline = computed(() => resolvedCmd.value?.multiline === true)
+// Multiline when the resolved action asks for it (e.g. substack post).
+const isMultiline = computed(() => resolvedAction.value?.multiline === true)
 
-// A slash-command that isn't built yet — kept visible so it's discoverable, but
-// not sendable so it can't be fired by accident.
-const blockedCmd = computed(() => {
-  const c = COMMANDS.find(c => c.cmd === draftParts.value[0])
-  return c && c.done !== true ? c : null
-})
+// A resolved action that isn't built yet — still sendable (the server replies
+// out-of-office), just badged "soon" so it's clear it won't act yet.
+const soonAction = computed(() =>
+  resolvedAction.value && resolvedAction.value.done !== true ? resolvedAction.value : null
+)
 
 // ── Send ─────────────────────────────────────────────────────────────────────
 function send() {
   const text = draft.value.trim()
-  if (!text || blockedCmd.value) return
+  if (!text) return
   sendMessage(identity.value, text)
   draft.value = ''
   showEmoji.value = false
@@ -493,47 +474,7 @@ function onKeydown(e: KeyboardEvent) {
         <!-- Input area -->
         <div class="input-wrap" @click.stop>
 
-          <!-- Command name autocomplete -->
-          <div v-if="showCmdMenu && filteredCmds.length > 0" class="autocomplete">
-            <div
-              v-for="c in filteredCmds"
-              :key="c.cmd"
-              class="autocomplete-item"
-              :class="{ 'autocomplete-item--active': isHl(c.cmd), 'autocomplete-item--soon': c.done !== true }"
-              @mouseenter="setHl(c.cmd)"
-              @click="selectCmd(c.cmd)"
-            >
-              <span class="autocomplete-cmd">{{ c.cmd }}</span>
-              <span v-if="c.param" class="autocomplete-param">&lt;{{ c.param.label }}&gt;</span>
-              <span class="autocomplete-desc">{{ c.desc }}</span>
-              <span v-if="c.multiline" class="autocomplete-tag">multiline</span>
-              <span v-if="c.done !== true" class="autocomplete-tag autocomplete-tag--soon">soon</span>
-            </div>
-          </div>
-
-          <!-- Console param autocomplete -->
-          <div v-if="showConsoleMenu && consoleCandidates.length > 0" class="autocomplete">
-            <div
-              v-for="id in consoleCandidates"
-              :key="id"
-              class="autocomplete-item"
-              :class="{ 'autocomplete-item--active': isHl(id) }"
-              @mouseenter="setHl(id)"
-              @click="pickConsole(id)"
-            >
-              <ConsoleAvatar
-                :id="id"
-                :icon="ICONS[id]"
-                :status="nodes[id]?.status ?? 'unconfigured'"
-                :color="nodes[id]?.color"
-                :size="20"
-              />
-              <span class="autocomplete-cmd">{{ id }}</span>
-              <span class="autocomplete-desc">{{ nodes[id]?.ip ?? '' }}</span>
-            </div>
-          </div>
-
-          <!-- Mention autocomplete -->
+          <!-- (1) Mention autocomplete: tag any node (+ @here/@everyone) -->
           <div v-if="showMentionMenu && filteredMentions.length > 0" class="autocomplete">
             <div
               v-for="m in filteredMentions"
@@ -543,22 +484,55 @@ function onKeydown(e: KeyboardEvent) {
               @mouseenter="setHl(m)"
               @click="selectMention(m)"
             >
+              <ConsoleAvatar
+                v-if="nodeByHandle[m.toLowerCase()]"
+                :id="nodeByHandle[m.toLowerCase()]"
+                :icon="ICONS[nodeByHandle[m.toLowerCase()]]"
+                :status="nodes[nodeByHandle[m.toLowerCase()]]?.status ?? 'unconfigured'"
+                :color="nodes[nodeByHandle[m.toLowerCase()]]?.color"
+                :size="20"
+              />
               <span class="autocomplete-cmd">{{ m }}</span>
             </div>
           </div>
 
-          <!-- @l40 vacuum verb autocomplete -->
-          <div v-if="showVacuumMenu && vacuumCandidates.length > 0" class="autocomplete">
+          <!-- (2) Action substep: the tagged node's verbs -->
+          <div v-if="showActionMenu && actionCandidates.length > 0" class="autocomplete">
             <div
-              v-for="v in vacuumCandidates"
-              :key="v.verb"
+              v-for="a in actionCandidates"
+              :key="a.verb"
               class="autocomplete-item"
-              :class="{ 'autocomplete-item--active': isHl(v.verb) }"
-              @mouseenter="setHl(v.verb)"
-              @click="pickVacuum(v.verb)"
+              :class="{ 'autocomplete-item--active': isHl(a.verb), 'autocomplete-item--soon': a.done !== true }"
+              @mouseenter="setHl(a.verb)"
+              @click="pickAction(a.verb)"
             >
-              <span class="autocomplete-cmd">{{ v.verb }}</span>
-              <span class="autocomplete-desc">{{ v.desc }}</span>
+              <span class="autocomplete-cmd">{{ a.verb }}</span>
+              <span v-if="a.target" class="autocomplete-param">&lt;{{ a.target }}&gt;</span>
+              <span class="autocomplete-desc">{{ a.desc }}</span>
+              <span v-if="a.multiline" class="autocomplete-tag">multiline</span>
+              <span v-if="a.done !== true" class="autocomplete-tag autocomplete-tag--soon">soon</span>
+            </div>
+          </div>
+
+          <!-- (3) Target substep: a console (or @everyone) for actions that take one -->
+          <div v-if="showTargetMenu && targetCandidates.length > 0" class="autocomplete">
+            <div
+              v-for="t in targetCandidates"
+              :key="t"
+              class="autocomplete-item"
+              :class="{ 'autocomplete-item--active': isHl(t) }"
+              @mouseenter="setHl(t)"
+              @click="pickTarget(t)"
+            >
+              <ConsoleAvatar
+                v-if="t !== '@everyone' && nodeByHandle[t.toLowerCase()]"
+                :id="nodeByHandle[t.toLowerCase()]"
+                :icon="ICONS[nodeByHandle[t.toLowerCase()]]"
+                :status="nodes[nodeByHandle[t.toLowerCase()]]?.status ?? 'unconfigured'"
+                :color="nodes[nodeByHandle[t.toLowerCase()]]?.color"
+                :size="20"
+              />
+              <span class="autocomplete-cmd">{{ t }}</span>
             </div>
           </div>
 
@@ -616,7 +590,7 @@ function onKeydown(e: KeyboardEvent) {
                   ref="inputEl"
                   v-model="draft"
                   class="input-field input-field--overlay"
-                  :placeholder="'Message as ' + identityLabel + '…  (/ for commands, @ to mention)'"
+                  :placeholder="'Message as ' + identityLabel + '…  (@ to tag a node)'"
                   maxlength="500"
                   @keydown="onKeydown"
                   @input="syncScroll"
@@ -634,11 +608,11 @@ function onKeydown(e: KeyboardEvent) {
 
             <button
               class="send-btn"
-              :disabled="!draft.trim() || !!blockedCmd"
-              :title="blockedCmd ? 'not built yet' : 'send'"
+              :disabled="!draft.trim()"
+              :title="soonAction ? 'not wired up yet — you\'ll get an out-of-office reply' : 'send'"
               @click="send"
             >
-              {{ blockedCmd ? 'Soon' : 'Send' }}
+              Send
             </button>
           </div>
         </div>
