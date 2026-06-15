@@ -359,27 +359,33 @@ def mappings_dir(base=None):
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "mappings"))
 
 
-def list_mappings(base=None):
-    """Sorted stems of the available '<source>-to-<target>.mapping.json' files."""
+def list_sources(base=None):
+    """Sorted event-source names -- the sub-dirs of the mapping store. The store is
+    organised config/mappings/<source>/<target>.json, so the dir IS the filter."""
+    d = mappings_dir(base)
     try:
-        return sorted(f[:-len(".mapping.json")] for f in os.listdir(mappings_dir(base))
-                      if f.endswith(".mapping.json"))
+        return sorted(n for n in os.listdir(d)
+                      if not n.startswith(".") and os.path.isdir(os.path.join(d, n)))
     except OSError:
         return []
 
 
-def load_mapping(name, base=None):
-    """Load a mapping by convention name (or a full path) from the mapping store.
+def list_targets(source, base=None):
+    """Sorted target controllers available for a source (the '<target>.json' stems
+    under <store>/<source>/)."""
+    try:
+        return sorted(f[:-len(".json")] for f in os.listdir(os.path.join(mappings_dir(base), source))
+                      if f.endswith(".json") and not f.startswith("."))
+    except OSError:
+        return []
 
-    Mappings are pure input=>output config (event source => target controller),
-    referenced by the bare stem, e.g. load_mapping('dreame-to-gamecube').
-    """
+
+def load_mapping(source, target, base=None):
+    """Load one mapping by (source, target) from config/mappings/<source>/<target>.json.
+    Mappings are pure input=>output config (an event source => a target controller),
+    e.g. load_mapping('dreame', 'gamecube')."""
     import json
-    if os.path.isfile(name):
-        path = name
-    else:
-        fname = name if name.endswith(".mapping.json") else name + ".mapping.json"
-        path = os.path.join(mappings_dir(base), fname)
+    path = os.path.join(mappings_dir(base), source, target + ".json")
     with open(path) as f:
         return json.load(f)
 

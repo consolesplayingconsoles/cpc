@@ -59,12 +59,17 @@ ROUTES = [
      "required": ["region"]},
     {"m": "POST", "p": "/dreame/logout", "tags": ["Dreame"],
      "summary": "Sign out of DreameHome (clears the in-memory session)."},
-    {"m": "GET", "p": "/robutek/mappings", "tags": ["Dreame"],
-     "summary": "Available vacuum->console drive mapping names (dev)."},
+    {"m": "GET", "p": "/mappings", "tags": ["Mappings"],
+     "summary": "All drive mappings, grouped by event source -> {source: [targets]}."},
+    {"m": "GET", "p": "/mappings/{source}", "tags": ["Mappings"],
+     "summary": "Targets for a source (the dir IS the filter), e.g. /mappings/dreame."},
+    {"m": "GET", "p": "/mappings/{source}/{target}", "tags": ["Mappings"],
+     "summary": "One mapping's JSON (event-source -> target-controller config)."},
     {"m": "POST", "p": "/robutek/drive", "tags": ["Dreame"],
      "summary": "Start / keep-alive / stop the vacuum->console drive (dev only).",
      "body": {"action":  {"type": "string", "desc": "play | keepalive | stop"},
-              "mapping": {"type": "string", "desc": "Mapping stem, e.g. dreame-to-gamecube."},
+              "source":  {"type": "string", "desc": "Mapping source (default dreame)."},
+              "mapping": {"type": "string", "desc": "Target controller, e.g. gamecube."},
               "speed":   {"type": "number"}},
      "required": ["action"]},
     {"m": "GET", "p": "/deploy/{node}/stream", "tags": ["Deploy"],
@@ -130,9 +135,13 @@ def drift_check():
         print("  [drift] could not read api.py (%s)" % exc)
         return
     dispatched = set(re.findall(r'parsed\.path == "(/[^"]*)"', src))
+    # Modular/prefix dispatch (e.g. `parts[0] == "mappings"`) serves a whole subtree;
+    # treat "/<seg>" and anything under it as covered so REST resources don't drift.
+    prefixes   = set("/" + seg for seg in re.findall(r'parts\[0\] == "([^"]+)"', src))
+    covered    = lambda p: p in dispatched or any(p == x or p.startswith(x + "/") for x in prefixes)
     documented = set(r["p"] for r in ROUTES if "{" not in r["p"])
-    missing = dispatched - documented   # served but undocumented
-    extra   = documented - dispatched   # documented but not in exact-path dispatch
+    missing = dispatched - documented                       # served but undocumented
+    extra   = set(p for p in documented if not covered(p))  # documented but not dispatched
     if missing:
         print("  [drift] served by api.py but NOT documented: %s" % ", ".join(sorted(missing)))
     if extra:

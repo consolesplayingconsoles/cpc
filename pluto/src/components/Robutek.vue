@@ -54,8 +54,10 @@ const piPresent  = computed(() => {
 })
 const driveTarget   = ref<'none' | 'keyboard' | 'pi'>('none')
 const driveError    = ref('')
-// which event→controller mapping (config file) to drive with; list from the API
-const driveMapping  = ref('dreame-to-gamecube')
+// This tab drives the vacuum, so the mapping source is always 'dreame'. The
+// target (which controller to emulate) is chosen from the API list for that source.
+const DRIVE_SOURCE  = 'dreame'
+const driveMapping  = ref('gamecube')
 const driveMappings = ref<string[]>([])
 // Output + Mapping selectors visible? Collapse them (settings toggle) so a
 // recording needn't reveal it's emulation — the drive keeps running regardless.
@@ -210,7 +212,7 @@ function startKeepalive() {
 function stopKeepalive() { if (keepaliveTimer) { clearInterval(keepaliveTimer); keepaliveTimer = 0 } }
 function startDrive() {
   if (driveTarget.value === 'none' || !sel.value?.route?.length) return
-  drivePost({ action: 'play', target: driveTarget.value, mapping: driveMapping.value, t: currentTime.value, speed: speed.value, session: sel.value })
+  drivePost({ action: 'play', target: driveTarget.value, source: DRIVE_SOURCE, mapping: driveMapping.value, t: currentTime.value, speed: speed.value, session: sel.value })
   startKeepalive()
 }
 function stopDriveOutput() {
@@ -229,9 +231,9 @@ function stopBeacon() {
 }
 async function fetchMappings() {
   try {
-    const r = await fetch(`${API}/robutek/mappings`)
+    const r = await fetch(`${API}/mappings/${DRIVE_SOURCE}`)
     const j = await r.json().catch(() => null)
-    driveMappings.value = (j && Array.isArray(j.mappings)) ? j.mappings : []
+    driveMappings.value = (j && Array.isArray(j.targets)) ? j.targets : []
     if (driveMappings.value.length && !driveMappings.value.includes(driveMapping.value))
       driveMapping.value = driveMappings.value[0]
   } catch { /* leave list empty */ }
