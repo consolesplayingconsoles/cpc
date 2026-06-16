@@ -17,8 +17,12 @@ const { messages, sendMessage } = useMessages()
 
 // ── Identity: you're a named device, or just an editable guest string ────────
 // The server tells us if our IP maps to a known console (authoritative, locked).
-// Otherwise we're a guest: a display name we keep in localStorage, default
-// guestNNNN, editable inline. No server-side guest registry, no avatar fuss.
+// Otherwise we're a guest OF THIS INSTANCE: a display name kept in localStorage,
+// default "<Lab|C2> Guest <NNNN>" — the instance you came in through + a stable
+// random suffix (assigned once, persisted immediately, editable). Unifies with the
+// node identities (Pluto Lab / Pluto C2) and gives multiple users/labs distinct
+// names for free. No server-side guest registry, no avatar fuss.
+const INSTANCE_LABEL = import.meta.env.DEV ? 'Lab' : 'C2'
 const GUEST_KEY   = 'cpc-chat-name'
 const meNode      = ref<string | null>(null)   // server-recognized device, else null
 const guestName   = ref('')
@@ -32,7 +36,7 @@ const identityLabel = computed(() => meNode.value ? displayName(meNode.value) : 
 
 function loadGuestName() {
   let n = window.localStorage.getItem(GUEST_KEY)
-  if (!n) { n = 'guest' + Math.floor(1000 + Math.random() * 9000); window.localStorage.setItem(GUEST_KEY, n) }
+  if (!n) { n = INSTANCE_LABEL + ' Guest ' + Math.floor(1000 + Math.random() * 9000); window.localStorage.setItem(GUEST_KEY, n) }
   guestName.value = n
 }
 function startEditName() {
@@ -73,7 +77,7 @@ function iconFor(id: string): string | undefined {
 }
 
 function displayName(id: string) {
-  if (id === 'pluto') return 'Pluto'
+  if (id === 'pluto') return 'Pluto C2'
   return props.nodes[id]?.name ?? id
 }
 

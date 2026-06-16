@@ -14,14 +14,14 @@ cp pluto/.env.sample pluto/.env
 
 ```bash
 # from the repo root — boots the dev env: API (:7700) + Vite (:5173) + Swagger UI (:7800)
-./start-pluto.sh           # --api or --web to start just one half
+./start-pluto-lab.sh           # --api or --web to start just one half
 ```
 
 ## Deploy (prod)
 
-`./deploy.sh pluto/.env` builds the SPA and ships the API + `dist/` + `config/` to the
+`./deploy-pluto-c2.sh pluto/.env` builds the SPA and ships the API + `dist/` + `config/` to the
 host, where `pluto/serve.sh` (under systemd) serves it. The dev-only tooling
-(`start-pluto.sh`, `tools/swagger.py`) is never deployed.
+(`start-pluto-lab.sh`, `tools/swagger.py`) is never deployed.
 
 Or just start pluto, click on the Pluto bubble in the diagram and hit the deploy button.
 

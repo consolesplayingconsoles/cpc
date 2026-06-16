@@ -5,6 +5,16 @@
     "label": "USB Eth"
   },
   {
+    "from": "lab",
+    "to": "pluto",
+    "label": "Deploys"
+  },
+  {
+    "from": "lab",
+    "to": "gateway",
+    "label": "WiFi"
+  },
+  {
     "from": "wii",
     "to": "gateway",
     "label": "WiFi"
@@ -21,11 +31,6 @@
   },
   {
     "from": "dc",
-    "to": "gateway",
-    "label": "Ethernet"
-  },
-  {
-    "from": "dc",
     "to": "vmu",
     "label": "Maple"
   },
@@ -36,13 +41,13 @@
   },
   {
     "from": "gba",
-    "to": "pi",
-    "label": "GBA Link / Pico"
+    "to": "pluto",
+    "label": "USB"
   },
   {
     "from": "ws",
-    "to": "pi",
-    "label": "Serial / Pico"
+    "to": "pluto",
+    "label": "USB"
   },
   {
     "from": "dreame",
@@ -61,13 +66,8 @@
   },
   {
     "from": "pi",
-    "to": "wii",
-    "label": "USB / Pico"
-  },
-  {
-    "from": "pi",
     "to": "dc",
-    "label": "USB / Pico / Maple"
+    "label": "DreamPi"
   },
   {
     "from": "saturn",

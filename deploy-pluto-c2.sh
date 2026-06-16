@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────
-#  deploy.sh — the deploy ENGINE: build locally and ship ONE node over SSH.
+#  deploy-pluto-c2.sh — the deploy ENGINE: build locally and ship ONE node over SSH.
 #
 #  Pluto owns deployment ("Pluto self-deploys everywhere"). You normally don't run
 #  this by hand: the Pluto UI's DEPLOY button streams it per node -- the API shells
@@ -10,14 +10,14 @@
 #  It always targets a SINGLE node; batch / multi-node deploys are a Pluto UI
 #  concern, not this script's.
 #
-#  Usage: ./deploy.sh <path-to-env-file>
-#    ./deploy.sh pluto/.env            # the Pluto host (first-deploy bootstrap)
-#    ./deploy.sh nodes/local/wii/.env  # a console node (normally driven via the UI)
+#  Usage: ./deploy-pluto-c2.sh <path-to-env-file>
+#    ./deploy-pluto-c2.sh pluto/.env            # the Pluto host (first-deploy bootstrap)
+#    ./deploy-pluto-c2.sh nodes/local/wii/.env  # a console node (normally driven via the UI)
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
-  echo "Usage: ./deploy.sh <env-file>"
+  echo "Usage: ./deploy-pluto-c2.sh <env-file>"
   exit 1
 fi
 
@@ -96,8 +96,7 @@ if [[ "$CONSOLE_DIR" == "pluto" ]]; then
       | $SSH "tar -xf - --strip-components=1 -C ${REMOTE_PLUTO}"
   # config/ carries everything the API reads: connections.json, chat.json, the
   # drive mappings/ (serve.sh points CPC_MAPPINGS at config/mappings), and the
-  # layout.json (frontend-only, already in dist — harmless). Local node dirs are
-  # NOT shipped: prod has no console .envs, so the LAN diagram shows pluto/gateway.
+  # layout.json (frontend-only, already in dist — harmless).
   $SSH "cat > ${REMOTE_PLUTO}/.env"      < "$ENV_FILE"
   $SSH "chmod +x ${REMOTE_PLUTO}/serve.sh"
 
@@ -105,9 +104,29 @@ if [[ "$CONSOLE_DIR" == "pluto" ]]; then
   # .env.sample (identity only — no real .env, no secrets) to /opt/nodes/cloud/,
   # where discover_nodes() looks (base_dir/../nodes). That keeps the cloud cluster
   # on the prod diagram even though no local consoles are deployed.
-  $SSH "rm -rf /opt/nodes/cloud && mkdir -p /opt/nodes"
+  # --strip-components=1 drops the leading 'nodes/' so the dirs land at
+  # /opt/nodes/cloud/* (not /opt/nodes/nodes/cloud/*, which discovery never scans).
+  $SSH "rm -rf /opt/nodes/cloud && mkdir -p /opt/nodes/cloud"
   tar --no-xattrs --no-fflags --no-mac-metadata -cf - nodes/cloud/*/.env.sample \
-      | $SSH "tar -xf - -C /opt/nodes"
+      | $SSH "tar -xf - --strip-components=1 -C /opt/nodes"
+
+  # Local LAN nodes: the C2 is the live LAN monitor, so it needs each node's identity
+  # + IP to ping and draw it. But it never DEPLOYS (that's the Lab), so we ship a
+  # SANITISED .env -- identity / IP / display only, with SSH + deploy creds and the
+  # workspace path stripped out (the C2 has no business holding them). Placeholders
+  # ship their .env.sample so "show unconfigured" matches the Lab. discover_nodes()
+  # prefers a real .env over the .sample.
+  $SSH "rm -rf /opt/nodes/local && mkdir -p /opt/nodes/local"
+  if ls nodes/local/*/.env.sample >/dev/null 2>&1; then
+    tar --no-xattrs --no-fflags --no-mac-metadata -cf - nodes/local/*/.env.sample \
+        | $SSH "tar -xf - --strip-components=1 -C /opt/nodes"
+  fi
+  for envf in nodes/local/*/.env; do
+    [ -f "$envf" ] || continue
+    name=$(basename "$(dirname "$envf")")
+    grep -E '^(NODE_NAME|HOST_IP|UI_PRIMARY_COLOR|UI_SECONDARY_COLOR|SMB_PATH|OS)=' "$envf" \
+        | $SSH "mkdir -p /opt/nodes/local/${name} && cat > /opt/nodes/local/${name}/.env"
+  done
   echo "sync ok"
 
   # Restart so the new code takes effect. If pluto.service is installed under a
@@ -138,7 +157,7 @@ $SSH "rm -rf ${REMOTE_PATH}/* && mkdir -p ${REMOTE_PATH}/logs"
 
 # Allowlist: ship ONLY the python client dir (code + vendored deps). No
 # .deployignore to babysit — anything else at the repo root (pluto/, birdbuddy/,
-# scripts/, start-pluto.sh, *.md, other consoles, ...) can't leak; it's not listed.
+# scripts/, start-pluto-lab.sh, *.md, other consoles, ...) can't leak; it's not listed.
 INCLUDE=( pluto-python-tui )
 
 tar --no-xattrs --no-fflags --no-mac-metadata \

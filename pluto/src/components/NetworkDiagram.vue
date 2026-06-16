@@ -7,6 +7,7 @@ import { API_BASE } from '../composables/useNodes'
 import { BUBBLE_R } from '../composables/bubbleConstants'
 import NodeBubble from './NodeBubble.vue'
 import NodeDrawer from './NodeDrawer.vue'
+import DeployTerminal from './DeployTerminal.vue'
 import AchievementToast from './AchievementToast.vue'
 import RecentActivity from './RecentActivity.vue'
 
@@ -53,6 +54,10 @@ const activeMenu  = ref<string | null>(null)
 const hoveredNode = ref<string | null>(null)
 
 const presentNodes = computed(() => Object.keys(props.nodes).filter(id => LAYOUT[id]))
+
+// Which Pluto node is THIS instance — so we can flag it with a "You are here" marker
+// on a map this big. Lab under vite, C2 in the deployed dist (same gate as the drawer).
+const selfId = import.meta.env.DEV ? 'lab' : 'pluto'
 
 // ── Pan & zoom ───────────────────────────────────────────────────────────────
 // Fit-to-view by default (scale 1 = the whole map, the zoomed-out overview the
@@ -170,13 +175,40 @@ function openSmb(id: string) {
   a.remove()
 }
 
-async function openWorkspace(id: string) {
-  await fetch(`${API_BASE}/workspace/${id}`, { method: 'POST' })
+// Open the strategic config dir in the IDE on the Lab machine (dev escape hatch).
+async function openConfig() {
+  await fetch(`${API_BASE}/config/open`, { method: 'POST' })
 }
+
+// The deploy terminal floats over the map (closable), not in the drawer — so the
+// drawer stays lean and the stream survives closing/switching drawers. It tracks
+// the node you deployed, independent of which drawer (if any) is open.
+const deployTermId = ref<string | null>(null)
+function startDeploy(id: string) { deployTermId.value = id; deploy(id) }
+function closeDeployTerm() {
+  if (deployTermId.value) clearOutput(deployTermId.value)
+  deployTermId.value = null
+}
+const floatingDeploy = computed(() => {
+  const id = deployTermId.value
+  if (!id) return null
+  const output = deployOutput.value[id]
+  if (!output) return null
+  return { id, output, lastMs: lastDurations.value[id] ?? null }
+})
+// Right-aligned + wide, so it doesn't block the centre of the map and long log
+// lines don't wrap. Offsets to clear the open drawer (300px) or the zoom column.
+const floatTermStyle = computed(() => ({
+  position: 'absolute',
+  right: activeMenu.value ? '316px' : '56px',
+  bottom: '16px',
+  width: 'min(540px, 46%)',
+  maxHeight: '46%',
+  zIndex: '5',
+}))
 
 function closeMenu() {
   if (panMoved) { panMoved = false; return }   // a pan-drag, not a real click
-  if (activeMenu.value) clearOutput(activeMenu.value)
   activeMenu.value = null
 }
 function toggleMenu(id: string) {
@@ -271,6 +303,12 @@ watch(hoveredNode, () => nextTick(updatePeekPos))
           :is-unconfigured="isUnconfigured(id)"
           @toggle="toggleMenu(id)"
         />
+        <!-- "You are here" — flags the Pluto instance you're currently viewing -->
+        <g v-if="id === selfId" class="yah" style="pointer-events:none">
+          <rect x="-47" y="-72" width="94" height="20" rx="10" fill="var(--accent)"/>
+          <text x="0" y="-58" text-anchor="middle" class="yah-text">You are here</text>
+          <path d="M-6 -52 L6 -52 L0 -44 Z" fill="var(--accent)"/>
+        </g>
       </g>
     </svg>
 
@@ -299,17 +337,24 @@ watch(hoveredNode, () => nextTick(updatePeekPos))
         :node="nodes[activeMenu]"
         :nodes="nodes"
         :icon="ICONS[activeMenu]"
-        :output="deployOutput[activeMenu] ?? null"
         :deploying="deploying === activeMenu"
-        :last-ms="lastDurations[activeMenu] ?? null"
         @close="closeMenu"
-        @clear="clearOutput(activeMenu)"
-        @deploy="deploy(activeMenu)"
+        @deploy="startDeploy(activeMenu)"
         @open-smb="openSmb(activeMenu)"
-        @open-workspace="openWorkspace(activeMenu)"
+        @open-config="openConfig"
         @open-tab="emit('open-tab', 'robutek')"
       />
     </Transition>
+
+    <!-- deploy terminal: floats over the map (closable), out of the drawer -->
+    <DeployTerminal
+      v-if="floatingDeploy"
+      :console-id="floatingDeploy.id"
+      :output="floatingDeploy.output"
+      :last-ms="floatingDeploy.lastMs"
+      :card-style="floatTermStyle"
+      @close="closeDeployTerm"
+    />
 
     <AchievementToast
       :show="showToast"
@@ -399,6 +444,20 @@ watch(hoveredNode, () => nextTick(updatePeekPos))
 .diagram .node   { pointer-events: auto; }
 .node            { cursor: default; }
 .node--clickable { cursor: pointer; }
+/* "You are here" marker — a small accent badge that gently bobs over the current
+   instance's Pluto node, so you can orient on a big map. */
+.yah { animation: yahBob 1.8s ease-in-out infinite; }
+.yah-text {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  fill: var(--accent-ink, #fff);
+}
+@keyframes yahBob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-3px); }
+}
 .edge-label {
   font-family: var(--font-mono);
   font-size: 9px;

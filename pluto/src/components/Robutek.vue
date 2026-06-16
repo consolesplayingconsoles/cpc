@@ -44,6 +44,10 @@ interface DreameData {
 
 const props = defineProps<{ name: string; active: boolean; nodes?: NodeMap }>()
 const emit = defineEmits<{ back: [] }>()
+
+// The local emulator output is a LAB-only feature — you emulate on the dev
+// workstation, never on the headless C2 box (which has no display/emulator).
+const isLab = import.meta.env.DEV
 const API = `http://${window.location.hostname}:7700`
 
 // Output target: where the playback clock is sent. 'none' = just animate the map.
@@ -695,7 +699,7 @@ async function signIn() {
         <span>Output</span>
         <select v-model="driveTarget" @keydown="blockArrows">
           <option value="none">Disabled</option>
-          <option value="keyboard">Local Emulator (Virtual Keyboard)</option>
+          <option v-if="isLab" value="keyboard">Local Emulator (Virtual Keyboard)</option>
           <option value="pi" :disabled="!piPresent">Console (Raspberry Pi)</option>
         </select>
       </label>

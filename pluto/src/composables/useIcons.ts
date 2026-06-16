@@ -6,7 +6,8 @@ import imgGba      from '../assets/avatars/gba.png'
 import imgWs       from '../assets/avatars/ws.png'
 import imgBatocera from '../assets/avatars/batocera.png'
 import imgDreame   from '../assets/avatars/dreame.png'
-import imgHost     from '../assets/avatars/host.png'
+import imgPlutoC2  from '../assets/avatars/pluto-c2.svg'
+import imgPlutoLab from '../assets/avatars/pluto-lab.svg'
 import imgClaude   from '../assets/avatars/claude.svg'
 import imgBird     from '../assets/avatars/birdbuddy.png'
 import imgPi       from '../assets/avatars/pi.svg'
@@ -26,7 +27,8 @@ export const ICONS: Record<string, string> = {
   ws:        imgWs,
   batocera:  imgBatocera,
   dreame:    imgDreame,
-  pluto:     imgHost,
+  pluto:     imgPlutoC2,    // the live C2 node wears the signal-badge planet mark
+  lab:       imgPlutoLab,   // the workspace node wears the beaker-badge planet mark
   saturn:    imgSaturn,
   megadrive: imgMegadrive,
   claude:        imgClaude,

@@ -452,13 +452,18 @@ _UA_NODE_SIGNATURES = [
 ]
 
 
-def ip_to_node(roster, config):
-    """Build {ip: node_id} from the discovered roster. Localhost maps to 'pluto'
-    so the operator can QA from the Mac; the roster already carries pluto's HOST_IP."""
-    mapping = {"127.0.0.1": "pluto", "::1": "pluto"}
+def ip_to_node(roster, config, is_lab=False, lab_ip=""):
+    """Build {ip: node_id} from the discovered roster. Localhost maps to the SELF
+    instance -- 'lab' on the workspace, else 'pluto' (the C2) -- so QAing from the
+    box you're running identifies you correctly. HOST_IP is always the C2; LAB_IP
+    (when known) is the Lab, so the lab machine reads as 'lab' from either side."""
+    self_id = "lab" if is_lab else "pluto"
+    mapping = {"127.0.0.1": self_id, "::1": self_id}
     host_ip = config.get("HOST_IP", "").strip()
     if host_ip:
         mapping[host_ip] = "pluto"
+    if lab_ip:
+        mapping[lab_ip] = "lab"
     for name, cfg in roster.items():
         ip = cfg.get("HOST_IP", "").strip()
         if ip:
@@ -565,6 +570,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     base_dir    = ""
     chat_config = {}
     node_roster = {}   # {name: cfg} discovered once at startup; the source of truth
+    is_lab      = False  # this instance is the Lab (deploy engine present), not the C2
+    lab_ip      = ""     # the Lab's address, when the C2 is told about it (LAB_IP)
 
     def log_message(self, format, *args):
         if "/deploy" in self.path or "/messages" in self.path:
@@ -606,7 +613,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """The named node bound to the requester's source IP, or None for a
         guest. This is the authoritative half of identity -- it can't be spoofed
         by a client-supplied name."""
-        mapping = ip_to_node(self.__class__.node_roster, self.__class__.config)
+        mapping = ip_to_node(self.__class__.node_roster, self.__class__.config,
+                             self.__class__.is_lab, self.__class__.lab_ip)
         return mapping.get(self.client_address[0])
 
     def _handle_whoami(self):
@@ -828,6 +836,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_drive()
         elif len(parts) == 2 and parts[0] == "workspace":
             self._handle_open(action=parts[0], target_node=parts[1])
+        elif parsed.path == "/config/open":
+            self._handle_open_config()
         else:
             self._send(404, {"error": "not found"})
 
@@ -938,6 +948,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         open_path(path)
         self._send(200, {"status": "opened", "path": path, "target": target_node})
 
+    def _handle_open_config(self):
+        # Open the strategic config dir (connections / layout / chat / mappings) on the
+        # API host — the dev-friendly way to edit network/deploy config in your own IDE
+        # instead of an in-drawer form. Lab-only by nature: the dir + a GUI live on the
+        # workstation. To apply a change to the live C2, edit here then redeploy (parity).
+        path = os.path.join(self.__class__.base_dir, "config")
+        print("  [OPEN:config] -> %s" % path)
+        open_path(path)
+        self._send(200, {"status": "opened", "path": path})
+
     def _handle_drive(self):
         """POST /robutek/drive {action, target, session, t, speed, mapping}.
 
@@ -1027,9 +1047,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(404, {"error": "no env file for %s" % node_id})
             return
         repo_root = os.path.dirname(base_dir)
-        deploy_sh = os.path.join(repo_root, "deploy.sh")
+        deploy_sh = os.path.join(repo_root, "deploy-pluto-c2.sh")
         if not os.path.exists(deploy_sh):
-            self._send(500, {"error": "deploy.sh not found"})
+            self._send(500, {"error": "deploy-pluto-c2.sh not found"})
             return
 
         console_cfg = load_env(full_env)
@@ -1085,12 +1105,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         base_dir = self.__class__.base_dir
         nodes    = {}
 
+        # DEPLOY is only possible where the deploy ENGINE lives: the repo checkout
+        # with deploy-pluto-c2.sh at its root (the dev workstation). The deployed box ships
+        # only /opt/pluto (api + dist + config -- no deploy-pluto-c2.sh, no node .envs), so a
+        # deploy there can't run. Gate every node's deploy flag on this one host-level
+        # check -- deterministic, no build flag, same spirit as `code`/has_code.
+        deploy_engine = os.path.isfile(os.path.join(os.path.dirname(base_dir), "deploy-pluto-c2.sh"))
+
         # The roster was discovered once at startup (nodes/*/ + pluto the host); we
         # never rescan. Per request we only re-ping: collect every IP and probe them
         # in parallel, so down hosts time out once concurrently, not once per node.
         roster     = self.__class__.node_roster
         gateway_ip = cfg.get("GATEWAY_IP", "").strip()
-        ips = [gateway_ip] + [c.get("HOST_IP", "").strip() for c in roster.values()]
+        # LAB_IP (optional, pluto/.env): the workspace instance's address. When set,
+        # the C2 can see + ping the Lab node (and offer a "Lab" jump). On the Lab
+        # itself we don't ping it -- it's localhost, always up.
+        lab_ip     = cfg.get("LAB_IP", "").strip()
+        ips = [gateway_ip, lab_ip] + [c.get("HOST_IP", "").strip() for c in roster.values()]
         pinged = probe_many(ips)
 
         if gateway_ip:
@@ -1110,34 +1141,39 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         for node_id, console_cfg in roster.items():
             # Cloud connectors (nodes/cloud/*): off-network service buddies drawn as
-            # the diagram's 'solar system'. Never pinged. A real .env means the
-            # operator wired it up -> 'cloud' (shown); a bare .env.sample is a
-            # placeholder -> 'unconfigured', hidden behind the same toggle as
-            # placeholder LAN nodes. Identity (name/colour) comes from the dir's .env.
+            # the diagram's 'solar system'. Never pinged, and ALWAYS shown -- the dir
+            # IS the declaration (CLAUDE.md). Identity (name/colour) comes from the
+            # dir's .env or its .env.sample placeholder. `configured` (a real .env, vs
+            # a bare .env.sample) is exposed as a sub-state for the UI, but never hides
+            # the node -- prod ships .env.sample only (no secrets) yet must still draw
+            # the whole cloud cluster.
             if console_cfg.get("_kind") == "cloud":
                 nodes[node_id] = {
-                    "id":     node_id,
-                    "name":   console_cfg.get("NODE_NAME", node_id),
-                    "ip":     "",
-                    "color":  console_cfg.get("UI_PRIMARY_COLOR") or None,
-                    "status": "cloud" if console_cfg.get("_has_env") else "unconfigured",
-                    "cloud":  True,
-                    "smb":    None,
-                    "deploy": False,
-                    "folder": False,
-                    "os":     None,
+                    "id":         node_id,
+                    "name":       console_cfg.get("NODE_NAME", node_id),
+                    "ip":         "",
+                    "color":      console_cfg.get("UI_PRIMARY_COLOR") or None,
+                    "status":     "cloud",
+                    "cloud":      True,
+                    "configured": bool(console_cfg.get("_has_env")),
+                    "smb":        None,
+                    "deploy":     False,
+                    "folder":     False,
+                    "os":         None,
                 }
                 continue
             # A node configured without a HOST_IP (e.g. a placeholder loaded from
             # .env.sample) renders 'unconfigured' so "show unconfigured" reveals it.
             ip    = console_cfg.get("HOST_IP", "").strip()
-            name  = console_cfg.get("NODE_NAME", node_id)
+            # The host node is the live command/comms instance -- label it "Pluto C2"
+            # everywhere (bubble, drawer, deploy) so it reads apart from the Lab.
+            name  = "Pluto C2" if node_id == "pluto" else console_cfg.get("NODE_NAME", node_id)
             color = console_cfg.get("UI_PRIMARY_COLOR") or None
             smb   = console_cfg.get("SMB_PATH", "").strip() or None
             alias    = console_cfg.get("CUSTOM_SSH_ALIAS", "").strip()
             ssh_user = console_cfg.get("SSH_USER", "").strip()
             ssh_key  = console_cfg.get("SSH_KEY_PATH", "").strip()
-            deployable = bool(ip and (alias or (ssh_user and ssh_key)))
+            deployable = deploy_engine and bool(ip and (alias or (ssh_user and ssh_key)))
             # CODE opens the source in the IDE on THIS host, so only surface it
             # where the checkout actually exists — true on the dev workstation,
             # false on the deployed headless box. Deterministic (no build flag).
@@ -1160,16 +1196,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "os":     _detect_os(console_cfg, KNOWN_OS.get(node_id) or det_os),
             }
 
-        # The 'cloud' hub is virtual -- like 'gateway' it has no config dir. Draw it
-        # whenever >=1 cloud connector exists, and let it track their state: 'cloud'
-        # (shown) when any connector is configured, else 'unconfigured' so the whole
-        # cluster tucks behind the same "show unconfigured" toggle as placeholder nodes.
-        cloud_satellites = [n for n in nodes.values() if n.get("cloud")]
-        if cloud_satellites:
-            any_configured = any(n["status"] == "cloud" for n in cloud_satellites)
+        # The Lab node -- Pluto's workspace instance (this repo checkout: the bench
+        # that builds, deploys and opens code). Config-gated like every other node:
+        # the Lab always sees itself (deploy_engine present -> 'up', it's localhost);
+        # the C2 sees it only when pluto/.env declares LAB_IP, then pings it like a
+        # LAN host (offline workstation -> 'down'). No LAB_IP on the C2 -> no Lab.
+        if deploy_engine or lab_ip:
+            if deploy_engine:
+                # The Lab IS this machine -- read its real OS for the bubble badge.
+                lab_status = "up"
+                lab_os = {"Darwin": "macos", "Linux": "linux", "Windows": "windows"}.get(platform.system())
+            else:
+                lab_up, lab_det = pinged.get(lab_ip, (False, None))
+                lab_status = "up" if lab_up else "down"
+                lab_os = lab_det   # best-effort guess from the ping TTL
+            nodes["lab"] = {
+                "id":     "lab",
+                "name":   "Pluto Lab",
+                # '' on the Lab itself (it's localhost -- the frontend falls back to
+                # the current host); the real LAB_IP when the C2 is looking at it.
+                "ip":     "" if deploy_engine else lab_ip,
+                "color":  cfg.get("UI_PRIMARY_COLOR") or None,
+                "status": lab_status,
+                "smb":    None,
+                "deploy": False,
+                "folder": False,
+                "code":   False,
+                "os":     lab_os,
+                "lab":    True,
+            }
+
+        # The 'cloud' hub is virtual -- like 'gateway' it has no config dir. Cloud
+        # connectors are always shown, so draw the hub whenever >=1 of them exists.
+        if any(n.get("cloud") for n in nodes.values()):
             nodes["cloud"] = {
                 "id": "cloud", "name": "Cloud", "ip": "", "color": None,
-                "status": "cloud" if any_configured else "unconfigured",
+                "status": "cloud",
                 "cloud": True, "smb": None, "deploy": False, "folder": False, "os": None,
             }
 
@@ -1240,6 +1302,12 @@ def run():
 
     Handler.config   = config
     Handler.base_dir = parent_dir
+    # Instance identity (deterministic, no build flag): the Lab is the host that holds
+    # the deploy engine (deploy-pluto-c2.sh at the repo root); the C2 is the deployed box.
+    Handler.is_lab = os.path.isfile(os.path.join(os.path.dirname(parent_dir), "deploy-pluto-c2.sh"))
+    Handler.lab_ip = config.get("LAB_IP", "").strip()
+    print("  instance: %s%s" % ("Lab" if Handler.is_lab else "C2",
+                                 ("  (lab @ %s)" % Handler.lab_ip) if Handler.lab_ip else ""))
 
     # Discover the node roster ONCE: nodes/local + nodes/cloud dirs + pluto (the host).
     roster = discover_nodes(parent_dir)
@@ -1264,7 +1332,7 @@ def run():
     # Release any held synthetic keys on shutdown, so a kill/restart mid-drive can't
     # strand a keydown -- Dolphin's background input would hold it forever and the
     # character keeps walking. atexit covers normal exit + Ctrl-C; the SIGTERM
-    # handler covers `kill` (e.g. start-pluto.sh restarting the API).
+    # handler covers `kill` (e.g. start-pluto-lab.sh restarting the API).
     atexit.register(_drive_stop)
 
     def _on_term(_sig, _frame):
