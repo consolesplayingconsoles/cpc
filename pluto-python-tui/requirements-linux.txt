@@ -1,2 +1,2 @@
-# Linux-only dependencies - installed on the remote console by deploy.sh.
+# Linux-only dependencies - installed on the remote console by deploy-pluto-c2.sh.
 # Controller input uses raw /dev/input reads so evdev is not needed.

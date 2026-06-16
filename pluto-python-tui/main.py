@@ -46,7 +46,7 @@ def _resolve_env() -> str:
         return sys.argv[1]
 
     # No argument: a deployed console ships exactly one console directory
-    # (deploy.sh strips every sibling), so discover the sole env automatically.
+    # (deploy-pluto-c2.sh strips every sibling), so discover the sole env automatically.
     # Console dirs sit one level up from this client dir (pluto-python-tui/).
     candidates = [
         p for p in glob.glob(os.path.join(ROOT, "..", "*", ".env"))

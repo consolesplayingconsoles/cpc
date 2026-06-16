@@ -65,7 +65,7 @@ The Python application features a terminal-based administrative interface for di
 * **Input Model**: Displays interactive text input fields dynamically at the exact time and place user configuration is required.
 * **Config Printing**: Capable of reading and printing raw configuration files (such as controller mappings) directly into the terminal window for instant inspection.
 * **Title format**: ASCII header always renders as `CPC MANUFACTURER CONSOLENAME` using pyfiglet. CPC + manufacturer on one line (secondary color), console name large below (primary color).
-* **Dependencies**: managed via `pluto-python-tui/requirements.txt`, vendored into `pluto-python-tui/vendor/`, deployed via `deploy.sh nodes/local/<console>/.env`.
+* **Dependencies**: managed via `pluto-python-tui/requirements.txt`, vendored into `pluto-python-tui/vendor/`, deployed via `deploy-pluto-c2.sh nodes/local/<console>/.env`.
 
 ### 7. Cross-Platform Topology & Dynamic Availability
 The core Python interface executes natively on a **master** Linux console. However, its management scope extends beyond the host machine to coordinate specialized **client** devices directly from the master interface.

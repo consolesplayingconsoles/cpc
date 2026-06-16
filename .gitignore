@@ -224,7 +224,7 @@ __marimo__/
 # operator's home directory. Non-meaningful to the repo; never commit.
 .claude/projects/
 
-# Vendored dependencies (built locally, shipped via deploy.sh)
+# Vendored dependencies (built locally, shipped via deploy-pluto-c2.sh)
 vendor/
 
 # Runtime logs

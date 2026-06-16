@@ -5,7 +5,7 @@ from env import load_env
 
 # Keys the local console interface needs to render and brand itself.
 # Networking / SSH fields (HOST_IP, SSH_USER, SSH_KEY_PATH, CUSTOM_SSH_ALIAS)
-# are deploy-time concerns validated by deploy.sh — not required to run the
+# are deploy-time concerns validated by deploy-pluto-c2.sh — not required to run the
 # TUI on the console itself, so they are intentionally not listed here.
 REQUIRED_KEYS = [
     "NODE_NAME",

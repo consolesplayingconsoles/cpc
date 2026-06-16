@@ -7,6 +7,8 @@ import { useMessages } from './composables/useMessages'
 import NetworkDiagram from './components/NetworkDiagram.vue'
 import GroupChat from './components/GroupChat.vue'
 import Robutek from './components/Robutek.vue'
+import plutoLabMark from './assets/avatars/pluto-lab.svg'
+import plutoC2Mark from './assets/avatars/pluto-c2.svg'
 
 const route = useRoute()
 const router = useRouter()
@@ -38,9 +40,30 @@ const dreameConfigured = computed(() =>
   !!nodes.value['dreame'] && nodes.value['dreame'].status !== 'unconfigured'
 )
 
-// True under `vite dev` (the dev starter), compiled to false in the built dist
-// shipped to the box — drives the DEV badge and the dev-only CODE button.
+// True under `vite dev` (the workspace starter), compiled to false in the built
+// dist shipped to the box. Distinguishes the two instance identities: the Lab
+// (workspace — builds/deploys/opens code) vs the C2 (the live command + comms node).
 const isDev = import.meta.env.DEV
+
+// The header logo IS the instance identity — the Lab wears the beaker mark, the
+// live C2 the signal mark.
+const headerMark = computed(() => isDev ? plutoLabMark : plutoC2Mark)
+
+// One header button: jump to the SIBLING instance, opened in a NEW TAB so a target
+// that isn't running never disturbs the current app ("be prepared"). From the Lab
+// -> the C2's deployed SPA (:5173); from the C2 -> the Lab's vite server (:5174),
+// shown only when LAB_IP is configured (so the Lab node exists in the roster).
+const siblingLink = computed<{ label: string; url: string } | null>(() => {
+  if (isDev) {
+    const ip = nodes.value['pluto']?.ip
+    return ip ? { label: 'C2', url: `http://${ip}:5173` } : null
+  }
+  const ip = nodes.value['lab']?.ip
+  return ip ? { label: 'Lab', url: `http://${ip}:5174` } : null
+})
+function openExternal(url: string) {
+  if (url) window.open(url, '_blank', 'noopener')
+}
 
 const showOffline    = ref(false)
 const lastSeenMsgId  = ref(0)
@@ -96,21 +119,15 @@ const displayNodes = computed(() => {
   <div class="shell">
     <header class="header">
       <span class="header-title">
-        <svg width="64" height="64" viewBox="0 0 24 24" style="vertical-align:middle; margin-right:6px;">
-          <!-- tilted orbit / network ring -->
-          <ellipse cx="12" cy="12" rx="11" ry="4.1" fill="none"
-                   stroke="var(--accent)" stroke-width="1.4" opacity="0.5"
-                   transform="rotate(-22 12 12)"/>
-          <!-- planet: terracotta Pluto -->
-          <circle cx="12" cy="12" r="5.6" fill="var(--accent)"/>
-          <circle cx="9.9" cy="9.9" r="1.9" fill="#fff" opacity="0.18"/>
-          <!-- network nodes riding the orbit -->
-          <circle cx="22.2" cy="7.9" r="1.6" fill="var(--accent)"/>
-          <circle cx="1.8" cy="16.1" r="1.6" fill="var(--accent)"/>
-        </svg><span>CPC Pluto</span>
-        <span v-if="isDev" class="dev-badge" title="Vite dev server — not the deployed build">DEV</span>
+        <img :src="headerMark" width="42" height="42" alt="" class="header-mark" /><span>CPC Pluto <span class="header-instance">{{ isDev ? 'Lab' : 'C2' }}</span></span>
       </span>
       <span class="header-controls">
+        <button
+          v-if="siblingLink"
+          class="head-link"
+          :title="`Open the ${siblingLink.label} dashboard in a new tab`"
+          @click="openExternal(siblingLink.url)"
+        >{{ siblingLink.label }}<svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3l-8 8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         <label class="toggle-label">
           <input type="checkbox" v-model="showOffline" class="toggle-checkbox" />
           <span v-if="activeTab !== 'robutek'">Show unconfigured nodes</span>
@@ -194,19 +211,11 @@ const displayNodes = computed(() => {
   align-items: center;
 }
 
-.dev-badge {
-  margin-left: 10px;
-  padding: 2px 7px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  color: var(--accent);
-  background: var(--accent-soft, rgba(245, 166, 35, 0.14));
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  text-transform: uppercase;
-  /* a quiet mode chip — clearly a state cue, not part of the brand accent usage */
+/* The instance (Lab / C2) is part of the title, not a chip — a lighter-weight,
+   muted qualifier after the terracotta brand so the two read as one identity. */
+.header-instance {
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
 .header-controls {
@@ -214,6 +223,38 @@ const displayNodes = computed(() => {
   align-items: center;
   gap: 20px;
 }
+
+.header-mark {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 7px;
+}
+
+.head-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 4px 9px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.head-link svg { opacity: 0.8; }
+.head-link:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft, rgba(245, 166, 35, 0.12));
+}
+.head-link:disabled { opacity: 0.45; cursor: default; }
+.head-link:focus { outline: none; }
+.head-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .toggle-label {
   display: flex;

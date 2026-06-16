@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────
-#  start-pluto.sh — launch the Pluto dashboard from the repo root.
+#  start-pluto-lab.sh — launch the Pluto dashboard from the repo root.
 #
 #  Starts the local dev environment for Pluto:
 #    - the API server   (python3 pluto/api/api.py, port 7700)
@@ -24,7 +24,7 @@ VITE_PORT="${VITE_PORT:-5173}"
 DEV_HOST="pluto.dev.localhost"
 
 # Resolve this script's own directory absolutely — robust whether invoked as
-# ./start-pluto.sh, bash start-pluto.sh, or sh start-pluto.sh (no BASH_SOURCE).
+# ./start-pluto-lab.sh, bash start-pluto-lab.sh, or sh start-pluto-lab.sh (no BASH_SOURCE).
 SELF="${BASH_SOURCE[0]:-$0}"
 ROOT="$(cd "$(dirname "$SELF")" && pwd)"
 PLUTO="$ROOT/pluto"
@@ -35,7 +35,7 @@ case "${1:-}" in
   --api) WANT_WEB=0 ;;
   --web) WANT_API=0 ;;
   "")    ;;
-  *)     echo "usage: ./start-pluto.sh [--api | --web]"; exit 1 ;;
+  *)     echo "usage: ./start-pluto-lab.sh [--api | --web]"; exit 1 ;;
 esac
 
 if [[ ! -f "$PLUTO/.env" ]]; then
