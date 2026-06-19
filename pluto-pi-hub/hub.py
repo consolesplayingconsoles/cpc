@@ -32,26 +32,35 @@ def load_env(path):
     return cfg
 
 
-# Bridges register here as they are built. Each will expose start()/stop()/status();
-# the supervisor below takes over their lifecycle once any exist.
-BRIDGES = []  # e.g. [HidBridge(cfg), ...]
+# Bridges are built from the node .env -- config decides which exist. Each exposes
+# start()/stop()/status(); the Phase-2 supervisor wires an op source into them.
+def build_bridges(cfg):
+    """Instantiate the bridges this node's .env configures."""
+    bridges = []
+    if cfg.get("UART_DEVICE"):                 # controller bridge: ops -> GP2040 frames -> Pico
+        from bridges.hid import HidBridge
+        bridges.append(HidBridge(cfg))
+    return bridges
 
 
 def main(argv):
     env_path = argv[1] if len(argv) > 1 else ""
     cfg = load_env(env_path)
     name = cfg.get("NODE_NAME", "Pi-Hub")
+    bridges = build_bridges(cfg)
 
     print("CPC Pi-Hub -- %s" % name)
     print("  env    : %s" % (env_path or "(none)"))
-    print("  bridges: %d configured" % len(BRIDGES))
-    if not BRIDGES:
-        print("  scaffold: no bridges active yet (HID/serial/DreamPi land under bridges/)")
+    print("  bridges: %d configured" % len(bridges))
+    for b in bridges:
+        print("    - %s" % b.name)
+    if not bridges:
+        print("  scaffold: no bridges configured (set UART_DEVICE for the controller bridge)")
         return 0
 
-    # Real run (future): start each bridge and supervise until signalled.
-    for bridge in BRIDGES:
-        bridge.start()
+    # Phase 2 wires the op source (Pluto stream / vacuum route) into the bridges and
+    # supervises start()/stop(). For now we report what's configured; the bridge is
+    # exercised directly (python3 -m bridges.hid <env>, or dc-test.sh).
     return 0
 
 

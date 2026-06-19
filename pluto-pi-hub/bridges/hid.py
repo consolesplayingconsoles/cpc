@@ -1,12 +1,13 @@
 """
 bridges/hid.py -- the Pi-side gamepad bridge: controller ops -> GP2040 UART frames.
 
-The Pi drives a Pico running GP2040-CE (gp2040-ce.info), which presents as a real
-USB gamepad (PS3/DualShock for the Maple->Dreamcast adapter; XInput/Switch/etc.
-otherwise). GP2040 normally reads physical buttons; our custom UartInput addon
-(firmware/<role>/) makes it read THIS UART instead. This bridge is the Pi-side
-half: it consumes the same abstract ops the server's pluto/api/drive/controller.py
-emits (press/release/pulse/axis/release_all) and renders each into GP2040's frame.
+The Pi drives a Pico running GP2040-CE (gp2040-ce.info), which presents itself as a
+PS3/DualShock USB gamepad -- target-agnostic: anything that accepts a PS3 pad takes
+it (a Maple adapter into a Dreamcast, a licensed PS5 upgrader, a PC, a real PS3).
+GP2040 normally reads physical buttons; our custom UartInput addon (firmware/<role>/)
+makes it read THIS UART instead. This bridge is the Pi-side half: it consumes the
+same abstract ops the server's pluto/api/drive/controller.py emits
+(press/release/pulse/axis/release_all) and renders each into GP2040's frame.
 
 Wire frame (must match the UartInput addon):
     0xAA 0x55  <dpad>  <btnL>  <btnH>  <xor>
