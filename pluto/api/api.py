@@ -28,6 +28,7 @@ from urllib.error import HTTPError
 # rest of this file keeps calling dreame_session.* / vacuum.* unchanged.
 from modules.dreame import session as dreame_session
 from modules.dreame import commands as vacuum
+from modules.substack import sender as substack
 
 
 def open_path(path):
@@ -177,6 +178,13 @@ def _claude_reply(messages_snapshot):
         reply = random.choice(_BOT_AWAY)
 
     _new_message(BOT_ID, reply)
+
+
+def _substack_post(creds, content):
+    """Background worker: turn an @substack post into a draft, reply as 'substack'.
+    Runs off-thread (login + draft are network IO) so POST /messages doesn't block."""
+    ok, msg = substack.post(creds, content)
+    _new_message("substack", msg)
 
 
 def _is_allowed_origin(origin):
@@ -901,9 +909,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         hit    = next((v for v in verbs if v and v in tokens), None)
         if hit:
             # A real command. This branch is the server-side hook where each handler
-            # will live (modular: route (node_id, hit) into api/modules/<service>/ as
-            # it's built). Until then, reply not-implemented -- no UX needed, the chat
-            # message IS the response.
+            # lives (modular: route (node_id, hit) into api/modules/<service>/). Built
+            # ones run; the rest reply not-implemented -- the chat message IS the UX.
+            if node_id == "substack" and hit == "post":
+                # everything after the "@handle post" prefix is the content
+                # (first line -> title, rest -> body); newlines preserved.
+                rest = text.strip()
+                first = rest.split(None, 1)
+                if first and first[0].startswith("@"):       # drop a leading @mention
+                    rest = first[1] if len(first) > 1 else ""
+                vparts = rest.split(None, 1)
+                content = vparts[1] if len(vparts) > 1 and vparts[0].lower() == hit else ""
+                creds = self.__class__.node_roster.get("substack", {})
+                threading.Thread(target=_substack_post, args=(creds, content), daemon=True).start()
+                return
             _new_message(node_id, "'%s' is not implemented yet." % hit)
         else:
             # tagged with no command -> list what this node can do (discoverable,
@@ -1107,7 +1126,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         # DEPLOY is only possible where the deploy ENGINE lives: the repo checkout
         # with deploy-pluto-c2.sh at its root (the dev workstation). The deployed box ships
-        # only /opt/pluto (api + dist + config -- no deploy-pluto-c2.sh, no node .envs), so a
+        # only /opt/cpc (api + dist + config -- no deploy-pluto-c2.sh, no node .envs), so a
         # deploy there can't run. Gate every node's deploy flag on this one host-level
         # check -- deterministic, no build flag, same spirit as `code`/has_code.
         deploy_engine = os.path.isfile(os.path.join(os.path.dirname(base_dir), "deploy-pluto-c2.sh"))

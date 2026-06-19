@@ -1,19 +1,27 @@
 #!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────
-#  deploy-pluto-c2.sh — the deploy ENGINE: build locally and ship ONE node over SSH.
+# -----------------------------------------------------------------
+#  deploy-pluto-c2.sh -- the deploy ENGINE: build locally and ship ONE node over SSH.
 #
 #  Pluto owns deployment ("Pluto self-deploys everywhere"). You normally don't run
 #  this by hand: the Pluto UI's DEPLOY button streams it per node -- the API shells
 #  out to this script and parses the ##STEP:<name> lines into SSE progress events.
-#  It lives at the repo root as the one-time DEV BOOTSTRAP too: run it manually to
-#  stand Pluto up the first time, before Pluto can redeploy itself and the rest.
-#  It always targets a SINGLE node; batch / multi-node deploys are a Pluto UI
-#  concern, not this script's.
+#  It is also the one-time DEV BOOTSTRAP: run it manually to stand the first node up.
+#
+#  WHAT each node gets is declarative, not hardcoded here: pluto/config/deploy.json
+#  maps a node dir to a list of PAYLOADS, and this script knows HOW to ship each one.
+#  Every node lands at the SAME remote root (/opt/cpc); multiple payloads coexist in
+#  that one dir, told apart by name (e.g. the Pi gets the client + the hub backend).
+#  Nodes not named in the map fall back to the "default" profile.
+#
+#  Payloads:
+#    server  -- the Pluto dashboard (api + dist + config), run by serve.sh under systemd.
+#    client  -- the python TUI client (pluto-python-tui + vendored deps).
+#    (hub)    -- the Pi's native-protocol bridge backend.  [not built yet]
 #
 #  Usage: ./deploy-pluto-c2.sh <path-to-env-file>
-#    ./deploy-pluto-c2.sh pluto/.env            # the Pluto host (first-deploy bootstrap)
-#    ./deploy-pluto-c2.sh nodes/local/wii/.env  # a console node (normally driven via the UI)
-# ─────────────────────────────────────────────────────────────
+#    ./deploy-pluto-c2.sh pluto/.env            # the Pluto host  -> server payload
+#    ./deploy-pluto-c2.sh nodes/local/wii/.env  # a console node  -> client payload
+# -----------------------------------------------------------------
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
@@ -22,13 +30,13 @@ if [[ $# -ne 1 ]]; then
 fi
 
 ENV_FILE="$1"
+[[ -f "$ENV_FILE" ]] || { echo "[ERROR] env file not found: $ENV_FILE"; exit 1; }
 
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "[ERROR] env file not found: $ENV_FILE"
-  exit 1
-fi
+REMOTE_ROOT="/opt/cpc"          # same path on every node
+NODE_DIR=$(basename "$(dirname "$ENV_FILE")")
+DEPLOY_MAP="pluto/config/deploy.json"
 
-# ── Parse env file ────────────────────────────────────────────
+# -- parse env file -----------------------------------------------
 _env_get() {
   local key="$1" val=""
   while IFS= read -r line; do
@@ -55,67 +63,64 @@ if [[ -z "$HOST_IP" || -z "$NODE_NAME" ]]; then
   exit 1
 fi
 
-REMOTE_PATH="/opt/cpc"
-CONSOLE_DIR=$(basename "$(dirname "$ENV_FILE")")
+# -- resolve payloads from the declarative map --------------------
+[[ -f "$DEPLOY_MAP" ]] || { echo "[ERROR] deploy map not found: $DEPLOY_MAP"; exit 1; }
+PAYLOADS="$(python3 - "$DEPLOY_MAP" "$NODE_DIR" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+node = sys.argv[2]
+print(" ".join(m.get(node, m.get("default", []))))
+PY
+)"
+[[ -n "$PAYLOADS" ]] || { echo "[ERROR] no deploy payloads for '$NODE_DIR' (and no default) in $DEPLOY_MAP"; exit 1; }
 
-# ── Local simulation mode ─────────────────────────────────────
+# -- local simulation mode ----------------------------------------
 if [[ "$HOST_IP" == "localhost" || "$HOST_IP" == "127.0.0.1" ]]; then
-  echo "[SIMULATION] ${NODE_NAME}"
-  mkdir -p ${REMOTE_PATH}/logs
+  echo "[SIMULATION] ${NODE_NAME}: payloads [${PAYLOADS}] -> ${REMOTE_ROOT}"
   echo "done."
   exit 0
 fi
 
-# ── SSH primitive ─────────────────────────────────────────────
+# -- SSH primitive ------------------------------------------------
 if [[ -n "$CUSTOM_SSH_ALIAS" ]]; then
   SSH="ssh ${CUSTOM_SSH_ALIAS}"
 else
   SSH="ssh -i ${SSH_KEY_PATH} -o StrictHostKeyChecking=no ${SSH_USER}@${HOST_IP}"
 fi
 
-echo "deploying ${NODE_NAME} (${CUSTOM_SSH_ALIAS:-${SSH_USER}@${HOST_IP}})"
+echo "deploying ${NODE_NAME} (${CUSTOM_SSH_ALIAS:-${SSH_USER}@${HOST_IP}}): payloads [${PAYLOADS}] -> ${REMOTE_ROOT}"
 
-# ── Pluto host deploy ─────────────────────────────────────────
-# Pluto is pure-stdlib Python (api/) + a pre-built static SPA (dist/). The API
-# reads its config/ JSON (connections.json, chat.json) at runtime, so ship that
-# dir too. No vendoring, no pip — the box only needs python3 to serve.
-if [[ "$CONSOLE_DIR" == "pluto" ]]; then
-  REMOTE_PLUTO="/opt/pluto"
+# =================================================================
+#  Payload shippers. Each ships its files into ${REMOTE_ROOT} and writes the node
+#  .env where that payload expects it -- BEFORE any restart, so a fail-fast service
+#  never boots without config. The node root is wiped once (below) before all run.
+# =================================================================
 
+# server -- the Pluto dashboard. api.py reads ${REMOTE_ROOT}/.env; discovery reads
+# the sibling /opt/nodes (base_dir/../nodes), so node identities ship there too.
+payload_server() {
   echo "##STEP:build"
   npm --prefix pluto run build
   echo "build ok"
 
   echo "##STEP:sync"
-  $SSH "rm -rf ${REMOTE_PLUTO} && mkdir -p ${REMOTE_PLUTO}"
-  # Ship the runnable surface only — the pre-built SPA (dist/), the stdlib API
-  # (api/), the runtime data, the starter, and the systemd unit. No src/, no
-  # node_modules. --strip-components=1 drops the leading 'pluto/'.
+  # Runnable surface only: pre-built SPA (dist/), stdlib API (api/), runtime config,
+  # the starter, the systemd unit. --strip-components=1 drops the leading 'pluto/'.
   tar --no-xattrs --no-fflags --no-mac-metadata \
       -cf - pluto/api pluto/dist pluto/config pluto/serve.sh pluto/deploy/pluto.service \
-      | $SSH "tar -xf - --strip-components=1 -C ${REMOTE_PLUTO}"
-  # config/ carries everything the API reads: connections.json, chat.json, the
-  # drive mappings/ (serve.sh points CPC_MAPPINGS at config/mappings), and the
-  # layout.json (frontend-only, already in dist — harmless).
-  $SSH "cat > ${REMOTE_PLUTO}/.env"      < "$ENV_FILE"
-  $SSH "chmod +x ${REMOTE_PLUTO}/serve.sh"
+      | $SSH "tar -xf - --strip-components=1 -C ${REMOTE_ROOT}"
+  $SSH "cat > ${REMOTE_ROOT}/.env" < "$ENV_FILE"
+  $SSH "chmod +x ${REMOTE_ROOT}/serve.sh"
 
-  # The cloud connectors (nodes/cloud/*) ARE discovered nodes, so ship their
-  # .env.sample (identity only — no real .env, no secrets) to /opt/nodes/cloud/,
-  # where discover_nodes() looks (base_dir/../nodes). That keeps the cloud cluster
-  # on the prod diagram even though no local consoles are deployed.
-  # --strip-components=1 drops the leading 'nodes/' so the dirs land at
-  # /opt/nodes/cloud/* (not /opt/nodes/nodes/cloud/*, which discovery never scans).
+  # Cloud connectors are discovered nodes: ship identity-only .env.sample (no
+  # secrets) to /opt/nodes/cloud/. --strip-components=1 drops the leading 'nodes/'.
   $SSH "rm -rf /opt/nodes/cloud && mkdir -p /opt/nodes/cloud"
   tar --no-xattrs --no-fflags --no-mac-metadata -cf - nodes/cloud/*/.env.sample \
       | $SSH "tar -xf - --strip-components=1 -C /opt/nodes"
 
-  # Local LAN nodes: the C2 is the live LAN monitor, so it needs each node's identity
-  # + IP to ping and draw it. But it never DEPLOYS (that's the Lab), so we ship a
-  # SANITISED .env -- identity / IP / display only, with SSH + deploy creds and the
-  # workspace path stripped out (the C2 has no business holding them). Placeholders
-  # ship their .env.sample so "show unconfigured" matches the Lab. discover_nodes()
-  # prefers a real .env over the .sample.
+  # Local LAN nodes: the server pings them, so it needs identity + IP, but it never
+  # deploys (that's the Lab), so ship a SANITISED .env -- identity/IP/display only,
+  # SSH + deploy creds + workspace path stripped. Placeholders ship their .sample.
   $SSH "rm -rf /opt/nodes/local && mkdir -p /opt/nodes/local"
   if ls nodes/local/*/.env.sample >/dev/null 2>&1; then
     tar --no-xattrs --no-fflags --no-mac-metadata -cf - nodes/local/*/.env.sample \
@@ -129,56 +134,85 @@ if [[ "$CONSOLE_DIR" == "pluto" ]]; then
   done
   echo "sync ok"
 
-  # Restart so the new code takes effect. If pluto.service is installed under a
-  # live systemd, restart it (zero-touch); otherwise leave a one-time hint.
+  # Restart. Re-sync the unit so a first install (or the /opt/pluto -> /opt/cpc path
+  # move) takes effect; ExecStart points at ${REMOTE_ROOT}/serve.sh.
   echo "##STEP:restart"
-  if $SSH "[ -d /run/systemd/system ] && systemctl cat pluto.service >/dev/null 2>&1"; then
-    $SSH "systemctl restart pluto" && echo "restarted via systemd (pluto.service)"
+  if $SSH "[ -d /run/systemd/system ]"; then
+    if $SSH "cp ${REMOTE_ROOT}/deploy/pluto.service /etc/systemd/system/pluto.service && systemctl daemon-reload && systemctl enable pluto >/dev/null 2>&1 && systemctl restart pluto"; then
+      echo "restarted via systemd (pluto.service synced to ${REMOTE_ROOT})"
+    else
+      echo "[note] could not sync/restart the unit (needs root). Re-point it once:"
+      echo "  ssh ${CUSTOM_SSH_ALIAS:-${SSH_USER}@${HOST_IP}} 'sudo cp ${REMOTE_ROOT}/deploy/pluto.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now pluto'"
+    fi
   else
-    echo "not managed by systemd — restart manually:  /opt/pluto/serve.sh"
-    echo "  one-time setup (Debian w/ systemd):"
-    echo "    ssh ${CUSTOM_SSH_ALIAS:-${SSH_USER}@${HOST_IP}} 'cp /opt/pluto/deploy/pluto.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now pluto'"
+    echo "not managed by systemd -- run ${REMOTE_ROOT}/serve.sh manually"
   fi
+}
 
-  echo "##STEP:done"
-  echo "deploy complete — http://${HOST_IP}:5173  (API :7700)"
-  exit 0
-fi
+# client -- the monolithic python TUI. Ships the same everywhere; lands at
+# ${REMOTE_ROOT}/pluto-python-tui and reads ../${NODE_DIR}/.env (run.sh auto-detect).
+payload_client() {
+  echo "##STEP:vendor"
+  rm -rf pluto-python-tui/vendor/
+  pip install --disable-pip-version-check -r pluto-python-tui/requirements.txt --target=pluto-python-tui/vendor/ --quiet
+  echo "vendor ok"
 
-# ── Step 1: vendor ────────────────────────────────────────────
-echo "##STEP:vendor"
-rm -rf pluto-python-tui/vendor/
-pip install --disable-pip-version-check -r pluto-python-tui/requirements.txt --target=pluto-python-tui/vendor/ --quiet
-echo "vendor ok"
+  echo "##STEP:sync"
+  tar --no-xattrs --no-fflags --no-mac-metadata -cf - pluto-python-tui \
+      | $SSH "tar -xf - -C ${REMOTE_ROOT}"
+  # This node's .env one level up from the client dir, keyed by node dir name, so
+  # run.sh / sibling_env resolve ../${NODE_DIR}/.env.
+  $SSH "mkdir -p ${REMOTE_ROOT}/${NODE_DIR} && cat > ${REMOTE_ROOT}/${NODE_DIR}/.env" < "$ENV_FILE"
+  echo "sync ok"
 
-# ── Step 2: sync ──────────────────────────────────────────────
-echo "##STEP:sync"
-$SSH "rm -rf ${REMOTE_PATH}/* && mkdir -p ${REMOTE_PATH}/logs"
+  if grep -qvE '^[[:space:]]*(#|$)' pluto-python-tui/requirements-linux.txt; then
+    echo "##STEP:deps"
+    RL="${REMOTE_ROOT}/pluto-python-tui/requirements-linux.txt"
+    RV="${REMOTE_ROOT}/pluto-python-tui/vendor/"
+    $SSH "pip3 install --disable-pip-version-check -r ${RL} --target=${RV} --quiet 2>/dev/null \
+          || pip install --disable-pip-version-check -r ${RL} --target=${RV} --quiet" || true
+    echo "deps ok"
+  fi
+}
 
-# Allowlist: ship ONLY the python client dir (code + vendored deps). No
-# .deployignore to babysit — anything else at the repo root (pluto/, birdbuddy/,
-# scripts/, start-pluto-lab.sh, *.md, other consoles, ...) can't leak; it's not listed.
-INCLUDE=( pluto-python-tui )
+# hub -- the Pi's native-protocol bridge backend (scaffold). Lands at
+# ${REMOTE_ROOT}/pluto-pi-hub and reads the shared ${NODE_DIR} .env that the client
+# payload writes (the Pi always deploys client + hub together, so no env write here).
+payload_hub() {
+  echo "##STEP:sync"
+  tar --no-xattrs --no-fflags --no-mac-metadata -cf - pluto-pi-hub \
+      | $SSH "tar -xf - -C ${REMOTE_ROOT}"
+  $SSH "chmod +x ${REMOTE_ROOT}/pluto-pi-hub/run.sh ${REMOTE_ROOT}/pluto-pi-hub/hub.py"
+  echo "sync ok"
 
-tar --no-xattrs --no-fflags --no-mac-metadata \
-    -cf - "${INCLUDE[@]}" | $SSH "tar -xf - -C ${REMOTE_PATH}"
+  # The engine stays BLIND to firmware: it just hands off to the hub's own
+  # propagate, which flashes each attached Pico with its role's firmware per the
+  # .env binding (PICO_<chipid>=<role>). The "next layer" is the hub's job.
+  # Pure stdlib (raw-REPL flasher), so plain python3 -- no mpremote dependency.
+  echo "##STEP:propagate"
+  $SSH "python3 ${REMOTE_ROOT}/pluto-pi-hub/propagate.py ${REMOTE_ROOT}/${NODE_DIR}/.env" || true
+}
 
-# This console's own .env, streamed separately so an absolute ENV_FILE path
-# (as the Pluto API passes) lands at the right relative spot, not /Users/...
-$SSH "mkdir -p ${REMOTE_PATH}/${CONSOLE_DIR}"
-$SSH "cat > ${REMOTE_PATH}/${CONSOLE_DIR}/.env" < "$ENV_FILE"
+# =================================================================
+#  Ship: wipe the node root's CONTENTS once (not the dir itself), then run each
+#  payload into it. We delete contents rather than the dir so a NON-root deploy
+#  user works too: it owns /opt/cpc's contents but can't recreate /opt/cpc under
+#  root-owned /opt. One-time per non-root node:
+#    sudo mkdir -p /opt/cpc && sudo chown <deploy-user> /opt/cpc
+# =================================================================
+$SSH "find ${REMOTE_ROOT} -mindepth 1 -delete 2>/dev/null; mkdir -p ${REMOTE_ROOT}/logs"
 
-echo "sync ok"
-
-# ── Step 3: linux deps ────────────────────────────────────────
-if grep -qvE '^[[:space:]]*(#|$)' pluto-python-tui/requirements-linux.txt; then
-  echo "##STEP:deps"
-  RL="${REMOTE_PATH}/pluto-python-tui/requirements-linux.txt"
-  RV="${REMOTE_PATH}/pluto-python-tui/vendor/"
-  $SSH "pip3 install --disable-pip-version-check -r ${RL} --target=${RV} --quiet 2>/dev/null \
-        || pip install --disable-pip-version-check -r ${RL} --target=${RV} --quiet" || true
-  echo "deps ok"
-fi
+for payload in $PAYLOADS; do
+  if ! declare -F "payload_${payload}" >/dev/null; then
+    echo "[ERROR] unknown payload '${payload}' for node '${NODE_DIR}' -- no payload_${payload}()"
+    exit 1
+  fi
+  "payload_${payload}"
+done
 
 echo "##STEP:done"
-echo "deploy complete — restart manually when ready"
+if echo " ${PAYLOADS} " | grep -q " server "; then
+  echo "deploy complete -- http://${HOST_IP}:5173  (API :7700)"
+else
+  echo "deploy complete -- ${NODE_NAME} [${PAYLOADS}] at ${REMOTE_ROOT}"
+fi

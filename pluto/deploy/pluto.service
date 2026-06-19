@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 # serve.sh launches the stdlib API + static SPA and waits on them; systemd's
 # cgroup kill makes sure both children die when the unit stops/restarts.
-ExecStart=/opt/pluto/serve.sh
+ExecStart=/opt/cpc/serve.sh
 Restart=always
 RestartSec=3
 # Keep the dashboard reachable across both crashes and reboots.

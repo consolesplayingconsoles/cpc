@@ -6,19 +6,19 @@
   },
   "nodeActions": {
     "dreame": [
-      { "verb": "status", "desc": "report state (read-only)", "done": true },
-      { "verb": "locate", "desc": "beep so you can find it",   "done": true },
-      { "verb": "clean",  "desc": "start cleaning",            "done": true },
-      { "verb": "dock",   "desc": "return to charge",          "done": true },
-      { "verb": "stop",   "desc": "stop / park in place",      "done": true }
+      { "verb": "status", "desc": "report state (read-only)" },
+      { "verb": "locate", "desc": "beep so you can find it" },
+      { "verb": "clean",  "desc": "start cleaning" },
+      { "verb": "dock",   "desc": "return to charge" },
+      { "verb": "stop",   "desc": "stop / park in place" }
     ],
     "dropbox": [
-      { "verb": "sync",    "desc": "back up saved games",  "target": "console", "done": false },
-      { "verb": "list",    "desc": "list saved games",     "target": "console", "done": false },
-      { "verb": "restore", "desc": "restore a saved game", "target": "console", "done": false }
+      { "verb": "sync",    "desc": "back up saved games",  "target": "console" },
+      { "verb": "list",    "desc": "list saved games",     "target": "console" },
+      { "verb": "restore", "desc": "restore a saved game", "target": "console" }
     ],
     "substack": [
-      { "verb": "post", "desc": "write & broadcast to substack", "multiline": true, "done": false }
+      { "verb": "post", "desc": "write & broadcast to substack", "multiline": true }
     ]
   },
   "emojis": [":)", ":(", ":|", ":D", ":'(", ">:(", "+1", "-1", "<3", "X_X", "O_O", "\\o/", "gg", "lol", "rip", "ugh", "zzz", "ngl", ":P", "..."]

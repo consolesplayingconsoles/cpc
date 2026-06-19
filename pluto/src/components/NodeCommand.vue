@@ -4,7 +4,9 @@ import { ref, computed } from 'vue'
 // A node command is just a chat message: "@handle verb [arg]". The shapes are
 // finite, so one component renders the right input and emits the assembled line;
 // the parent posts it to /messages (logged in the chat feed AND messages.log).
-interface Cmd { verb: string; desc?: string; target?: string; multiline?: boolean; done?: boolean }
+// Every verb is always sendable — an unbuilt one gets a gracious "not implemented
+// yet" from the server. The backend is the contract; the UI never pre-judges.
+interface Cmd { verb: string; desc?: string; target?: string; multiline?: boolean }
 
 const props = defineProps<{
   handle:   string                              // e.g. "@dropbox"
@@ -16,7 +18,6 @@ const emit = defineEmits<{ run: [text: string] }>()
 const kind  = computed(() => props.cmd.multiline ? 'text' : props.cmd.target ? 'node' : 'button')
 const label = computed(() => props.cmd.verb.charAt(0).toUpperCase() + props.cmd.verb.slice(1))
 const base  = computed(() => `${props.handle} ${props.cmd.verb}`)
-const soon  = computed(() => props.cmd.done !== true)
 
 const text   = ref('')
 const target = ref(props.targets?.[0]?.value ?? '@everyone')
@@ -36,7 +37,6 @@ function fire(arg?: string) {
     <span class="cmd__label">{{ label }}</span>
     <span v-if="cmd.desc" class="cmd__desc">{{ cmd.desc }}</span>
     <span v-if="sent" class="cmd__sent">sent &check;</span>
-    <span v-else-if="soon" class="cmd__soon">soon</span>
   </button>
 
   <!-- command + text -->
@@ -44,7 +44,6 @@ function fire(arg?: string) {
     <div class="cmd__head">
       <span class="cmd__label">{{ label }}</span>
       <span v-if="sent" class="cmd__sent">sent &check;</span>
-      <span v-else-if="soon" class="cmd__soon">soon</span>
     </div>
     <textarea v-model="text" class="cmd__text" :placeholder="cmd.desc || 'Write…'" rows="3"></textarea>
     <button class="cmd__send" :disabled="!text.trim()" @click="fire(text.trim())">Send</button>
@@ -56,7 +55,6 @@ function fire(arg?: string) {
       <span class="cmd__label">{{ label }}</span>
       <span v-if="cmd.desc" class="cmd__desc">{{ cmd.desc }}</span>
       <span v-if="sent" class="cmd__sent">sent &check;</span>
-      <span v-else-if="soon" class="cmd__soon">soon</span>
     </div>
     <div class="cmd__row">
       <select v-model="target" class="cmd__select">
@@ -82,7 +80,6 @@ function fire(arg?: string) {
 .cmd__head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .cmd__label { font-size: 14px; font-weight: 600; color: var(--text); }
 .cmd__desc { font-size: 12px; color: var(--text-faint); }
-.cmd__soon { margin-left: auto; font-size: 11px; color: var(--text-faint); }
 .cmd__sent { margin-left: auto; font-size: 11px; color: var(--color-up); }
 .cmd__text {
   width: 100%; resize: vertical; box-sizing: border-box;
