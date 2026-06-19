@@ -3,7 +3,7 @@
 #  serve.sh — run Pluto on the host box: API + static SPA.
 #
 #  Pure stdlib python3, no deps to install. This is what `deploy-pluto-c2.sh pluto/.env`
-#  drops at /opt/pluto/serve.sh; run it there to bring the dashboard up.
+#  drops at /opt/cpc/serve.sh; run it there to bring the dashboard up.
 #
 #    API : http://<host>:7700   (api/api.py — nodes, chat, deploys)
 #    SPA : http://<host>:5173   (the pre-built dist/, served static)

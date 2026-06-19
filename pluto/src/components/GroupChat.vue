@@ -171,7 +171,6 @@ interface ActionDef {
   desc:       string
   target?:    string    // 'console' -> a second tag (a console, or @everyone)
   multiline?: boolean
-  done?:      boolean    // built? false = still sendable, but the server replies "soon"
 }
 const NODE_ACTIONS: Record<string, ActionDef[]> = chatConfig.nodeActions ?? {}
 const HANDLES: Record<string, string> = chatConfig.mentions.handles ?? {}
@@ -322,12 +321,6 @@ function applyHighlighted(): boolean {
 
 // Multiline when the resolved action asks for it (e.g. substack post).
 const isMultiline = computed(() => resolvedAction.value?.multiline === true)
-
-// A resolved action that isn't built yet — still sendable (the server replies
-// out-of-office), just badged "soon" so it's clear it won't act yet.
-const soonAction = computed(() =>
-  resolvedAction.value && resolvedAction.value.done !== true ? resolvedAction.value : null
-)
 
 // ── Send ─────────────────────────────────────────────────────────────────────
 function send() {
@@ -506,7 +499,7 @@ function onKeydown(e: KeyboardEvent) {
               v-for="a in actionCandidates"
               :key="a.verb"
               class="autocomplete-item"
-              :class="{ 'autocomplete-item--active': isHl(a.verb), 'autocomplete-item--soon': a.done !== true }"
+              :class="{ 'autocomplete-item--active': isHl(a.verb) }"
               @mouseenter="setHl(a.verb)"
               @click="pickAction(a.verb)"
             >
@@ -514,7 +507,6 @@ function onKeydown(e: KeyboardEvent) {
               <span v-if="a.target" class="autocomplete-param">&lt;{{ a.target }}&gt;</span>
               <span class="autocomplete-desc">{{ a.desc }}</span>
               <span v-if="a.multiline" class="autocomplete-tag">multiline</span>
-              <span v-if="a.done !== true" class="autocomplete-tag autocomplete-tag--soon">soon</span>
             </div>
           </div>
 
@@ -613,7 +605,7 @@ function onKeydown(e: KeyboardEvent) {
             <button
               class="send-btn"
               :disabled="!draft.trim()"
-              :title="soonAction ? 'not wired up yet — you\'ll get an out-of-office reply' : 'send'"
+              title="send"
               @click="send"
             >
               Send
@@ -1012,16 +1004,6 @@ function onKeydown(e: KeyboardEvent) {
   background: #e6e6e2;
   box-shadow: inset 2px 0 0 var(--text);
 }
-/* not-yet-built command: visible & navigable, but visually muted */
-.autocomplete-item--soon { cursor: default; }
-.autocomplete-item--soon .autocomplete-cmd,
-.autocomplete-item--soon .autocomplete-desc { opacity: 0.5; }
-.autocomplete-tag--soon {
-  color: #9a6c1a;
-  border-color: #d8b06a;
-  background: #faf3e2;
-}
-
 .autocomplete-cmd {
   font-family: var(--font-sans);
   font-size: 12px;

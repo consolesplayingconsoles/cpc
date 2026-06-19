@@ -6,7 +6,7 @@ import NodeBubble from './NodeBubble.vue'
 import NodeCommand from './NodeCommand.vue'
 import chatConfig from '../../config/chat.json'
 
-interface Cmd { verb: string; desc?: string; target?: string; multiline?: boolean; done?: boolean }
+interface Cmd { verb: string; desc?: string; target?: string; multiline?: boolean }
 const NODE_ACTIONS = (chatConfig.nodeActions ?? {}) as Record<string, Cmd[]>
 const HANDLES      = (chatConfig.mentions.handles ?? {}) as Record<string, string>
 
@@ -29,8 +29,10 @@ const emit = defineEmits<{
 // Offline / unconfigured nodes can't act — deploy + files need the node reachable.
 const offline = computed(() => props.node.status === 'down' || props.node.status === 'unconfigured')
 const unconfigured = computed(() => props.node.status === 'unconfigured')
-// Host vs console: deploying a console ships the Pluto python client to it.
-const deployLabel = computed(() => props.id === 'pluto' ? 'Deploy Pluto C2' : 'Deploy Pluto Client')
+// A node's payloads come from config/deploy.json (client, hub, ...), so the button
+// stays generic -- "Deploy Pluto Node" -- rather than naming a payload. (The host
+// keeps its instance label.)
+const deployLabel = computed(() => props.id === 'pluto' ? 'Deploy Pluto C2' : 'Deploy Pluto Node')
 // The vacuum has its own control surface — its commands live in the Dreame view.
 // Both vacuum nodes open it: `dreame` (the L40 on the LAN) and `dreamehome` (its cloud).
 const isVacuum = computed(() => props.id === 'dreame' || props.id === 'dreamehome')

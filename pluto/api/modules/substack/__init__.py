@@ -1,2 +1,2 @@
-"""Substack content-sink connector (planned). The /post-to-substack sender will
-live here. Reserved slot -- no implementation yet."""
+"""Substack connector: the @substack post chat verb -> a draft on the operator's pub."""
+from . import sender  # re-export so `from modules.substack import sender`

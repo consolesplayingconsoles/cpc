@@ -1,0 +1,5 @@
+{
+  "default": ["client"],
+  "pluto": ["server"],
+  "pi": ["client", "hub"]
+}
