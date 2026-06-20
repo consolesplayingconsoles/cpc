@@ -12,6 +12,12 @@ This time it will ship.
 
 ---
 
+## A note on how this is built
+
+I build this with heavy help from an AI assistant. It digs up tools and prior art, talks me through setup problems, writes a good deal of the code, and helps draft the write-ups. A single person taking on this many different consoles would not be realistic otherwise; the assistance is what makes the scale possible at all.
+
+---
+
 ## CPC Pluto
 
 The management console for an asymmetric private network of retro consoles. It brings internet access to hardware that predates the web, and enables cross-console experiences that were never designed to exist.
