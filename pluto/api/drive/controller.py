@@ -10,7 +10,8 @@ console/transport is swappable:
     DreameEvents --> translate(event, mapping) --> ops --> Sink --> target
                          (this file)                         |--> DolphinPipeSink  (local now)
                                                              |--> PrintSink        (test/dry-run)
-                                                             '--> <Pico HID sink>  (real hardware, later)
+                                                             |--> KeyboardSink     (Mac emulator)
+                                                             '--> NetworkSink      (Pi op receiver -> Pico USB gamepad)
 
 translate(event, mapping) is a PURE function (event -> list of ops). Button STATE
 lives in the Sink, so the translator is trivially testable. Pure stdlib, 3.6+, ASCII.
@@ -345,6 +346,68 @@ class KeyboardSink(Sink):
                 pass
         self._dir_down.clear()
         self._btn_down.clear()
+
+
+class NetworkSink(Sink):
+    """Stream ops to the Pi-Hub op receiver over TCP -- the real-hardware sink (the
+    counterpart to KeyboardSink's emulator path). The receiver (pluto-pi-hub, run.sh
+    serve) renders each op with its HidBridge into UART frames to the Pico, which
+    presents as a USB gamepad. This sink's contract ends at the Pico: what the Pico
+    emulates and what's plugged into it are config, not this layer's concern (today a
+    PS3 pad into a Maple adapter into a Dreamcast, all swappable).
+
+    The OP STREAM is the whole interface: this sink forwards each translate() result
+    as one newline-delimited JSON array and computes nothing. The Pi holds button
+    state (its HidBridge does), so replay and live play look identical on the wire,
+    both are just op lists arriving in real time.
+
+    TCP_NODELAY is set so a single live keypress isn't Nagle-buffered (latency
+    matters for play; harmless for replay). A dropped or closed link is the Pi's cue
+    to release everything (its idle watchdog), so a crash fails safe.
+
+    Pluto DIALS the Pi (host:port from the node roster); the Pi only listens. Pure
+    stdlib, 3.6+, ASCII.
+    """
+
+    def __init__(self, host, port, timeout=4.0):
+        super(NetworkSink, self).__init__()
+        import socket
+        sock = socket.create_connection((host, int(port)), timeout=timeout)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        sock.settimeout(None)               # blocking writes once connected
+        self._sock = sock
+        self._closed = False
+
+    def _send(self, obj):
+        if self._closed:
+            return
+        import json
+        try:
+            self._sock.sendall((json.dumps(obj) + "\n").encode("ascii"))
+        except OSError:
+            self._closed = True             # link gone; the Pi releases on silence
+
+    def apply(self, ops):
+        # Forward the whole op list verbatim (one event = one batch); the Pi's
+        # HidBridge.apply consumes the identical op vocabulary. A 'pulse' crosses as
+        # one op so the press/release sleep happens at the hardware, not over the net.
+        if ops:
+            self._send(ops)
+
+    def release_all(self):
+        # Terminal: tell the Pi to neutralise, then drop the link (its watchdog would
+        # do the same on silence). Idempotent -- drive end and stop both call it.
+        self._send([{"op": "release_all"}])
+        self.close()
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._sock.close()
+        except OSError:
+            pass
 
 
 def mappings_dir(base=None):

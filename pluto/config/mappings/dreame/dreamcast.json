@@ -1,6 +1,7 @@
 {
   "_comment": "Dreame events => Dreamcast controller. The DC has an ANALOG STICK, so this uses absolute heading -> stick (smooth route-following, like the Wind Waker demo that worked). DEV: Flycast on Mac is SDL2 (NSEvent keyboard, so synthetic keys should land) -- bind the DC Analog stick to the Arrow keys; the KeyboardSink emits the stick as arrows. PROD: also the real hardware target (USB-to-Maple -> Dreamcast), so dev + prod use the same console. Face buttons aren't pressed yet (move-only); add a \"keys\" section when a mapping starts pressing them. For a relative/tank-steer game instead, use dreame-to-relative.",
   "controller": "Dreamcast (analog stick)",
+  "controls": { "Enter": "START" },
   "rules": {
     "move": { "axis": "MAIN", "from": "vector" },
     "end":  { "release_all": true }

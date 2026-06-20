@@ -271,7 +271,7 @@ watch(hoveredNode, () => nextTick(updatePeekPos))
           stroke-width="1.5"
           :stroke-dasharray="e.flowing ? '4 4' : '6 4'"
           :class="{ 'edge-flowing': e.flowing }"
-          :opacity="e.unconfigured ? 0.08 : e.cloud ? 0.5 : e.up ? 0.8 : 0.2"
+          :opacity="e.unconfigured ? 0.32 : e.cloud ? 0.5 : e.up ? 0.8 : 0.48"
         />
         <g
           v-for="e in visibleEdges" :key="'lbl-' + e.key"
@@ -427,7 +427,7 @@ watch(hoveredNode, () => nextTick(updatePeekPos))
   font-weight: 600;
   line-height: 1;
   color: var(--text, #1a2233);
-  background: rgba(238, 240, 243, 0.92);
+  background: var(--tab-track);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--line);
@@ -435,7 +435,7 @@ watch(hoveredNode, () => nextTick(updatePeekPos))
   cursor: pointer;
   transition: background 0.15s, opacity 0.15s;
 }
-.zoom-btn:hover:not(:disabled) { background: rgba(26, 34, 51, 0.06); }
+.zoom-btn:hover:not(:disabled) { background: var(--surface-3); }
 .zoom-btn:disabled { opacity: 0.38; cursor: default; }
 .zoom-btn:focus         { outline: none; }
 .zoom-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

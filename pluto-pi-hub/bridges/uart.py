@@ -29,7 +29,13 @@ class UartLink(object):
         speed = getattr(termios, "B%d" % self.baud)
         a[_ISPEED] = speed
         a[_OSPEED] = speed
-        a[_CFLAG] &= ~(termios.PARENB | termios.CSTOPB | termios.CSIZE)
+        # 8N1, NO hardware flow control. CRTSCTS must be OFF: this is a 3-wire link
+        # (TX/RX/GND, no RTS/CTS), so if flow control is on the kernel waits forever
+        # for CTS and NOTHING transmits -- the exact failure dc-test.sh dodges with
+        # `-crtscts`. Don't trust the port's inherited state; force it, like dc-test.
+        # HUPCL off too (no modem lines to drop on close), matching `-hupcl`.
+        a[_CFLAG] &= ~(termios.PARENB | termios.CSTOPB | termios.CSIZE
+                       | getattr(termios, "CRTSCTS", 0) | getattr(termios, "HUPCL", 0))
         a[_CFLAG] |= termios.CS8 | termios.CLOCAL | termios.CREAD          # 8N1, rx on
         a[_IFLAG] &= ~(termios.IXON | termios.IXOFF | termios.IXANY | termios.INLCR | termios.ICRNL)
         a[_OFLAG] &= ~termios.OPOST                                        # raw output

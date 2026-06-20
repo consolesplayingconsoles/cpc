@@ -977,6 +977,64 @@ class Handler(http.server.BaseHTTPRequestHandler):
         open_path(path)
         self._send(200, {"status": "opened", "path": path})
 
+    def _handle_press(self, body):
+        """One-off controller button (the Enter->Start hotkey). Resolves key->button
+        via the mapping's `controls`, then pulses it: through the live drive sink if a
+        replay is running, else a transient connection to the selected target."""
+        try:
+            controller, _ = _drive_libs()
+        except Exception as exc:
+            self._send(200, {"ok": False, "error": "drive libs: %s" % exc})
+            return
+        try:
+            mapping = controller.load_mapping(body.get("source") or "dreame",
+                                              body.get("mapping") or "gamecube")
+        except Exception as exc:
+            self._send(200, {"ok": False, "error": "mapping: %s" % exc})
+            return
+        btn = body.get("btn") or (mapping.get("controls") or {}).get(body.get("key") or "")
+        if not btn:
+            self._send(200, {"ok": True, "ignored": body.get("key")})   # unbound key: no-op
+            return
+        ops = [{"op": "pulse", "btn": btn, "ms": int(body.get("ms") or 120)}]
+
+        with _drive_lock:
+            live = _drive_state.get("sink")
+        if live is not None:                          # inject into the running replay
+            try:
+                live.apply(ops)
+                self._send(200, {"ok": True, "pressed": btn, "via": "live"})
+            except Exception as exc:
+                self._send(200, {"ok": False, "error": "press: %s" % exc})
+            return
+
+        target = body.get("target")                   # no replay -> transient link
+        try:
+            if target == "pi":
+                pi_cfg = self.__class__.node_roster.get("pi") or {}
+                host = pi_cfg.get("HOST_IP", "").strip()
+                port = pi_cfg.get("PI_BRIDGE_PORT", "").strip()
+                if not host or not port:
+                    self._send(200, {"ok": False, "error": "pi node has no HOST_IP/PI_BRIDGE_PORT"})
+                    return
+                sink = controller.NetworkSink(host, port)
+            elif target == "keyboard":
+                sink = controller.KeyboardSink(button_keys=mapping.get("keys"))
+            else:
+                self._send(200, {"ok": False, "error": "unknown target: %s" % target})
+                return
+        except Exception as exc:
+            self._send(200, {"ok": False, "error": "can't reach target (%s)" % exc})
+            return
+        try:
+            sink.apply(ops)
+        finally:
+            try:
+                sink.release_all()
+            except Exception:
+                pass
+        self._send(200, {"ok": True, "pressed": btn, "via": "transient"})
+
     def _handle_drive(self):
         """POST /robutek/drive {action, target, session, t, speed, mapping}.
 
@@ -1004,16 +1062,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _drive_state["last_seen"] = time.time()
             self._send(200, {"ok": True})
             return
+        if action == "press":
+            # One-off button (the hidden Enter->Start hotkey). The key->button binding
+            # lives in the mapping's `controls`; the route only steers, so this is how
+            # you dismiss a console menu (e.g. the DC's VMU-removed prompt) by hand. Goes
+            # through the LIVE drive if one's running, else a transient link to the target.
+            self._handle_press(body)
+            return
         if action != "play":
             self._send(400, {"error": "unknown action"})
             return
 
         target = body.get("target")
-        if target == "pi":
-            self._send(200, {"ok": False,
-                "error": "Console (Raspberry Pi) output isn't wired yet (Pico pending)."})
-            return
-        if target != "keyboard":
+        if target not in ("keyboard", "pi"):
             self._send(200, {"ok": False, "error": "unknown target: %s" % target})
             return
 
@@ -1029,18 +1090,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"ok": False, "error": "mapping: %s" % exc})
             return
         speed = float(body.get("speed") or 1.0)
-        # base movement duty (mapping) scaled by speed: 1x = robot pace, the speed
-        # multipliers ramp toward a full sprint (capped at 1.0).
-        eff_duty = min(1.0, float(mapping.get("move_duty", 1.0)) * max(speed, 1e-6))
-        try:
-            # the mapping carries its own per-emulator keys (its "keys" section)
-            sink = controller.KeyboardSink(keyset="arrows", button_keys=mapping.get("keys"),
-                                           move_duty=eff_duty)
-        except Exception as exc:
-            self._send(200, {"ok": False,
-                "error": "keyboard sink: %s -- pip install pynput, run the API under that "
-                         "interpreter, and grant the terminal Accessibility." % exc})
-            return
+        if target == "pi":
+            # Stream ops over TCP to the Pi-Hub op receiver (run.sh serve), which
+            # frames them to the Pico. Host/port come from the discovered pi node.
+            pi_cfg = self.__class__.node_roster.get("pi") or {}
+            host = pi_cfg.get("HOST_IP", "").strip()
+            port = pi_cfg.get("PI_BRIDGE_PORT", "").strip()
+            if not host or not port:
+                self._send(200, {"ok": False,
+                    "error": "pi node has no HOST_IP/PI_BRIDGE_PORT in its .env"})
+                return
+            try:
+                sink = controller.NetworkSink(host, port)
+            except Exception as exc:
+                self._send(200, {"ok": False,
+                    "error": "can't reach the Pi receiver at %s:%s (%s) -- is the hub up "
+                             "(run.sh serve / cpc-hub.service)?" % (host, port, exc)})
+                return
+        else:
+            # base movement duty (mapping) scaled by speed: 1x = robot pace, the speed
+            # multipliers ramp toward a full sprint (capped at 1.0).
+            eff_duty = min(1.0, float(mapping.get("move_duty", 1.0)) * max(speed, 1e-6))
+            try:
+                # the mapping carries its own per-emulator keys (its "keys" section)
+                sink = controller.KeyboardSink(keyset="arrows", button_keys=mapping.get("keys"),
+                                               move_duty=eff_duty)
+            except Exception as exc:
+                self._send(200, {"ok": False,
+                    "error": "keyboard sink: %s -- pip install pynput, run the API under that "
+                             "interpreter, and grant the terminal Accessibility." % exc})
+                return
 
         session = body.get("session") or {}
         events = dreame_events.events_from_route(session)
@@ -1066,9 +1145,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(404, {"error": "no env file for %s" % node_id})
             return
         repo_root = os.path.dirname(base_dir)
-        deploy_sh = os.path.join(repo_root, "deploy-pluto-c2.sh")
+        deploy_sh = os.path.join(repo_root, "deploy.sh")
         if not os.path.exists(deploy_sh):
-            self._send(500, {"error": "deploy-pluto-c2.sh not found"})
+            self._send(500, {"error": "deploy.sh not found"})
             return
 
         console_cfg = load_env(full_env)
@@ -1125,11 +1204,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         nodes    = {}
 
         # DEPLOY is only possible where the deploy ENGINE lives: the repo checkout
-        # with deploy-pluto-c2.sh at its root (the dev workstation). The deployed box ships
-        # only /opt/cpc (api + dist + config -- no deploy-pluto-c2.sh, no node .envs), so a
+        # with deploy.sh at its root (the dev workstation). The deployed box ships
+        # only /opt/cpc (api + dist + config -- no deploy.sh, no node .envs), so a
         # deploy there can't run. Gate every node's deploy flag on this one host-level
         # check -- deterministic, no build flag, same spirit as `code`/has_code.
-        deploy_engine = os.path.isfile(os.path.join(os.path.dirname(base_dir), "deploy-pluto-c2.sh"))
+        deploy_engine = os.path.isfile(os.path.join(os.path.dirname(base_dir), "deploy.sh"))
 
         # The roster was discovered once at startup (nodes/*/ + pluto the host); we
         # never rescan. Per request we only re-ping: collect every IP and probe them
@@ -1322,8 +1401,8 @@ def run():
     Handler.config   = config
     Handler.base_dir = parent_dir
     # Instance identity (deterministic, no build flag): the Lab is the host that holds
-    # the deploy engine (deploy-pluto-c2.sh at the repo root); the C2 is the deployed box.
-    Handler.is_lab = os.path.isfile(os.path.join(os.path.dirname(parent_dir), "deploy-pluto-c2.sh"))
+    # the deploy engine (deploy.sh at the repo root); the C2 is the deployed box.
+    Handler.is_lab = os.path.isfile(os.path.join(os.path.dirname(parent_dir), "deploy.sh"))
     Handler.lab_ip = config.get("LAB_IP", "").strip()
     print("  instance: %s%s" % ("Lab" if Handler.is_lab else "C2",
                                  ("  (lab @ %s)" % Handler.lab_ip) if Handler.lab_ip else ""))

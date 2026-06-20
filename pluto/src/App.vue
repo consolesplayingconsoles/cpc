@@ -13,6 +13,22 @@ import plutoC2Mark from './assets/avatars/pluto-c2.svg'
 const route = useRoute()
 const router = useRouter()
 
+// Light/dark theme — toggled in the header, persisted, applied to <html> so the
+// token overrides in style.css take effect. Default light; dark films cleanly
+// next to a console instead of a panel that blows out white.
+const theme = ref<'light' | 'dark'>(
+  (localStorage.getItem('cpc-theme') as 'light' | 'dark') || 'light'
+)
+function applyTheme(t: 'light' | 'dark') {
+  document.documentElement.setAttribute('data-theme', t)
+}
+applyTheme(theme.value)
+function toggleTheme() {
+  theme.value = theme.value === 'dark' ? 'light' : 'dark'
+  localStorage.setItem('cpc-theme', theme.value)
+  applyTheme(theme.value)
+}
+
 // The visible panel is driven by the current route name. The router table maps
 // '/' → network, '/chat' → chat, '/dreame' → the Dreame/Robutek view.
 const activeTab = computed<'network' | 'chat' | 'robutek'>(() => {
@@ -122,6 +138,14 @@ const displayNodes = computed(() => {
         <img :src="headerMark" width="42" height="42" alt="" class="header-mark" /><span>CPC Pluto <span class="header-instance">{{ isDev ? 'Lab' : 'C2' }}</span></span>
       </span>
       <span class="header-controls">
+        <button
+          class="head-link theme-toggle"
+          :title="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+          @click="toggleTheme"
+        >
+          <svg v-if="theme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>
+          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </button>
         <button
           v-if="siblingLink"
           class="head-link"
@@ -333,7 +357,7 @@ const displayNodes = computed(() => {
      than bumping the terminal. */
   z-index: 2;
   display: flex;
-  background: rgba(238, 240, 243, 0.9);   /* one unified track holds all three */
+  background: var(--tab-track);   /* one unified track holds all three */
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--line);
