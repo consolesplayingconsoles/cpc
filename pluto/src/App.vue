@@ -30,16 +30,21 @@ function toggleTheme() {
 }
 
 // The visible panel is driven by the current route name. The router table maps
-// '/' → network, '/chat' → chat, '/dreame' → the Dreame/Robutek view.
-const activeTab = computed<'network' | 'chat' | 'robutek'>(() => {
-  if (route.name === 'chat') return 'chat'
-  if (route.name === 'dreame') return 'robutek'
+// '/' → network, '/chat' → chat, '/control/...' → the Control surface.
+// The Command surface is the chat component (it's the node command bus); route is
+// 'command' but the internal panel key stays 'chat'.
+const activeTab = computed<'network' | 'chat' | 'control'>(() => {
+  if (route.name === 'command') return 'chat'
+  if (route.name === 'control') return 'control'
   return 'network'
 })
 
-// open-tab key (and the switcher buttons) → path
-function goToTab(tab: 'network' | 'chat' | 'robutek' | 'dreame') {
-  const path = tab === 'chat' ? '/chat' : (tab === 'robutek' || tab === 'dreame') ? '/dreame' : '/'
+// open-tab key (and the switcher buttons) → path. The node drawer still emits
+// 'robutek'/'dreame'; both open the Control surface for the dreame source.
+function goToTab(tab: 'network' | 'chat' | 'control' | 'robutek' | 'dreame') {
+  const path = tab === 'chat' ? '/command'
+    : (tab === 'control' || tab === 'robutek' || tab === 'dreame') ? '/control/dreame'
+    : '/'
   if (route.path !== path) router.push(path)
 }
 
@@ -113,10 +118,10 @@ watch(activeTab, (tab) => {
   if (tab === 'chat') lastSeenMsgId.value = latestId()
 }, { immediate: true })
 
-// Never strand the user on a hidden Dreame tab — covers both a /dreame deep
+// Never strand the user on a hidden Control surface — covers both a /control deep
 // link and the roster loading async after mount. Redirect back to Network.
 watch(dreameConfigured, (ok) => {
-  if (!ok && activeTab.value === 'robutek') router.replace('/')
+  if (!ok && activeTab.value === 'control') router.replace('/')
 }, { immediate: true })
 
 const displayNodes = computed(() => {
@@ -154,7 +159,7 @@ const displayNodes = computed(() => {
         >{{ siblingLink.label }}<svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3l-8 8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         <label class="toggle-label">
           <input type="checkbox" v-model="showOffline" class="toggle-checkbox" />
-          <span v-if="activeTab !== 'robutek'">Show unconfigured nodes</span>
+          <span v-if="activeTab !== 'control'">Show unconfigured nodes</span>
         </label>
         <span class="header-status">
           <span>{{ loading ? 'Scanning' : error ? 'Offline' : 'Live' }}</span>
@@ -167,10 +172,10 @@ const displayNodes = computed(() => {
     </header>
 
     <main class="main">
-      <!-- Floating tab switcher — top-level Pluto surfaces only. A per-node module
-           drill-in (Dreame) hides it and carries its own Back affordance instead,
-           so we never sit in a tab bar with nothing selected. -->
-      <div v-if="activeTab !== 'robutek'" class="tab-switcher">
+      <!-- Floating tab switcher — the top-level Pluto surfaces. Control joins
+           Network + Chat (shown once the vacuum source is configured); it carries
+           its own selector rail, so no Back affordance and no hidden tab bar. -->
+      <div class="tab-switcher">
         <button
           class="tab"
           :class="{ 'tab--active': activeTab === 'network' }"
@@ -181,9 +186,15 @@ const displayNodes = computed(() => {
           :class="{ 'tab--active': activeTab === 'chat' }"
           @click="goToTab('chat')"
         >
-          Chat
+          Command
           <span v-if="unreadCount > 0" class="tab-badge">{{ unreadCount }}</span>
         </button>
+        <button
+          v-if="dreameConfigured"
+          class="tab"
+          :class="{ 'tab--active': activeTab === 'control' }"
+          @click="goToTab('control')"
+        >Control</button>
       </div>
 
       <div v-show="activeTab === 'network'" class="network-view">
@@ -197,7 +208,7 @@ const displayNodes = computed(() => {
         :show-offline="showOffline"
       />
 
-      <Robutek v-show="activeTab === 'robutek'" :name="dreameName" :active="activeTab === 'robutek'" :nodes="nodes" @back="goToTab('network')" />
+      <Robutek v-show="activeTab === 'control'" :name="dreameName" :active="activeTab === 'control'" :nodes="nodes" />
     </main>
 
     <footer class="footer">
