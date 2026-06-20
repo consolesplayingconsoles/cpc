@@ -5,8 +5,8 @@ The console-agnostic SPINE of the "vacuum plays a console" build. It turns vacuu
 data into a stream of typed ACTION TRIGGERS -- discrete, timestamped events that a
 downstream consumer maps to controller buttons/stick. Capturing them is decoupled
 from (and unblocked by) the hardware hop: Wii via Pico, Dreamcast via USB-to-Maple,
-or just a Mac driving Flycast/Dolphin -- all consume the SAME event stream, so this
-layer never changes when the target console does.
+or just a Mac driving an emulator (Flycast) -- all consume the SAME event stream, so
+this layer never changes when the target console does.
 
 Two producers, by data source:
   * events_from_route(session)  -- REPLAY of a captured clean (routes.json). The

@@ -39,14 +39,43 @@ def load_env(path):
     return cfg
 
 
+def parse_pico(value):
+    """A PICO_<chipid> .env value -> a fields dict. Accepts 'role=hid,conn=uart,
+    dev=...,baud=...' or the bare role shorthand 'hid'. (Mirrors propagate.py.)"""
+    value = (value or "").strip()
+    if len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]:
+        value = value[1:-1].strip()        # tolerate a quoted .env value
+    if "=" not in value:
+        return {"role": value} if value else {}
+    out = {}
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        k, _, v = part.partition("=")
+        out[k.strip()] = v.strip()
+    return out
+
+
 # Bridges are built from the node .env -- config decides which exist. Each exposes
 # start()/stop()/status(); the Phase-2 supervisor wires an op source into them.
 def build_bridges(cfg):
-    """Instantiate the bridges this node's .env configures."""
+    """One controller bridge per UART-connected Pico. A UART is one TX/RX pin set =
+    one board, so device + baud come from THAT Pico's line (PICO_<chipid>=...,conn=uart,
+    dev=...,baud=...), not a node-global. baud defaults to 115200; dev is required."""
     bridges = []
-    if cfg.get("UART_DEVICE"):                 # controller bridge: ops -> GP2040 frames -> Pico
-        from bridges.hid import HidBridge
-        bridges.append(HidBridge(cfg))
+    from bridges.hid import HidBridge
+    for k in sorted(cfg):
+        if not k.startswith("PICO_"):
+            continue
+        spec = parse_pico(cfg[k])
+        if (spec.get("conn") or "").lower() != "uart":
+            continue                            # USB Picos aren't driven over a tty here
+        dev = spec.get("dev")
+        if not dev:
+            print("  [skip] %s: conn=uart but no dev= on its line" % k)
+            continue
+        bridges.append(HidBridge(dev, spec.get("baud") or "115200"))
     return bridges
 
 
@@ -115,9 +144,9 @@ def serve(cfg):
 
     bridges = build_bridges(cfg)
     if not bridges:
-        print("  serve: no controller bridge (set UART_DEVICE) -- nothing to drive")
+        print("  serve: no controller bridge (no UART Pico in the .env) -- nothing to drive")
         return 0
-    bridge = bridges[0]
+    bridge = bridges[0]          # the op stream drives the first UART Pico
     bridge.start()                          # opens the UART, sends a neutral frame
 
     stop = {"flag": False}
@@ -132,7 +161,7 @@ def serve(cfg):
     srv.listen(1)
     srv.settimeout(1.0)                     # so SIGTERM is noticed between accepts
     print("CPC Pi-Hub op receiver up -- :%d -> %s (%s)" % (
-        port, bridge.name, cfg.get("UART_DEVICE", "/dev/ttyAMA0")))
+        port, bridge.name, bridge.device))
     try:
         while not stop["flag"]:
             try:
@@ -170,7 +199,7 @@ def main(argv):
     for b in bridges:
         print("    - %s" % b.name)
     if not bridges:
-        print("  scaffold: no bridges configured (set UART_DEVICE for the controller bridge)")
+        print("  scaffold: no bridges configured (add a PICO_<chipid>=...,conn=uart,dev=... line)")
         return 0
     print("  run 'hub.py serve %s' to start the op receiver" % (env_path or "<env>"))
     return 0

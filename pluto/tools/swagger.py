@@ -69,7 +69,7 @@ ROUTES = [
      "summary": "Start / keep-alive / stop the vacuum->console drive (dev only).",
      "body": {"action":  {"type": "string", "desc": "play | keepalive | stop"},
               "source":  {"type": "string", "desc": "Mapping source (default dreame)."},
-              "mapping": {"type": "string", "desc": "Target controller, e.g. gamecube."},
+              "mapping": {"type": "string", "desc": "Target controller, e.g. gamecube_dpad."},
               "speed":   {"type": "number"}},
      "required": ["action"]},
     {"m": "GET", "p": "/deploy/{node}/stream", "tags": ["Deploy"],

@@ -361,7 +361,7 @@ def render_chat(config: dict, messages: list, draft: str, status: str = ""):
     term_height = term.lines
 
     node    = config.get("NODE_NAME", "").lower()
-    channel = "# consoles-chatting-consoles"
+    channel = "#consoles-chatting-consoles"
 
     # Layout (top to bottom): header, controls, divider, [msg_area], separator, draft.
     # The DRAFT is the very last line — keystrokes only ever repaint that one row, so

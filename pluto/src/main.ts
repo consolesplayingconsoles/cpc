@@ -8,16 +8,19 @@ import App from './App.vue'
 // treats as a lazy import and chokes on) satisfies the matcher without rendering.
 const Blank = { render: () => null }
 
+// Each surface carries its own channel hashtag in route meta — the global second
+// header (App.vue) just renders route.meta.hashtag, so the per-page string lives with
+// the route definition, not an ad-hoc map in the parent.
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', name: 'network', component: Blank },
-    { path: '/command', name: 'command', component: Blank },
+    { path: '/', name: 'network', component: Blank, meta: { hashtag: '#consoles-connected-to-consoles' } },
+    { path: '/command', name: 'command', component: Blank, meta: { hashtag: '#consoles-chatting-consoles' } },
     { path: '/chat', redirect: '/command' },   // back-compat: Chat -> Command (C2)
     // Control surface: source (event producer) / target (output sink) / mapping
     // (control scheme). All three ride the URL so a reload restores the selection
     // instead of dropping to a default (the old reload-to-Disabled trap).
-    { path: '/control/:source?/:target?/:mapping?', name: 'control', component: Blank },
+    { path: '/control/:source?/:target?/:mapping?', name: 'control', component: Blank, meta: { hashtag: '#anything-playing-consoles' } },
     { path: '/dreame', redirect: '/control/dreame' },   // back-compat
     // Anything else falls back to the network view.
     { path: '/:pathMatch(.*)*', redirect: '/' },

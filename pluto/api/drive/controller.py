@@ -8,21 +8,12 @@ renders those ops to a target. The same events + mapping drive any sink, so the
 console/transport is swappable:
 
     DreameEvents --> translate(event, mapping) --> ops --> Sink --> target
-                         (this file)                         |--> DolphinPipeSink  (local now)
-                                                             |--> PrintSink        (test/dry-run)
+                         (this file)                         |--> PrintSink        (test/dry-run)
                                                              |--> KeyboardSink     (Mac emulator)
                                                              '--> NetworkSink      (Pi op receiver -> Pico USB gamepad)
 
 translate(event, mapping) is a PURE function (event -> list of ops). Button STATE
 lives in the Sink, so the translator is trivially testable. Pure stdlib, 3.6+, ASCII.
-
-## Local Dolphin setup (the "if possible" -> yes)
-Dolphin ships a Pipe input backend, no extra deps:
-  1. mkfifo "~/Library/Application Support/Dolphin/Pipes/cpc"
-  2. Dolphin > Controllers > GameCube Port 1 = Standard Controller > Configure,
-     set Device to "Pipe/0/cpc", and bind the buttons/Main-Stick to themselves.
-  3. Run the launcher with DolphinPipeSink -> it writes PRESS/RELEASE/SET lines.
-Commands accepted by the pipe: PRESS/RELEASE <BTN>, SET <AXIS> <x> <y>, SET <TRIG> <v>.
 """
 import os
 
@@ -37,11 +28,12 @@ def _is_opspec(rule):
 
 
 def _vector_xy(value):
-    """An event value -> (x, y) in Dolphin stick space (0..1, 0.5 = center).
+    """An event value -> (x, y) in axis space (0..1, 0.5 = center). Each live sink
+    quantises this onto the d-pad (4/8-way), so it's the heading, not true analog.
 
     Accepts a unit vector {dx,dy} (preferred) or {heading} degrees. +dy = up =
-    higher Y (Dolphin stick up). Sign calibration, if a real pad reads mirrored,
-    is a one-line change here -- intentionally the single choke point."""
+    higher Y (axis up). Sign calibration, if a real pad reads mirrored, is a
+    one-line change here -- intentionally the single choke point."""
     dx = dy = 0.0
     if isinstance(value, dict):
         if "dx" in value and "dy" in value:
@@ -135,8 +127,8 @@ class Sink(object):
 
 
 class PrintSink(Sink):
-    """Dry-run sink: prints the exact line each op would send to Dolphin. No
-    sleeps -- a pulse prints PRESS then RELEASE. For testing without a console."""
+    """Dry-run sink: prints the exact op each line would render. No sleeps -- a
+    pulse prints PRESS then RELEASE. For testing without a console."""
 
     def press(self, btn):
         super(PrintSink, self).press(btn)
@@ -148,44 +140,6 @@ class PrintSink(Sink):
 
     def axis(self, name, x, y):
         print("    SET %s %.3f %.3f" % (name, x, y))
-
-
-class DolphinPipeSink(Sink):
-    """Writes Dolphin Pipe-input commands to the FIFO. open() blocks until Dolphin
-    (the reader) is up with the Pipe controller configured -- start Dolphin first."""
-
-    def __init__(self, path):
-        super(DolphinPipeSink, self).__init__()
-        self.path = path
-        self._f = open(path, "w")
-
-    def _send(self, line):
-        self._f.write(line + "\n")
-        self._f.flush()
-
-    def press(self, btn):
-        super(DolphinPipeSink, self).press(btn)
-        self._send("PRESS %s" % btn)
-
-    def release(self, btn):
-        super(DolphinPipeSink, self).release(btn)
-        self._send("RELEASE %s" % btn)
-
-    def pulse(self, btn, ms):
-        import time
-        self._send("PRESS %s" % btn)
-        time.sleep(max(ms, 0) / 1000.0)
-        self._send("RELEASE %s" % btn)
-
-    def axis(self, name, x, y):
-        self._send("SET %s %.3f %.3f" % (name, x, y))
-
-    def close(self):
-        try:
-            self.release_all()
-            self._f.close()
-        except Exception:
-            pass
 
 
 class KeyboardSink(Sink):
@@ -446,19 +400,11 @@ def list_targets(source, base=None):
 def load_mapping(source, target, base=None):
     """Load one mapping by (source, target) from config/mappings/<source>/<target>.json.
     Mappings are pure input=>output config (an event source => a target controller),
-    e.g. load_mapping('dreame', 'gamecube')."""
+    e.g. load_mapping('dreame', 'gamecube_dpad')."""
     import json
     path = os.path.join(mappings_dir(base), source, target + ".json")
     with open(path) as f:
         return json.load(f)
-
-
-def dolphin_pipe_path(name="cpc", base=None):
-    """Default Dolphin Pipes FIFO path (macOS). Override base for Linux
-    (~/.config/dolphin-emu/Pipes or ~/.local/share/dolphin-emu/Pipes)."""
-    if base is None:
-        base = os.path.expanduser("~/Library/Application Support/Dolphin/Pipes")
-    return os.path.join(base, name)
 
 
 # -- Driver --------------------------------------------------------------------
