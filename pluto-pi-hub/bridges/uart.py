@@ -45,11 +45,30 @@ class UartLink(object):
         return self
 
     def send(self, data):
+        """Write bytes, tolerating a dead/absent Pico. A powered-off Pico (or a serial
+        glitch) makes os.write raise OSError [Errno 5] -- left unhandled that crashed
+        the whole hub, which then flapped under systemd's Restart=always (the "hub keeps
+        being unavailable" symptom). Instead: drop the fd so the next send re-opens, and
+        return False. The op just doesn't land until the link is back; the receiver stays
+        up. Returns True on success."""
         if isinstance(data, str):
             data = data.encode()
-        os.write(self.fd, data)
+        if self.fd is None:                 # dropped earlier -> try to bring it back
+            try:
+                self.open()
+            except OSError:
+                return False
+        try:
+            os.write(self.fd, data)
+            return True
+        except OSError:
+            self.close()                    # device went away; re-open on the next send
+            return False
 
     def close(self):
         if self.fd is not None:
-            os.close(self.fd)
+            try:
+                os.close(self.fd)
+            except OSError:
+                pass
             self.fd = None

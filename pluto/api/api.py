@@ -369,6 +369,54 @@ def discover_nodes(base_dir):
     return roster
 
 
+def parse_pico(value):
+    """A PICO_<chipid> .env value -> a fields dict. Accepts the structured form
+    'role=hid,conn=usb,managed=python' or the bare role shorthand 'hid'. (Mirrors
+    pluto-pi-hub/propagate.py; the two packages can't share code.)"""
+    value = (value or "").strip()
+    if len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]:
+        value = value[1:-1].strip()        # tolerate a quoted .env value
+    if "=" not in value:
+        return {"role": value} if value else {}
+    out = {}
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        k, _, v = part.partition("=")
+        out[k.strip()] = v.strip()
+    return out
+
+
+def picos_from_env(cfg, fw_root=None):
+    """Every PICO_<chipid>=... line in a node's .env -> a list the UI can render.
+
+    Declared fields (role, conn, dev, baud) pass through verbatim -- NO assumed
+    defaults, so what isn't declared reads as 'unspecified' rather than a fabricated
+    'usb'. `deploy` is DERIVED, never declared: a board is pluto-deployed IFF its role
+    has firmware here -- the exact condition propagate.py flashes on -- so the badge
+    reflects what pluto ACTUALLY does, not a flag that can drift. '' when we can't see
+    the firmware tree (a deployed node without the hub checkout). Sorted by chip id."""
+    out = []
+    for k in sorted(cfg):
+        if not k.startswith("PICO_"):
+            continue
+        spec = parse_pico(cfg[k])
+        role = spec.get("role", "")
+        deploy = ""
+        if fw_root and role:
+            deploy = "pluto" if os.path.exists(os.path.join(fw_root, role, "main.py")) else "pi"
+        out.append({
+            "chipid": k[len("PICO_"):],
+            "role":   role,
+            "conn":   spec.get("conn", ""),     # usb | uart -- empty if not declared
+            "dev":    spec.get("dev", ""),
+            "baud":   spec.get("baud", ""),
+            "deploy": deploy,                   # DERIVED: pluto (firmware present) | pi (local) | '' (unknown)
+        })
+    return out
+
+
 def probe(ip):
     """Reach a host and infer a coarse OS family from the reply TTL.
 
@@ -552,8 +600,8 @@ def _drive_play(controller, events, mapping, sink, t0, speed):
     def watchdog():
         # Stop the drive (releasing keys) if the frontend stops sending keepalives --
         # e.g. the browser/tab closed or crashed and no 'pause' reached us. Without
-        # this the route keeps replaying and the character runs away (only an app
-        # with background input, like Dolphin, visibly shows it).
+        # this the route keeps replaying and the character runs away (only an
+        # emulator with background input visibly shows it).
         while not stop.wait(2.0):
             with _drive_lock:
                 current = _drive_state.get("stop") is stop
@@ -846,6 +894,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_open(action=parts[0], target_node=parts[1])
         elif parsed.path == "/config/open":
             self._handle_open_config()
+        elif len(parts) == 3 and parts[0] == "native":
+            self._handle_native(parts[1], parts[2])
         else:
             self._send(404, {"error": "not found"})
 
@@ -953,6 +1003,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ── Existing handlers (unchanged) ─────────────────────────────────────────
 
+    def _handle_native(self, node_id, action):
+        """A node's NATIVE-system action (e.g. the Wii's homebrew flash / game library),
+        as opposed to its Linux side (SSH deploy / SMB). Not built yet -- we surface the
+        capability in the drawer and let the API say so honestly, rather than hide it."""
+        self._send(200, {"ok": False,
+                         "error": "native '%s' for %s is not implemented yet" % (action, node_id)})
+
     def _handle_open(self, action, target_node):
         # CODE button — open WORKSPACE_PATH (the source checkout) in the IDE. This
         # runs on the API host, so it's host-local by nature: only meaningful when
@@ -968,11 +1025,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, {"status": "opened", "path": path, "target": target_node})
 
     def _handle_open_config(self):
-        # Open the strategic config dir (connections / layout / chat / mappings) on the
-        # API host — the dev-friendly way to edit network/deploy config in your own IDE
-        # instead of an in-drawer form. Lab-only by nature: the dir + a GUI live on the
-        # workstation. To apply a change to the live C2, edit here then redeploy (parity).
-        path = os.path.join(self.__class__.base_dir, "config")
+        # Open a config dir on the API host — the dev-friendly way to edit config in your
+        # own IDE instead of an in-drawer form. Lab-only by nature: the dir + a GUI live
+        # on the workstation. Optional POST body {"sub": "mappings/dreame"} opens that
+        # subdir (the Control rail's "open mapping dir"); no body opens config/ itself.
+        # `sub` is path-traversal guarded to stay under config/.
+        sub = ""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            if length:
+                sub = (json.loads(self.rfile.read(length)) or {}).get("sub", "") or ""
+        except (ValueError, json.JSONDecodeError):
+            sub = ""
+        root = os.path.join(self.__class__.base_dir, "config")
+        path = os.path.normpath(os.path.join(root, sub)) if sub else root
+        if os.path.commonpath([root, path]) != root:   # refuse to escape config/
+            self._send(400, {"error": "bad path"})
+            return
         print("  [OPEN:config] -> %s" % path)
         open_path(path)
         self._send(200, {"status": "opened", "path": path})
@@ -988,7 +1057,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         try:
             mapping = controller.load_mapping(body.get("source") or "dreame",
-                                              body.get("mapping") or "gamecube")
+                                              body.get("mapping") or "gamecube_dpad")
         except Exception as exc:
             self._send(200, {"ok": False, "error": "mapping: %s" % exc})
             return
@@ -1085,7 +1154,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         try:
             mapping = controller.load_mapping(body.get("source") or "dreame",
-                                              body.get("mapping") or "gamecube")
+                                              body.get("mapping") or "gamecube_dpad")
         except Exception as exc:
             self._send(200, {"ok": False, "error": "mapping: %s" % exc})
             return
@@ -1203,6 +1272,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         base_dir = self.__class__.base_dir
         nodes    = {}
 
+        # Firmware tree (the deploy engine's checkout) -- present on the dev/Lab host,
+        # absent on a deployed box. Used to DERIVE each Pico's pluto-vs-local deploy
+        # ownership from whether its role has firmware. None => we can't tell.
+        fw_root = os.path.join(os.path.dirname(base_dir), "pluto-pi-hub", "firmware")
+        if not os.path.isdir(fw_root):
+            fw_root = None
+
         # DEPLOY is only possible where the deploy ENGINE lives: the repo checkout
         # with deploy.sh at its root (the dev workstation). The deployed box ships
         # only /opt/cpc (api + dist + config -- no deploy.sh, no node .envs), so a
@@ -1292,6 +1368,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # Precedence: .env OS= override > known-by-definition > probe TTL.
                 # (e.g. OS=native on a Wii homebrew build to drop the Tux.)
                 "os":     _detect_os(console_cfg, KNOWN_OS.get(node_id) or det_os),
+                # Declared Pico fleet (PICO_<chipid>=... lines); [] for nodes without.
+                # deploy ownership is derived against the firmware tree (fw_root).
+                "picos":  picos_from_env(console_cfg, fw_root),
             }
 
         # The Lab node -- Pluto's workspace instance (this repo checkout: the bench
@@ -1428,8 +1507,8 @@ def run():
     server = _Server(("0.0.0.0", PORT), Handler)
 
     # Release any held synthetic keys on shutdown, so a kill/restart mid-drive can't
-    # strand a keydown -- Dolphin's background input would hold it forever and the
-    # character keeps walking. atexit covers normal exit + Ctrl-C; the SIGTERM
+    # strand a keydown -- an emulator's background input would hold it forever and
+    # the character keeps walking. atexit covers normal exit + Ctrl-C; the SIGTERM
     # handler covers `kill` (e.g. start-pluto-lab.sh restarting the API).
     atexit.register(_drive_stop)
 

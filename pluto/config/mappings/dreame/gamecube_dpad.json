@@ -1,0 +1,11 @@
+{
+  "_comment": "Dreame events => GameCube pad, d-pad. Loaded via controller.load_mapping('dreame', 'gamecube_dpad'). INTENT: open-world 'just move' (e.g. Wind Waker) -- the vacuum's route becomes the character's walk, so locomotion is the WHOLE mapping: heading -> MAIN axis, nothing else. That axis is quantised onto the d-pad by every live sink (4/8-way, no true analog). Drive a GameCube emulator via the keyboard target, bind the d-pad to arrows. The capture layer emits turn/reposition/battery/pet; turn/reposition stay unbound (a turn is just a new heading), but pet -> a quick A press, so the character reacts when the clean detected a pet (placed at the route midpoint, since the data is a per-clean boolean). A more button-heavy game would be a different mapping over the same events.",
+  "controller": "GameCube pad (d-pad)",
+  "controls": { "Enter": "START", "action": "A", "cancel": "B" },
+  "move_duty": 0.1,
+  "rules": {
+    "move": { "axis": "MAIN", "from": "vector" },
+    "pet":  { "pulse": "A", "ms": 120 },
+    "end":  { "release_all": true }
+  }
+}

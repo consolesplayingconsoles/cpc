@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 import PetIcon from './PetIcon.vue'
+import CopyButton from './CopyButton.vue'
 import type { NodeMap } from '../composables/useNodes'
 
 interface Point { x: number; y: number }
@@ -43,46 +44,33 @@ interface DreameData {
   error?: string | null
 }
 
-const props = defineProps<{ name: string; active: boolean; nodes?: NodeMap }>()
+// Demoted to the 'dreame' source-child of Control: source/target/mapping are owned
+// by the parent rail and arrive as props (URL-driven). This component just reads
+// them and drives the playback.
+const props = defineProps<{
+  name: string; active: boolean; nodes?: NodeMap
+  source: string; target: string; mapping: string
+}>()
+// Drive errors are OWNED by the Control parent (shown in the shared control bar),
+// not here -- this child just reports them up. '' clears.
+const emit = defineEmits<{ 'drive-error': [string] }>()
 
-// The local emulator output is a LAB-only feature — you emulate on the dev
-// workstation, never on the headless C2 box (which has no display/emulator).
-const isLab = import.meta.env.DEV
 const API = `http://${window.location.hostname}:7700`
-const route  = useRoute()
 const router = useRouter()
+const driveTarget  = computed<'none' | 'keyboard' | 'pi'>(() => (props.target || 'none') as 'none' | 'keyboard' | 'pi')
+const driveMapping = computed(() => props.mapping || '')
 
-// Output target + mapping live in the URL (/control/{source}/{target}/{mapping}),
-// so a reload/HMR restores the selection instead of dropping to a default -- the
-// old reload-to-Disabled trap. source is 'dreame' for this surface.
-const DRIVE_SOURCE  = 'dreame'
-const driveError    = ref('')
-const driveMappings = ref<string[]>([])
-
-const piPresent  = computed(() => {
-  const n = props.nodes?.['pi']
-  return !!n && n.status !== 'unconfigured'
-})
-// Default output when the URL pins none: real console if the Pi's here, else the
-// Lab's local emulator, else nothing. Never silently 'Disabled'.
-const defaultTarget = computed<'none' | 'keyboard' | 'pi'>(() =>
-  piPresent.value ? 'pi' : isLab ? 'keyboard' : 'none')
-
-function controlPath(target: string, mapping: string) {
-  return ['/control', DRIVE_SOURCE, target, mapping].filter((x, i) => i < 2 || x).join('/')
-}
-// v-model-able selections, but the URL is the source of truth (survives reload).
-const driveTarget = computed<'none' | 'keyboard' | 'pi'>({
-  get: () => ((route.params.target as string) || defaultTarget.value) as 'none' | 'keyboard' | 'pi',
-  set: (v) => router.push(controlPath(v, (route.params.mapping as string) || driveMappings.value[0] || '')),
-})
-const driveMapping = computed<string>({
-  get: () => (route.params.mapping as string) || driveMappings.value[0] || '',
-  set: (v) => router.push(controlPath(driveTarget.value, v)),
-})
-// Output + Mapping selectors visible? Collapse them (settings toggle) so a
-// recording needn't reveal it's emulation — the drive keeps running regardless.
-const showDrive     = ref(true)
+// The dreame source depends on its .env: without it, dreame isn't offered in the
+// Control source dropdown. If you still land on /control/dreame -- the case that
+// confused things on every Vite hot reload -- bounce up to the /control parent so it
+// auto-picks a usable source. This guard lives in the dreame child (where the .env
+// dependency is), not the parent. Gated on the roster being loaded so the initial
+// fetch doesn't fire a false redirect.
+watch(() => props.nodes, (nodes) => {
+  if (!nodes || Object.keys(nodes).length === 0) return   // roster not loaded yet
+  const d = nodes['dreame']
+  if (!d || d.status === 'unconfigured') router.replace('/control')
+}, { immediate: true })
 
 const data      = ref<DreameData | null>(null)
 const loading   = ref(false)
@@ -185,22 +173,17 @@ function onPlaybackKey(e: KeyboardEvent) {
     // `controls`; the route only steers, so this is how you dismiss a console menu
     // (e.g. the DC's VMU-removed prompt) by hand. Natural reflex for anyone stuck.
     e.preventDefault()
-    drivePost({ action: 'press', target: driveTarget.value, source: DRIVE_SOURCE, mapping: driveMapping.value, key: 'Enter' })
+    drivePost({ action: 'press', target: driveTarget.value, source: props.source, mapping: driveMapping.value, key: 'Enter' })
     return
   }
   if (driveTarget.value !== 'none' && e.key.indexOf('Arrow') === 0) e.preventDefault()
-}
-// A focused <select> walks its options on arrow keys -- block that so the synthetic
-// stick can't change Output / Mapping / speed (or steal pause) mid-drive.
-function blockArrows(e: KeyboardEvent) {
-  if (e.key.indexOf('Arrow') === 0) e.preventDefault()
 }
 onMounted(() => {
   window.addEventListener('keydown', onPlaybackKey, true)
   window.addEventListener('pagehide', stopBeacon)
 })
 function seek(e: Event) { pause(); currentTime.value = Number((e.target as HTMLInputElement).value); syncVideo() }
-watch(sel, () => { pause(); currentTime.value = 0; svgScale.value = 1; driveError.value = ''; clearVideo() })
+watch(sel, () => { pause(); currentTime.value = 0; svgScale.value = 1; emit('drive-error', ''); clearVideo() })
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf); stopDriveOutput(); clearVideo()
   window.removeEventListener('keydown', onPlaybackKey, true)
@@ -217,9 +200,9 @@ async function drivePost(payload: Record<string, unknown>) {
       body: JSON.stringify(payload),
     })
     const j = await r.json().catch(() => null)
-    driveError.value = j && j.ok === false ? (j.error || 'drive error') : ''
+    emit('drive-error', j && j.ok === false ? (j.error || 'drive error') : '')
   } catch {
-    driveError.value = 'API unreachable'
+    emit('drive-error', 'API unreachable')
   }
 }
 // Heartbeat while driving so the API knows we're still here. If it stops (tab
@@ -241,7 +224,7 @@ function startKeepalive() {
 function stopKeepalive() { if (keepaliveTimer) { clearInterval(keepaliveTimer); keepaliveTimer = 0 } }
 function startDrive() {
   if (driveTarget.value === 'none' || !sel.value?.route?.length) return
-  drivePost({ action: 'play', target: driveTarget.value, source: DRIVE_SOURCE, mapping: driveMapping.value, t: currentTime.value, speed: speed.value, session: sel.value })
+  drivePost({ action: 'play', target: driveTarget.value, source: props.source, mapping: driveMapping.value, t: currentTime.value, speed: speed.value, session: sel.value })
   startKeepalive()
 }
 function stopDriveOutput() {
@@ -258,24 +241,14 @@ function stopBeacon() {
       new Blob([JSON.stringify({ action: 'pause' })], { type: 'application/json' }))
   } catch { /* tab is going away; best effort only */ }
 }
-async function fetchMappings() {
-  try {
-    const r = await fetch(`${API}/mappings/${DRIVE_SOURCE}`)
-    const j = await r.json().catch(() => null)
-    driveMappings.value = (j && Array.isArray(j.targets)) ? j.targets : []
-    if (driveMappings.value.length && !driveMappings.value.includes(driveMapping.value))
-      driveMapping.value = driveMappings.value[0]
-  } catch { /* leave list empty */ }
-}
 watch(speed, () => { if (playing.value) startDrive() })
+// target/mapping come from the parent rail (props); re-drive when they change.
 watch(driveTarget, (t) => {
-  driveError.value = ''
+  emit('drive-error', '')
   if (t === 'none') { stopDriveOutput(); return }
-  if (!driveMappings.value.length) fetchMappings()
   if (playing.value) startDrive()
 })
 watch(driveMapping, () => { if (playing.value && driveTarget.value !== 'none') startDrive() })
-watch(driveMapping, () => { if (playing.value) startDrive() })
 watch(() => props.active, (a) => { if (!a) pause() })
 
 // ── route geometry + zoom ─────────────────────────────────────────
@@ -453,12 +426,6 @@ function fmtClock(sec: number): string {
   const m = Math.floor(sec / 60), s = Math.floor(sec % 60)
   return `${m}:${s.toString().padStart(2, '0')}`
 }
-const copied = ref('')
-function copyId(id: string) {
-  navigator.clipboard?.writeText(id).then(() => {
-    copied.value = id; setTimeout(() => { if (copied.value === id) copied.value = '' }, 1200)
-  }).catch(() => {})
-}
 
 // ── cache-first load: history/map render without a session ────────
 async function load(sync = false) {
@@ -534,7 +501,7 @@ async function signIn() {
         <span v-if="fetchedAt && !loading" class="rb-fetched mono">{{ fetchedAt }}</span>
         <button class="rb-ghost" :class="{ accent: !connected }" :disabled="loading"
           @click="connected ? load(true) : openLogin()">
-          {{ loading ? 'refreshing…' : connected ? 'refresh' : 'Sign in' }}
+          {{ loading ? 'Refreshing…' : connected ? 'Refresh' : 'Sign in' }}
         </button>
       </div>
     </header>
@@ -580,14 +547,14 @@ async function signIn() {
             <span class="rb-row-main">
               <span class="rb-row-date">{{ fmtDate(s.date) }}</span>
               <span class="rb-row-meta mono">{{ fmt(s.cleaning_min) }} · {{ fmtArea(s.area_m2) }}</span>
+              <span class="rb-row-id-line">
+                <span class="rb-row-id mono" :title="s.session_id">{{ s.session_id }}</span>
+                <CopyButton :text="s.session_id" :title="'copy session id\n' + s.session_id" />
+              </span>
             </span>
             <span class="rb-row-tags">
               <span v-if="s.kind === 'sweep'" class="rb-tag sweep" title="sweep pass (map may be skewed)">sweep</span>
               <PetIcon v-if="s.pet" class="rb-pet" title="pet detected during this clean" />
-              <button class="rb-id-copy" :title="'copy session id\n' + s.session_id" @click.stop="copyId(s.session_id)">
-                <svg v-if="copied !== s.session_id" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-              </button>
             </span>
           </button>
           <div v-if="!visible.length" class="rb-empty">
@@ -699,36 +666,7 @@ async function signIn() {
         <button class="rb-step" @click="stepSpeed(1)" :disabled="speedIdx >= SPEEDS.length - 1" title="Faster" aria-label="Faster">+</button>
       </div>
 
-      <!-- output target: where the clock is sent. Collapsible behind the settings
-           toggle so a recording needn't reveal the output/mapping (IP); the drive
-           keeps running while hidden. Disabled animates only the map; Console
-           (Raspberry Pi) is offered only when the pi node is present. -->
-      <span class="rb-tx-sep" />
-      <button class="rb-tx-gear" :class="{ on: showDrive }" @click="showDrive = !showDrive"
-              :title="showDrive ? 'Hide output settings' : 'Show output settings'" aria-label="Toggle output settings">
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-          <line x1="2.5" y1="5" x2="13.5" y2="5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-          <line x1="2.5" y1="11" x2="13.5" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-          <circle cx="6" cy="5" r="2.1" fill="var(--surface)" stroke="currentColor" stroke-width="1.5" />
-          <circle cx="10" cy="11" r="2.1" fill="var(--surface)" stroke="currentColor" stroke-width="1.5" />
-        </svg>
-      </button>
-      <label v-if="showDrive" class="rb-tx-ctl" title="Where playback is sent">
-        <span>Output</span>
-        <select v-model="driveTarget" @keydown="blockArrows">
-          <option value="none">Disabled</option>
-          <option v-if="isLab" value="keyboard">Local Emulator (Virtual Keyboard)</option>
-          <option value="pi" :disabled="!piPresent">Console (Raspberry Pi)</option>
-        </select>
-      </label>
-      <label v-if="showDrive && driveTarget !== 'none' && driveMappings.length" class="rb-tx-ctl" title="Event → controller mapping (config)">
-        <span>Mapping</span>
-        <select v-model="driveMapping" @keydown="blockArrows">
-          <option v-for="m in driveMappings" :key="m" :value="m">{{ m }}</option>
-        </select>
-      </label>
-      <span v-if="showDrive && driveError" class="rb-drive-err mono" :title="driveError">{{ driveError }}</span>
-
+      <!-- Output + Mapping + any drive error live in the Control rail now. -->
       <span class="rb-tx-sep" />
       <input ref="fileInput" type="file" accept="video/*" class="rb-file" @change="onPickVideo" />
       <button v-if="!hasVideo" class="rb-tx-btn" @click="pickVideo" :disabled="!sel?.route?.length"
@@ -861,11 +799,8 @@ async function signIn() {
 .rb-map-paw { fill: var(--accent); pointer-events: none; animation: rb-paw-in 0.25s ease-out; }
 .rb-paw-bg { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
 @keyframes rb-paw-in { from { opacity: 0; } to { opacity: 1; } }
-.rb-id-copy {
-  display: grid; place-items: center; width: 26px; height: 26px; padding: 0;
-  border: 0; background: none; color: var(--text-faint); cursor: pointer; border-radius: var(--r-sm);
-}
-.rb-id-copy:hover { color: var(--accent); background: var(--accent-soft); }
+.rb-row-id-line { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.rb-row-id { flex: 0 1 auto; min-width: 0; font-size: 10px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rb-empty { padding: var(--sp-5) var(--sp-4); font-size: 13px; color: var(--text-muted); text-align: center; }
 .rb-collapse {
   position: absolute; top: 12px; z-index: 5; width: 24px; height: 24px;
@@ -927,7 +862,7 @@ async function signIn() {
 .rb-step:hover:not(:disabled) { border-color: var(--accent); }
 .rb-step:disabled { opacity: 0.4; cursor: default; }
 
-/* Tall/narrow window (e.g. Pluto docked beside Dolphin): stack map over video
+/* Tall/narrow window (e.g. Pluto docked beside an emulator): stack map over video
    instead of side-by-side, so each keeps usable width. No video yet -> the map
    just takes the whole stage as today; this only kicks in once a video pane
    renders. */
@@ -965,5 +900,4 @@ async function signIn() {
 .rb-tx-ctl input[type="number"] { width: 48px; }
 .rb-tx-ctl select { max-width: 150px; }   /* truncate long options (the Output label) so they don't blow out the bar */
 .rb-tx-sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 var(--sp-1); }
-.rb-drive-err { font-size: 11px; color: var(--bad, #c0392b); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

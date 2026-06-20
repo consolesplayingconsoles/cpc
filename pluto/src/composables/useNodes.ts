@@ -4,6 +4,18 @@ import { ref, onMounted, onUnmounted } from 'vue'
 // configured, linked rather than pinged, so it never reports up/down.
 export type NodeStatus = 'up' | 'down' | 'unconfigured' | 'cloud'
 
+// One Pico board, parsed from the node's `.env` PICO_<chipid>=... line. The host
+// (e.g. the Pi) declares its whole fleet this way; the drawer renders it so you can
+// see what each locally-deployed board is for.
+export interface PicoInfo {
+  chipid: string
+  role:   string          // firmware / purpose
+  conn:   string          // 'usb' | 'uart' -- empty when not declared (shown as unspecified)
+  dev:    string          // uart device path (uart only)
+  baud:   string          // uart baud (uart only)
+  deploy: string          // 'pluto' (deploy pipeline flashes it) | 'pi' (you flash it locally) -- empty = unknown
+}
+
 export interface NodeData {
   id:     string
   name:   string
@@ -18,6 +30,7 @@ export interface NodeData {
   code?:  boolean         // CODE button — open the source in the IDE (pluto only)
   os?:    string | null   // declared runtime; 'linux' shows a Tux on the bubble
   cloud?: boolean         // a cloud-cluster service buddy, not a pinged LAN node
+  picos?: PicoInfo[]      // declared Pico fleet (nodes with PICO_<chipid>=... lines)
 }
 
 export type NodeMap = Record<string, NodeData>

@@ -45,7 +45,7 @@ function buildLayout(): Record<string, { x: number; y: number }> {
 const LAYOUT = buildLayout()
 
 const {
-  deploying, deployOutput, lastDurations,
+  deploying, deployOutput, lastDurations, lastDeployedAt,
   showToast, toastConsoleName, toastDuration,
   deploy, clearOutput, dismissToast,
 } = useDeploy(() => props.nodes)
@@ -338,6 +338,8 @@ watch(hoveredNode, () => nextTick(updatePeekPos))
         :nodes="nodes"
         :icon="ICONS[activeMenu]"
         :deploying="deploying === activeMenu"
+        :last-ms="lastDurations[activeMenu] ?? null"
+        :last-at="lastDeployedAt[activeMenu] ?? null"
         @close="closeMenu"
         @deploy="startDeploy(activeMenu)"
         @open-smb="openSmb(activeMenu)"

@@ -1,0 +1,9 @@
+{
+  "_comment": "Dreame events => Dreamcast, d-pad. The route's heading becomes a MAIN axis, but every live sink quantises that axis onto the d-pad (the Pico firmware is digital; the KeyboardSink holds arrow keys), so this is 4/8-way movement, NOT true analog -- nothing renders analog anymore. DEV: Flycast on Mac is SDL2 (NSEvent keyboard) -- bind the DC d-pad (or stick) to the Arrow keys; the KeyboardSink emits the arrows. PROD: the real hardware target (USB-to-Maple -> Dreamcast), so dev + prod use the same console. Face buttons aren't pressed by the route (move-only); the Control remote's Action/Cancel use the 'controls' block below. For a relative/tank-steer game instead, use dreamcast_dpad_tank.",
+  "controller": "Dreamcast (d-pad)",
+  "controls": { "Enter": "START", "action": "A", "cancel": "B" },
+  "rules": {
+    "move": { "axis": "MAIN", "from": "vector" },
+    "end":  { "release_all": true }
+  }
+}

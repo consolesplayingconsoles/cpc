@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, onMounted } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import type { NodeMap, NodeData } from '../composables/useNodes'
-import { API_BASE } from '../composables/useNodes'
 import { ICONS } from '../composables/useIcons'
 import { useMessages } from '../composables/useMessages'
+import { useIdentity } from '../composables/useIdentity'
 import ConsoleAvatar from './ConsoleAvatar.vue'
 import chatConfig from '../../config/chat.json'
 
@@ -15,48 +15,10 @@ const props = defineProps<{
 // ── Messages (live API) ──────────────────────────────────────────────────────
 const { messages, sendMessage } = useMessages()
 
-// ── Identity: you're a named device, or just an editable guest string ────────
-// The server tells us if our IP maps to a known console (authoritative, locked).
-// Otherwise we're a guest OF THIS INSTANCE: a display name kept in localStorage,
-// default "<Lab|C2> Guest <NNNN>" — the instance you came in through + a stable
-// random suffix (assigned once, persisted immediately, editable). Unifies with the
-// node identities (Pluto Lab / Pluto C2) and gives multiple users/labs distinct
-// names for free. No server-side guest registry, no avatar fuss.
-const INSTANCE_LABEL = import.meta.env.DEV ? 'Lab' : 'C2'
-const GUEST_KEY   = 'cpc-chat-name'
-const meNode      = ref<string | null>(null)   // server-recognized device, else null
-const guestName   = ref('')
-const editingName = ref(false)
-const nameDraft   = ref('')
-const nameInputEl = ref<HTMLInputElement | null>(null)
-
-const isGuest       = computed(() => !meNode.value)
-const identity      = computed(() => meNode.value ?? guestName.value)
+// ── Identity: who you are — shared with the global header (which shows/edits it),
+// so the chat sends as exactly what the header displays. See useIdentity. ──
+const { meNode, guestName, isGuest, identity } = useIdentity()
 const identityLabel = computed(() => meNode.value ? displayName(meNode.value) : guestName.value)
-
-function loadGuestName() {
-  let n = window.localStorage.getItem(GUEST_KEY)
-  if (!n) { n = INSTANCE_LABEL + ' Guest ' + Math.floor(1000 + Math.random() * 9000); window.localStorage.setItem(GUEST_KEY, n) }
-  guestName.value = n
-}
-function startEditName() {
-  nameDraft.value = guestName.value
-  editingName.value = true
-  nextTick(() => { nameInputEl.value?.focus(); nameInputEl.value?.select() })
-}
-function saveName() {
-  const v = nameDraft.value.trim().slice(0, 24)
-  if (v) { guestName.value = v; window.localStorage.setItem(GUEST_KEY, v) }
-  editingName.value = false
-}
-
-onMounted(async () => {
-  loadGuestName()
-  try {
-    const r = await window.fetch(`${API_BASE}/whoami`)
-    if (r.ok) { const j = await r.json(); meNode.value = j.node ?? null }
-  } catch { /* offline — stay a guest */ }
-})
 
 // ── Member lists — ordered: online → offline → unconfigured ──────────────────
 const allNodes = computed(() => Object.values(props.nodes).filter(n => n.id !== 'gateway'))
@@ -364,38 +326,7 @@ function onKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="chat" @click="showEmoji = false">
-    <!-- Top bar: channel + your identity. The floating tab switcher nests here. -->
-    <div class="chat-topbar">
-      <span class="channel-name"># consoles-chatting-consoles</span>
-
-      <div class="identity">
-        <span class="identity-eyebrow">You're</span>
-        <input
-          v-if="isGuest && editingName"
-          ref="nameInputEl"
-          v-model="nameDraft"
-          class="identity-input"
-          maxlength="24"
-          @keydown.enter="saveName"
-          @keydown.escape="editingName = false"
-          @blur="saveName"
-        />
-        <button
-          v-else-if="isGuest"
-          class="identity-name"
-          title="Edit your display name"
-          @click="startEditName"
-        >
-          {{ guestName }}
-          <svg class="identity-pencil" width="11" height="11" viewBox="0 0 24 24" fill="none">
-            <path d="M14.06 6.19l3.75 3.75M4 20.5h3.75L18.31 9.94a1.5 1.5 0 0 0 0-2.12l-1.63-1.63a1.5 1.5 0 0 0-2.12 0L4 16.75v3.75z"
-                  stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-          </svg>
-        </button>
-        <span v-else class="identity-name identity-name--locked">{{ identityLabel }}</span>
-      </div>
-    </div>
-
+    <!-- Channel header + identity now live in the GLOBAL second header (App.vue). -->
     <div class="chat-body">
 
       <!-- Left sidebar: ordered online → offline → unconfigured -->
@@ -695,69 +626,7 @@ function onKeydown(e: KeyboardEvent) {
   min-width: 0;
 }
 
-/* Full-width top bar — the floating tab switcher nests in this strip, so there
-   is no longer a dead band above the chat. Channel left, your identity right. */
-.chat-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 58px;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
-  flex-shrink: 0;
-}
-
-.channel-name {
-  font-family: var(--font-sans);
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--text);
-}
-
-/* ── Identity: a named device (locked) or an editable guest string ───── */
-.identity {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.identity-eyebrow {
-  font-family: var(--font-sans);
-  font-size: 12px;
-  color: var(--text-muted);
-}
-.identity-name {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  padding: 4px 10px;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-.identity-name:hover            { border-color: var(--accent); }
-.identity-pencil                { opacity: 0.55; }
-.identity-name--locked          { cursor: default; }
-.identity-name--locked:hover    { border-color: transparent; }
-.identity-input {
-  font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  width: 132px;
-  padding: 4px 10px;
-  border: 1px solid var(--accent);
-  border-radius: var(--r-sm);
-  outline: none;
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
+/* (Channel header + identity moved to the global second header in App.vue.) */
 
 /* Guest sender avatar — a monogram, no console icon to borrow */
 .guest-avatar {

@@ -35,6 +35,24 @@ def load_env(path):
     return cfg
 
 
+def parse_pico(value):
+    """A PICO_<chipid> value -> a fields dict. Accepts the structured form
+    'role=hid,conn=usb,managed=python' or the bare role shorthand 'hid'."""
+    value = (value or "").strip()
+    if len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]:
+        value = value[1:-1].strip()        # tolerate a quoted .env value
+    if "=" not in value:
+        return {"role": value} if value else {}
+    out = {}
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        k, _, v = part.partition("=")
+        out[k.strip()] = v.strip()
+    return out
+
+
 def attached_ports():
     _, out = _run(["mpremote", "devs"])
     return [ln.split()[0] for ln in out.splitlines()
@@ -53,7 +71,8 @@ def current_main(port):
 
 def main(argv):
     env = load_env(argv[1] if len(argv) > 1 else "")
-    want = {k[len("PICO_"):].lower(): v for k, v in env.items() if k.startswith("PICO_")}
+    want = {k[len("PICO_"):].lower(): parse_pico(v)
+            for k, v in env.items() if k.startswith("PICO_")}
     if not want:
         print("propagate: no PICO_<chipid>=<role> binding -- nothing to flash")
         return 0
@@ -66,13 +85,20 @@ def main(argv):
         if not uid:
             print("  [skip] %s: no chip id (busy? not MicroPython?)" % port)
             continue
-        role = want.get(uid)
-        if not role:
+        spec = want.get(uid)
+        if not spec:
             print("  [skip] %s (%s): not in the .env binding" % (port, uid))
             continue
+        role = spec.get("role")
+        if not role:
+            print("  [skip] %s (%s): no role in the .env binding" % (port, uid))
+            continue
+        # Pluto flashes a board IFF its role has firmware here. That existence IS the
+        # pluto-vs-local deploy ownership -- the binding truth, no declarative flag to
+        # drift out of sync (the dashboard derives the same way).
         fw = os.path.join(FW_ROOT, role, "main.py")
         if not os.path.exists(fw):
-            print("  [skip] %s (%s): no firmware/%s/main.py" % (uid, role, role))
+            print("  [skip] %s (%s): no firmware/%s/ -- deployed locally on the Pi, not by pluto" % (uid, role, role))
             continue
         with open(fw) as f:
             desired = f.read()

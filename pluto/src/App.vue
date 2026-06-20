@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useNodes } from './composables/useNodes'
 import { useConnections } from './composables/useConnections'
 import { useMessages } from './composables/useMessages'
+import { useIdentity } from './composables/useIdentity'
 import NetworkDiagram from './components/NetworkDiagram.vue'
 import GroupChat from './components/GroupChat.vue'
-import Robutek from './components/Robutek.vue'
+import Control from './components/Control.vue'
 import plutoLabMark from './assets/avatars/pluto-lab.svg'
 import plutoC2Mark from './assets/avatars/pluto-c2.svg'
 
@@ -16,8 +17,12 @@ const router = useRouter()
 // Light/dark theme — toggled in the header, persisted, applied to <html> so the
 // token overrides in style.css take effect. Default light; dark films cleanly
 // next to a console instead of a panel that blows out white.
+// localStorage keys follow one convention across the app: cpc.<domain>.<leaf>
+// (see the storage-keys note in .claude memory). Old un-namespaced key read once
+// as a fallback so the saved preference survives the rename.
+const THEME_KEY = 'cpc.ui.theme'
 const theme = ref<'light' | 'dark'>(
-  (localStorage.getItem('cpc-theme') as 'light' | 'dark') || 'light'
+  (localStorage.getItem(THEME_KEY) || localStorage.getItem('cpc-theme') || 'light') as 'light' | 'dark'
 )
 function applyTheme(t: 'light' | 'dark') {
   document.documentElement.setAttribute('data-theme', t)
@@ -25,7 +30,7 @@ function applyTheme(t: 'light' | 'dark') {
 applyTheme(theme.value)
 function toggleTheme() {
   theme.value = theme.value === 'dark' ? 'light' : 'dark'
-  localStorage.setItem('cpc-theme', theme.value)
+  localStorage.setItem(THEME_KEY, theme.value)
   applyTheme(theme.value)
 }
 
@@ -39,11 +44,13 @@ const activeTab = computed<'network' | 'chat' | 'control'>(() => {
   return 'network'
 })
 
-// open-tab key (and the switcher buttons) → path. The node drawer still emits
-// 'robutek'/'dreame'; both open the Control surface for the dreame source.
+// open-tab key (and the switcher buttons) → path. The Control tab lands on the bare
+// surface (it auto-selects the first available source); the node drawer's
+// 'robutek'/'dreame' jump straight to the dreame source.
 function goToTab(tab: 'network' | 'chat' | 'control' | 'robutek' | 'dreame') {
   const path = tab === 'chat' ? '/command'
-    : (tab === 'control' || tab === 'robutek' || tab === 'dreame') ? '/control/dreame'
+    : tab === 'control' ? '/control'
+    : (tab === 'robutek' || tab === 'dreame') ? '/control/dreame'
     : '/'
   if (route.path !== path) router.push(path)
 }
@@ -52,14 +59,26 @@ const { nodes, loading, error } = useNodes()
 const { connections } = useConnections()
 const { messages } = useMessages()
 
-const dreameName = computed(() => nodes.value['dreame']?.name ?? 'dreame')
+// ── Global second header: a per-tab channel hashtag + your identity. Both headers
+// live HERE in the parent so the top is uniform across tabs (no per-page stacking).
+// The hashtag is the only per-tab-changing string and is declared in each route's
+// meta (see main.ts), so adding a surface carries its own hashtag with it. ──
+const pageHashtag = computed(() => (route.meta.hashtag as string | undefined) ?? '')
 
-// The Dreame tab only makes sense when the vacuum node is configured (a real .env;
-// an unconfigured placeholder reads status 'unconfigured'). Hide the tab otherwise.
-// (The vacuum's modules will fold into the UI properly later; this tab is fine for now.)
-const dreameConfigured = computed(() =>
-  !!nodes.value['dreame'] && nodes.value['dreame'].status !== 'unconfigured'
-)
+// Identity (who you are) is shared with the chat via useIdentity; the header shows it
+// and lets a guest rename. A recognized node is locked to its display name.
+const { meNode, guestName, isGuest, setGuestName } = useIdentity()
+const editingName = ref(false)
+const nameDraft   = ref('')
+const nameInputEl = ref<HTMLInputElement | null>(null)
+function displayName(id: string) { return id === 'pluto' ? 'Pluto C2' : (nodes.value[id]?.name ?? id) }
+const identityLabel = computed(() => meNode.value ? displayName(meNode.value) : guestName.value)
+function startEditName() {
+  nameDraft.value = guestName.value
+  editingName.value = true
+  nextTick(() => { nameInputEl.value?.focus(); nameInputEl.value?.select() })
+}
+function saveName() { setGuestName(nameDraft.value); editingName.value = false }
 
 // True under `vite dev` (the workspace starter), compiled to false in the built
 // dist shipped to the box. Distinguishes the two instance identities: the Lab
@@ -118,12 +137,6 @@ watch(activeTab, (tab) => {
   if (tab === 'chat') lastSeenMsgId.value = latestId()
 }, { immediate: true })
 
-// Never strand the user on a hidden Control surface — covers both a /control deep
-// link and the roster loading async after mount. Redirect back to Network.
-watch(dreameConfigured, (ok) => {
-  if (!ok && activeTab.value === 'control') router.replace('/')
-}, { immediate: true })
-
 const displayNodes = computed(() => {
   const src = error.value
     ? Object.fromEntries(Object.entries(nodes.value).map(
@@ -157,9 +170,11 @@ const displayNodes = computed(() => {
           :title="`Open the ${siblingLink.label} dashboard in a new tab`"
           @click="openExternal(siblingLink.url)"
         >{{ siblingLink.label }}<svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3l-8 8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <!-- Show-unconfigured reveals unconfigured entities on every surface: map
+             nodes, chat members, and Control's unconfigured source options. -->
         <label class="toggle-label">
           <input type="checkbox" v-model="showOffline" class="toggle-checkbox" />
-          <span v-if="activeTab !== 'control'">Show unconfigured nodes</span>
+          <span>Show unconfigured nodes</span>
         </label>
         <span class="header-status">
           <span>{{ loading ? 'Scanning' : error ? 'Offline' : 'Live' }}</span>
@@ -172,9 +187,39 @@ const displayNodes = computed(() => {
     </header>
 
     <main class="main">
-      <!-- Floating tab switcher — the top-level Pluto surfaces. Control joins
-           Network + Chat (shown once the vacuum source is configured); it carries
-           its own selector rail, so no Back affordance and no hidden tab bar. -->
+      <!-- Global second header — uniform across tabs. Per-tab hashtag (left), your
+           identity (right); the floating tab switcher rides over its clear centre. -->
+      <div class="subheader">
+        <span class="channel-name">{{ pageHashtag }}</span>
+        <div class="identity">
+          <span class="identity-eyebrow">You're</span>
+          <input
+            v-if="isGuest && editingName"
+            ref="nameInputEl"
+            v-model="nameDraft"
+            class="identity-input"
+            maxlength="24"
+            @keydown.enter="saveName"
+            @keydown.escape="editingName = false"
+            @blur="saveName"
+          />
+          <button
+            v-else-if="isGuest"
+            class="identity-name"
+            title="Edit your display name"
+            @click="startEditName"
+          >
+            {{ guestName }}
+            <svg class="identity-pencil" width="11" height="11" viewBox="0 0 24 24" fill="none">
+              <path d="M14.06 6.19l3.75 3.75M4 20.5h3.75L18.31 9.94a1.5 1.5 0 0 0 0-2.12l-1.63-1.63a1.5 1.5 0 0 0-2.12 0L4 16.75v3.75z"
+                    stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <span v-else class="identity-name identity-name--locked">{{ identityLabel }}</span>
+        </div>
+      </div>
+
+      <!-- Floating tab switcher — the three top-level Pluto surfaces, always present. -->
       <div class="tab-switcher">
         <button
           class="tab"
@@ -190,25 +235,26 @@ const displayNodes = computed(() => {
           <span v-if="unreadCount > 0" class="tab-badge">{{ unreadCount }}</span>
         </button>
         <button
-          v-if="dreameConfigured"
           class="tab"
           :class="{ 'tab--active': activeTab === 'control' }"
           @click="goToTab('control')"
         >Control</button>
       </div>
 
-      <div v-show="activeTab === 'network'" class="network-view">
-        <div v-if="loading" class="state-msg">Scanning network…</div>
-        <NetworkDiagram v-show="!loading" :nodes="displayNodes" :connections="connections" @open-tab="goToTab($event as 'network' | 'chat' | 'robutek' | 'dreame')" />
+      <div class="panels">
+        <div v-show="activeTab === 'network'" class="network-view">
+          <div v-if="loading" class="state-msg">Scanning network…</div>
+          <NetworkDiagram v-show="!loading" :nodes="displayNodes" :connections="connections" @open-tab="goToTab($event as 'network' | 'chat' | 'robutek' | 'dreame')" />
+        </div>
+
+        <GroupChat
+          v-show="activeTab === 'chat'"
+          :nodes="nodes"
+          :show-offline="showOffline"
+        />
+
+        <Control v-show="activeTab === 'control'" :active="activeTab === 'control'" :nodes="nodes" :show-offline="showOffline" />
       </div>
-
-      <GroupChat
-        v-show="activeTab === 'chat'"
-        :nodes="nodes"
-        :show-offline="showOffline"
-      />
-
-      <Robutek v-show="activeTab === 'control'" :name="dreameName" :active="activeTab === 'control'" :nodes="nodes" />
     </main>
 
     <footer class="footer">
@@ -345,9 +391,54 @@ const displayNodes = computed(() => {
 /* ── Main ────────────────────────────────────────────────────── */
 .main {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
+
+/* Global second header — same height/colour for every tab; the floating tabs ride
+   over its clear centre (hashtag left, identity right). */
+.subheader {
+  flex: 0 0 auto;
+  height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.channel-name {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+.identity { display: flex; align-items: center; gap: 8px; }
+.identity-eyebrow { font-family: var(--font-sans); font-size: 12px; color: var(--text-muted); }
+.identity-name {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-sans); font-size: 13px; font-weight: 600;
+  color: var(--accent); background: var(--accent-soft);
+  border: 1px solid transparent; border-radius: var(--r-sm);
+  padding: 4px 10px; cursor: pointer; transition: border-color 0.15s;
+}
+.identity-name:hover            { border-color: var(--accent); }
+.identity-pencil                { opacity: 0.55; }
+.identity-name--locked          { cursor: default; }
+.identity-name--locked:hover    { border-color: transparent; }
+.identity-input {
+  font-family: var(--font-sans); font-size: 13px; font-weight: 600;
+  color: var(--text); width: 132px; padding: 4px 10px;
+  border: 1px solid var(--accent); border-radius: var(--r-sm);
+  outline: none; box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* The tab panels fill the rest below the second header. */
+.panels { flex: 1; min-height: 0; position: relative; }
 
 .network-view {
   width: 100%;

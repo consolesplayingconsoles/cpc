@@ -41,10 +41,12 @@ _AXIS_DEADZONE = 0.30                      # quantise an analog axis onto the d-
 class HidBridge(object):
     name = "hid"
 
-    def __init__(self, cfg, repeat=2):
-        self.cfg = cfg or {}
-        self.link = UartLink(self.cfg.get("UART_DEVICE", "/dev/ttyAMA0"),
-                             int(self.cfg.get("UART_BAUD", "115200")))
+    def __init__(self, device="/dev/ttyAMA0", baud=115200, repeat=2):
+        # device + baud are per-board (a UART is one TX/RX pin set = one Pico), passed
+        # in from that Pico's .env line -- not a node-global.
+        self.device = device
+        self.baud = int(baud)
+        self.link = UartLink(device, self.baud)
         self.repeat = repeat               # frames per change; link's solid, >1 = belt+braces
         self.dpad = 0
         self.buttons = 0
@@ -65,7 +67,7 @@ class HidBridge(object):
 
     def status(self):
         return {"name": self.name, "active": self._open,
-                "device": self.cfg.get("UART_DEVICE", "/dev/ttyAMA0"),
+                "device": self.device,
                 "dpad": self.dpad, "buttons": self.buttons}
 
     # -- op application (same shape as controller.py's Sink) ------------------
@@ -135,17 +137,10 @@ class HidBridge(object):
 # Standalone smoke test, so a deploy is verifiable on the bench:
 #   python3 -m bridges.hid ../pi/.env       (DOWN x3, UP x3, A)
 if __name__ == "__main__":
-    import os
     import sys
-    env = {}
-    p = sys.argv[1] if len(sys.argv) > 1 else ""
-    if p and os.path.exists(p):
-        for ln in open(p):
-            ln = ln.strip()
-            if ln and not ln.startswith("#") and "=" in ln:
-                key, _, val = ln.partition("=")
-                env[key.strip()] = val.strip()
-    bridge = HidBridge(env).start()
+    device = sys.argv[1] if len(sys.argv) > 1 else "/dev/ttyAMA0"
+    baud   = sys.argv[2] if len(sys.argv) > 2 else "115200"
+    bridge = HidBridge(device, baud).start()
     print("hid bridge: %s" % bridge.status())
     seq = ([{"op": "pulse", "btn": "D_DOWN", "ms": 200}] * 3
            + [{"op": "pulse", "btn": "D_UP", "ms": 200}] * 3

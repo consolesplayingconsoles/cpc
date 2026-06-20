@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { NodeData, NodeMap } from '../composables/useNodes'
 import { API_BASE } from '../composables/useNodes'
 import NodeBubble from './NodeBubble.vue'
 import NodeCommand from './NodeCommand.vue'
+import CopyButton from './CopyButton.vue'
 import chatConfig from '../../config/chat.json'
 
 interface Cmd { verb: string; desc?: string; target?: string; multiline?: boolean }
@@ -16,6 +17,8 @@ const props = defineProps<{
   nodes:     NodeMap
   icon?:     string
   deploying: boolean
+  lastMs?:   number | null   // duration of this node's last successful deploy
+  lastAt?:   number | null   // when (epoch ms) it last deployed
 }>()
 
 const emit = defineEmits<{
@@ -53,8 +56,8 @@ const dashUrl   = computed(() =>
   : props.id === 'lab' ? `http://${instanceHost.value}:5174` : '')
 const dashLabel  = computed(() => props.id === 'pluto' ? 'Open Pluto C2' : 'Open Pluto Lab')
 const retroUrl   = computed(() => `http://${instanceHost.value}:7700/retro`)
-// The retro page is served by each instance's own API, so it IS the dev/prod build.
-const retroLabel = computed(() => props.id === 'lab' ? 'Open Retro Web (dev)' : 'Open Retro Web (prod)')
+// The retro page is served by each instance's own API, so it IS the local/stable build.
+const retroLabel = computed(() => props.id === 'lab' ? 'Open Retro Web (local)' : 'Open Retro Web (stable)')
 function openExternal(url: string) {
   if (url) window.open(url, '_blank', 'noopener')
 }
@@ -67,6 +70,46 @@ const instanceHasOps = computed(() => showDeploy.value || showLabConfig.value)
 
 // Non-instance nodes keep the flat layout: their infra actions + chat commands.
 const hasInfra = computed(() => props.node.deploy || props.node.folder)
+
+// The Wii is two machines in one: a Linux node (Wii-Linux: SSH deploy + SMB files) AND
+// a native console (Homebrew/Nintendont: .dol flash + game library). Deploy/Files mean
+// different things in each, so its drawer shows BOTH as separate sections rather than
+// pretending they're one. The native side isn't built yet -- the buttons are real, and
+// the API answers 'not implemented' (honest capability, not a hidden one).
+const isWii = computed(() => props.id === 'wii')
+const nativeNote = ref('')
+function nativeAction(action: string) {
+  nativeNote.value = ''
+  fetch(`${API_BASE}/native/${props.id}/${action}`, { method: 'POST' })
+    .then(r => r.json())
+    .then(j => { nativeNote.value = j?.error || (j?.ok ? '' : 'failed') })
+    .catch(() => { nativeNote.value = 'API unreachable' })
+}
+
+// Last-deploy line — general to any deployable node (pi, pluto, the python clients).
+// The pi's covers its Picos too (their flashing is a step of the pi deploy).
+const hasDeployInfo = computed(() => !!props.lastAt || !!props.lastMs)
+function fmtAgo(at: number | null | undefined): string {
+  if (!at) return ''
+  const s = Math.max(0, Math.round((Date.now() - at) / 1000))
+  if (s < 60) return 'just now'
+  const m = Math.round(s / 60); if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60); if (h < 24) return `${h}h ago`
+  return `${Math.round(h / 24)}d ago`
+}
+function fmtDur(ms: number | null | undefined): string {
+  return ms ? `${Math.round(ms / 1000)}s` : ''
+}
+
+// Pico fleet (the Pi): each board declared in the node's .env, so you can see at a
+// glance what every locally-deployed board is for and how it's managed/connected.
+const picos = computed(() => props.node.picos ?? [])
+// Colour HINT only, from the declared value -- never the source of the text. Anything
+// unrecognized (incl. blank) styles neutral, so changing the .env value can't break it.
+function deployClass(d: string) {
+  const v = (d || '').toLowerCase()
+  return v === 'pluto' ? 'is-pluto' : v === 'pi' ? 'is-pi' : 'is-unknown'
+}
 
 // Node commands (the chat verbs) surface here too — DRY: same chat.json registry,
 // same dispatch. Each posts "@handle verb [arg]" to /messages (logged in the chat
@@ -100,6 +143,10 @@ function postCommand(text: string) {
       </svg>
     </header>
 
+    <p v-if="hasDeployInfo" class="nd__deploy-meta">
+      Last deploy{{ lastAt ? ' ' + fmtAgo(lastAt) : '' }}{{ lastMs ? ' · ~' + fmtDur(lastMs) : '' }}
+    </p>
+
     <!-- ── Instance nodes: two sections that spell the node — Pluto + (C2|Lab) ── -->
     <template v-if="isInstanceNode">
       <section class="nd__sec">
@@ -123,11 +170,11 @@ function postCommand(text: string) {
                the label, the icon (no text) is the action — open it in your IDE. -->
           <button v-if="showLabConfig" class="nd__cfg" title="Open the Lab config folder in your IDE" @click="emit('open-config')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H8l1.5 1.6h6A1.5 1.5 0 0 1 17 9v2.2"/>
-              <path d="M3 7.5V15a1.5 1.5 0 0 0 1.5 1.5H10.5"/>
-              <circle cx="17.5" cy="16.5" r="3.2"/>
-              <circle cx="17.5" cy="16.5" r="0.95" fill="currentColor" stroke="none"/>
-              <path d="M17.5 12.6v1.1M17.5 19.4v1.1M13.6 16.5h1.1M20.3 16.5h1.1M14.8 13.8l.8.8M19.4 18.4l.8.8M20.2 13.8l-.8.8M14.8 19.2l.8-.8"/>
+              <path d="M3 6A1.5 1.5 0 0 1 4.5 4.5H7.5L9 6h3.5A1.5 1.5 0 0 1 14 7.5V9"/>
+              <path d="M3 6v8A1.5 1.5 0 0 0 4.5 15.5H8"/>
+              <circle cx="15.5" cy="15.5" r="4.6"/>
+              <circle cx="15.5" cy="15.5" r="1.4" fill="currentColor" stroke="none"/>
+              <path d="M15.5 9.3v1.6M15.5 20.1v1.6M21.7 15.5h-1.6M10.9 15.5H9.3M19.9 11.1l-1.1 1.1M12.2 18.8l-1.1 1.1M19.9 19.9l-1.1-1.1M12.2 12.2l-1.1-1.1"/>
             </svg>
           </button>
         </div>
@@ -141,7 +188,39 @@ function postCommand(text: string) {
 
     <!-- ── Every other node: flat infra actions + chat commands ── -->
     <template v-else>
-      <section v-if="isVacuum || hasInfra" class="nd__sec">
+      <!-- The Wii is dual-natured: a Linux node (SSH deploy + SMB files) AND a native
+           console (homebrew flash + game library). Two sections so Deploy/Files read
+           honestly per mode; the native side isn't built, so the API says so. -->
+      <template v-if="isWii">
+        <section class="nd__sec">
+          <p class="nd__lbl">Linux</p>
+          <button v-if="node.deploy" class="nd__act" :disabled="deploying || offline" @click="emit('deploy')">
+            <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l4 4M12 3l-4 4M12 3v12"/><path d="M5 21h14"/></svg>
+            <span>{{ deployLabel }}</span>
+            <span v-if="deploying" class="nd__act-note">Running…</span>
+          </button>
+          <button v-if="node.folder" class="nd__act" :disabled="offline" @click="emit('open-smb')">
+            <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            <span>Files</span>
+          </button>
+          <p v-if="!node.deploy && !node.folder" class="nd__hint">No SSH or SMB configured.</p>
+        </section>
+
+        <section class="nd__sec">
+          <p class="nd__lbl">System</p>
+          <button class="nd__act" :disabled="offline" @click="nativeAction('flash')">
+            <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>
+            <span>Flash Homebrew</span>
+          </button>
+          <button class="nd__act" :disabled="offline" @click="nativeAction('games')">
+            <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.4"/></svg>
+            <span>Game Library</span>
+          </button>
+          <p v-if="nativeNote" class="nd__hint">{{ nativeNote }}</p>
+        </section>
+      </template>
+
+      <section v-else-if="isVacuum || hasInfra" class="nd__sec">
         <p class="nd__lbl">Actions</p>
 
         <button v-if="isVacuum" class="nd__act" @click="emit('open-tab')">
@@ -159,6 +238,28 @@ function postCommand(text: string) {
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
           <span>Files</span>
         </button>
+      </section>
+
+      <section v-if="picos.length" class="nd__sec">
+        <p class="nd__lbl">Picos</p>
+        <div v-for="p in picos" :key="p.chipid" class="nd__pico">
+          <!-- chip id is the board's identity — full, prominent, the lead line, copyable. -->
+          <div class="nd__pico-id">
+            <span class="nd__pico-id-text">{{ p.chipid }}</span>
+            <CopyButton :text="p.chipid" :title="'copy chip id\n' + p.chipid" />
+          </div>
+          <div class="nd__pico-main">
+            <span class="nd__pico-role">{{ p.role || 'unassigned' }}</span>
+            <span class="nd__pico-badge" :class="deployClass(p.deploy)"
+                  :title="p.deploy === 'pluto' ? 'Flashed by the Pluto deploy pipeline (firmware/' + p.role + '/ exists)'
+                        : p.deploy === 'pi' ? 'Deployed locally on the Pi — Pluto does not flash it'
+                        : 'Deploy ownership not determinable here'">
+              {{ p.deploy || 'deploy?' }}
+            </span>
+            <span class="nd__pico-badge is-conn">{{ p.conn || 'conn?' }}</span>
+            <span v-if="(p.conn || '').toLowerCase() === 'uart'" class="nd__pico-uart">{{ p.dev || 'no dev' }}<template v-if="p.baud">@{{ p.baud }}</template></span>
+          </div>
+        </div>
       </section>
 
       <section v-if="commands.length" class="nd__sec">
@@ -200,8 +301,10 @@ function postCommand(text: string) {
 .nd__x:hover { background: var(--surface-2); color: var(--text); }
 .nd__head { display: flex; justify-content: center; padding: 4px 0 2px; }
 .nd__bubble { display: block; width: 168px; height: auto; pointer-events: none; }
+.nd__deploy-meta { margin: 0; text-align: center; font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
 .nd__sec { margin-top: 18px; }
 .nd__lbl { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--text-faint); margin: 0 0 10px; }
+.nd__hint { margin: 2px 0 0; font-size: 12px; color: var(--text-faint); }
 .nd__act {
   display: flex; align-items: center; gap: 10px;
   width: 100%; margin-bottom: 8px; padding: 9px 12px;
@@ -226,4 +329,19 @@ function postCommand(text: string) {
 }
 .nd__cfg:hover { background: var(--surface-2); border-color: var(--line-strong); color: var(--accent); }
 .nd__cfg svg { width: 19px; height: 19px; flex: 0 0 auto; }
+
+/* Pico fleet rows: one card per declared board. The chip id is the board's identity,
+   so it leads in full; role + deploy ownership + connection follow as attributes. */
+.nd__pico { padding: 8px 10px; margin-bottom: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.nd__pico-id { display: flex; align-items: center; gap: 4px; margin-bottom: 5px; }
+.nd__pico-id-text { font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; color: var(--text); word-break: break-all; }
+.nd__pico-main { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.nd__pico-role { font-size: 13px; font-weight: 600; color: var(--text-muted); }
+/* Pills: every badge carries the SAME visible border (surface-3 fill, line-strong
+   border, strong text) so they read crisply in light mode too -- pluto is the one
+   accent-tinted state, unknown is a dashed ghost. No more invisible off-white chips. */
+.nd__pico-badge { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--surface-3); color: var(--text); }
+.nd__pico-badge.is-pluto   { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+.nd__pico-badge.is-unknown { color: var(--text-muted); background: transparent; border-style: dashed; }
+.nd__pico-uart { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 </style>

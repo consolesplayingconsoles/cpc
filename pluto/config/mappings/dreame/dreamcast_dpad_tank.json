@@ -1,0 +1,13 @@
+{
+  "_comment": "Dreame events => Dreamcast, tank/relative steering (the GTA2 scheme): hold accelerate-forward, steer left/right on turns -- GTA2's movement is non-standard. For plain heading-follow movement use dreamcast_dpad / gamecube_dpad instead. 'keys' = the DC/Flycast binding (we run it there, never the PS1 one): X=accelerate (FWD), D=reverse (REV), arrows=steer. Edit 'keys' if your binding differs. Tune the turn pulse ms for sharper/softer steering; lower events.TURN_DEG for more frequent steering.",
+  "controller": "Dreamcast (tank / relative steering, e.g. GTA2)",
+  "controls": { "Enter": "START", "action": "A", "cancel": "B" },
+  "keys": { "FWD": "x", "REV": "d", "STEERL": "left", "STEERR": "right" },
+  "rules": {
+    "start":      { "press": "FWD" },
+    "turn":       { "left":  { "pulse": "STEERL", "ms": 160 },
+                    "right": { "pulse": "STEERR", "ms": 160 } },
+    "reposition": { "pulse": "REV", "ms": 140 },
+    "end":        { "release_all": true }
+  }
+}
