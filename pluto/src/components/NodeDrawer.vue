@@ -29,7 +29,7 @@ const emit = defineEmits<{
 // Offline / unconfigured nodes can't act — deploy + files need the node reachable.
 const offline = computed(() => props.node.status === 'down' || props.node.status === 'unconfigured')
 const unconfigured = computed(() => props.node.status === 'unconfigured')
-// A node's payloads come from config/deploy.json (client, hub, ...), so the button
+// A node's payloads come from config/payloads.json (client, hub, ...), so the button
 // stays generic -- "Deploy Pluto Node" -- rather than naming a payload. (The host
 // keeps its instance label.)
 const deployLabel = computed(() => props.id === 'pluto' ? 'Deploy Pluto C2' : 'Deploy Pluto Node')
@@ -88,7 +88,7 @@ function postCommand(text: string) {
 </script>
 
 <template>
-  <aside class="nd" @click.stop>
+  <aside class="nd" @click.stop @wheel.stop>
     <button class="nd__x" title="Close" aria-label="Close" @click="emit('close')">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>

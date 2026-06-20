@@ -132,4 +132,7 @@ const ipY         = computed(() => nameLines.value.length > 1 ? 78 : 65)
   font-weight: 600;
   fill: #3a3a3a;
 }
+/* the OS hint is a dark glyph on light; on dark it'd vanish, so lift it to a
+   readable grey there (light mode unchanged). */
+:root[data-theme="dark"] .os-badge-mac { fill: var(--color-secondary); }
 </style>

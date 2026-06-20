@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------
-#  deploy-pluto-c2.sh -- the deploy ENGINE: build locally and ship ONE node over SSH.
+#  deploy.sh -- the deploy ENGINE: build locally and ship ONE node over SSH.
 #
 #  Pluto owns deployment ("Pluto self-deploys everywhere"). You normally don't run
 #  this by hand: the Pluto UI's DEPLOY button streams it per node -- the API shells
 #  out to this script and parses the ##STEP:<name> lines into SSE progress events.
 #  It is also the one-time DEV BOOTSTRAP: run it manually to stand the first node up.
 #
-#  WHAT each node gets is declarative, not hardcoded here: pluto/config/deploy.json
+#  WHAT each node gets is declarative, not hardcoded here: pluto/config/payloads.json
 #  maps a node dir to a list of PAYLOADS, and this script knows HOW to ship each one.
 #  Every node lands at the SAME remote root (/opt/cpc); multiple payloads coexist in
 #  that one dir, told apart by name (e.g. the Pi gets the client + the hub backend).
@@ -16,16 +16,16 @@
 #  Payloads:
 #    server  -- the Pluto dashboard (api + dist + config), run by serve.sh under systemd.
 #    client  -- the python TUI client (pluto-python-tui + vendored deps).
-#    (hub)    -- the Pi's native-protocol bridge backend.  [not built yet]
+#    hub     -- the Pi's bridge backend; its always-up op receiver runs under systemd.
 #
-#  Usage: ./deploy-pluto-c2.sh <path-to-env-file>
-#    ./deploy-pluto-c2.sh pluto/.env            # the Pluto host  -> server payload
-#    ./deploy-pluto-c2.sh nodes/local/wii/.env  # a console node  -> client payload
+#  Usage: ./deploy.sh <path-to-env-file>
+#    ./deploy.sh pluto/.env            # the Pluto host  -> server payload
+#    ./deploy.sh nodes/local/wii/.env  # a console node  -> client payload
 # -----------------------------------------------------------------
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
-  echo "Usage: ./deploy-pluto-c2.sh <env-file>"
+  echo "Usage: ./deploy.sh <env-file>"
   exit 1
 fi
 
@@ -34,7 +34,7 @@ ENV_FILE="$1"
 
 REMOTE_ROOT="/opt/cpc"          # same path on every node
 NODE_DIR=$(basename "$(dirname "$ENV_FILE")")
-DEPLOY_MAP="pluto/config/deploy.json"
+DEPLOY_MAP="pluto/config/payloads.json"
 
 # -- parse env file -----------------------------------------------
 _env_get() {
@@ -191,6 +191,23 @@ payload_hub() {
   # Pure stdlib (raw-REPL flasher), so plain python3 -- no mpremote dependency.
   echo "##STEP:propagate"
   $SSH "python3 ${REMOTE_ROOT}/pluto-pi-hub/propagate.py ${REMOTE_ROOT}/${NODE_DIR}/.env" || true
+
+  # Bring up the always-up op receiver (Pluto's op stream -> Pico). Same systemd
+  # pattern as the server: sync the unit, then `restart` -- which STOPS the instance
+  # currently holding the UART + listen port (graceful SIGTERM) before the fresh one
+  # binds them, so a redeploy hands off cleanly.
+  echo "##STEP:restart"
+  HUB_UNIT="${REMOTE_ROOT}/pluto-pi-hub/deploy/cpc-hub.service"
+  if $SSH "[ -d /run/systemd/system ]"; then
+    if $SSH "cp ${HUB_UNIT} /etc/systemd/system/cpc-hub.service && systemctl daemon-reload && systemctl enable cpc-hub >/dev/null 2>&1 && systemctl restart cpc-hub"; then
+      echo "restarted via systemd (cpc-hub.service synced to ${REMOTE_ROOT})"
+    else
+      echo "[note] could not sync/restart the unit (needs root). Re-point it once:"
+      echo "  ssh ${CUSTOM_SSH_ALIAS:-${SSH_USER}@${HOST_IP}} 'sudo cp ${HUB_UNIT} /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now cpc-hub'"
+    fi
+  else
+    echo "not managed by systemd -- run ${REMOTE_ROOT}/pluto-pi-hub/run.sh serve manually"
+  fi
 }
 
 # =================================================================

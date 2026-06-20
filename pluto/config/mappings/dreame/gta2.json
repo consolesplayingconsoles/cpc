@@ -1,6 +1,7 @@
 {
   "_comment": "Dreame events => GTA2 (tank/relative steering: hold accelerate-forward, steer left/right on turns -- GTA2's movement is non-standard, NOT absolute analog; for analog use dreame-to-gamecube / dreame-to-dreamcast). 'keys' = the DC/Flycast binding (we run it there, never the PS1 one): X=accelerate (FWD), D=reverse (REV), arrows=steer. Edit 'keys' if your binding differs. Tune the turn pulse ms for sharper/softer steering; lower events.TURN_DEG for more frequent steering.",
   "controller": "GTA2 (tank / relative steering)",
+  "controls": { "Enter": "START" },
   "keys": { "FWD": "x", "REV": "d", "STEERL": "left", "STEERR": "right" },
   "rules": {
     "start":      { "press": "FWD" },

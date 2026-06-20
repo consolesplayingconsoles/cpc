@@ -667,7 +667,7 @@ function onKeydown(e: KeyboardEvent) {
   cursor: default;
   transition: background 0.12s;
 }
-.member:hover             { background: rgba(0,0,0,0.04); }
+.member:hover             { background: var(--surface-3); }
 .member--offline          { opacity: 0.5; }
 .member--unconfigured     { opacity: 0.28; }
 
@@ -956,8 +956,8 @@ function onKeydown(e: KeyboardEvent) {
   flex-shrink: 0;
   margin-bottom: 1px;
 }
-.emoji-toggle:hover       { background: rgba(0,0,0,0.06); }
-.emoji-toggle--active     { background: rgba(0,0,0,0.08); border-color: var(--line); }
+.emoji-toggle:hover       { background: var(--surface-3); }
+.emoji-toggle--active     { background: var(--surface-3); border-color: var(--line); }
 
 .send-btn {
   font-family: var(--font-sans);
@@ -983,7 +983,7 @@ function onKeydown(e: KeyboardEvent) {
   bottom: calc(100% + 4px);
   left: 16px;
   right: 16px;
-  background: var(--color-bg);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
   box-shadow: 0 4px 20px rgba(0,0,0,0.1);
@@ -1001,8 +1001,8 @@ function onKeydown(e: KeyboardEvent) {
 }
 .autocomplete-item:hover { background: var(--surface-2); }
 .autocomplete-item--active {
-  background: #e6e6e2;
-  box-shadow: inset 2px 0 0 var(--text);
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .autocomplete-cmd {
   font-family: var(--font-sans);
@@ -1017,6 +1017,8 @@ function onKeydown(e: KeyboardEvent) {
   color: #9a6c1a;
   letter-spacing: 0.04em;
 }
+/* the amber param hint is dark-on-light; lift it on dark so it stays legible */
+:root[data-theme="dark"] .autocomplete-param { color: var(--warn); }
 .autocomplete-desc {
   font-family: var(--font-sans);
   font-size: 11px;
@@ -1038,7 +1040,7 @@ function onKeydown(e: KeyboardEvent) {
   position: absolute;
   bottom: calc(100% + 4px);
   right: 16px;
-  background: var(--color-bg);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px;
@@ -1063,7 +1065,7 @@ function onKeydown(e: KeyboardEvent) {
   color: var(--text);
   transition: background 0.1s;
 }
-.emoji-btn:hover { background: #e8e8e6; }
+.emoji-btn:hover { background: var(--surface-3); }
 
 /* ── Responsive ──────────────────────────────────────────────── */
 @media (max-width: 620px) {

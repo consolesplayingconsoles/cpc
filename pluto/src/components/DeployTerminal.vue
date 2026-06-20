@@ -83,6 +83,7 @@ const STEP_LABELS: Record<string, string> = {
     }"
     :style="cardStyle"
     @click.stop
+    @wheel.stop
   >
     <div class="term__bar">
       <span class="term__title">

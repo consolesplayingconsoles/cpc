@@ -2,7 +2,7 @@
 """
 swagger.py — DEV-ONLY OpenAPI / Swagger UI for the Pluto API.
 
-Lives OUTSIDE the deployed surface: deploy-pluto-c2.sh ships only pluto/api + dist + config
+Lives OUTSIDE the deployed surface: deploy.sh ships only pluto/api + dist + config
 + serve.sh + deploy/, never pluto/tools/. So the production API stays pure-stdlib
 with zero docs code or dependencies — exactly the "the box needs only python3"
 property. This wrapper runs locally, on whatever python you like, and gives you the

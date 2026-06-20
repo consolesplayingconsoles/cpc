@@ -164,6 +164,14 @@ function onPlaybackKey(e: KeyboardEvent) {
   if (e.code === 'Space') {
     e.preventDefault(); e.stopPropagation(); togglePlay(); return
   }
+  if (e.key === 'Enter' && driveTarget.value !== 'none') {
+    // Hidden hotkey: Enter -> Start. The key->button binding lives in the mapping's
+    // `controls`; the route only steers, so this is how you dismiss a console menu
+    // (e.g. the DC's VMU-removed prompt) by hand. Natural reflex for anyone stuck.
+    e.preventDefault()
+    drivePost({ action: 'press', target: driveTarget.value, source: DRIVE_SOURCE, mapping: driveMapping.value, key: 'Enter' })
+    return
+  }
   if (driveTarget.value !== 'none' && e.key.indexOf('Arrow') === 0) e.preventDefault()
 }
 // A focused <select> walks its options on arrow keys -- block that so the synthetic

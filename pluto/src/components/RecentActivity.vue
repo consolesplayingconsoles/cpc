@@ -52,7 +52,7 @@ const recent = computed(() => props.messages.slice(-props.max))
   width: 360px;
   max-width: 360px;
   padding: 9px 11px 10px;
-  background: rgba(238, 240, 243, 0.92);
+  background: var(--tab-track);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--line);
@@ -88,7 +88,7 @@ const recent = computed(() => props.messages.slice(-props.max))
   cursor: pointer;
   transition: color 0.15s, background 0.15s;
 }
-.activity__btn:hover         { color: var(--accent); background: rgba(26, 34, 51, 0.06); }
+.activity__btn:hover         { color: var(--accent); background: var(--surface-3); }
 .activity__btn:focus         { outline: none; }
 .activity__btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .activity__list {

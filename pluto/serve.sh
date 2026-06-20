@@ -2,7 +2,7 @@
 # ─────────────────────────────────────────────────────────────
 #  serve.sh — run Pluto on the host box: API + static SPA.
 #
-#  Pure stdlib python3, no deps to install. This is what `deploy-pluto-c2.sh pluto/.env`
+#  Pure stdlib python3, no deps to install. This is what `deploy.sh pluto/.env`
 #  drops at /opt/cpc/serve.sh; run it there to bring the dashboard up.
 #
 #    API : http://<host>:7700   (api/api.py — nodes, chat, deploys)
@@ -25,7 +25,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if [[ ! -d "$HERE/dist" ]]; then
-  echo "[ERROR] $HERE/dist not found — was this deployed with deploy-pluto-c2.sh pluto/.env?"
+  echo "[ERROR] $HERE/dist not found — was this deployed with deploy.sh pluto/.env?"
   exit 1
 fi
 

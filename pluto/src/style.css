@@ -32,6 +32,7 @@
   --surface-3:   #eef0f3;
   --line:        #e6e8ec;   /* quiet border */
   --line-strong: #d6d9df;
+  --tab-track:   rgba(238, 240, 243, 0.9);   /* frosted tab-switcher track */
 
   /* status (refined) */
   --ok:    #16a34a;
@@ -48,6 +49,44 @@
   --shadow-sm: 0 1px 2px rgba(16,24,40,0.05);
   --shadow:    0 1px 3px rgba(16,24,40,0.08), 0 1px 2px rgba(16,24,40,0.05);
   --shadow-md: 0 6px 16px rgba(16,24,40,0.10);
+}
+
+/* ── Dark theme ────────────────────────────────────────────────
+   Opt-in via data-theme="dark" on <html> (header switch). Flips the neutral
+   scale; the terracotta accent and status colours carry over. Built so a panel
+   films cleanly next to a console instead of blowing out white. */
+:root[data-theme="dark"] {
+  --color-bg:        #0e1116;
+  --color-primary:   #e8eaed;
+  --color-secondary: #bcc3d0;
+  --color-up:        #2ecc71;
+  --color-down:      #ef4d4d;
+  --color-border:    #272c36;
+
+  --accent:        #d07a5c;
+  --accent-hover:  #dd8a6b;
+  --accent-soft:   rgba(208, 122, 92, 0.18);
+
+  --text:        #e8eaed;
+  --text-muted:  #bcc3d0;
+  --text-faint:  #8b94a3;
+
+  --surface:     #161a21;
+  --surface-2:   #0e1116;
+  --surface-3:   #1d222b;
+  --line:        #272c36;
+  --line-strong: #39414e;
+  --tab-track:   rgba(22, 26, 33, 0.85);
+
+  --ok:    #22c55e;
+  --warn:  #f59e0b;
+  --bad:   #ef4444;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.5);
+  --shadow:    0 1px 3px rgba(0,0,0,0.55), 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-md: 0 6px 18px rgba(0,0,0,0.55);
+
+  color-scheme: dark;
 }
 
 /* ── Reset ─────────────────────────────────────────────────── */
