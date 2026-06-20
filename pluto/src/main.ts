@@ -12,8 +12,13 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', name: 'network', component: Blank },
-    { path: '/chat', name: 'chat', component: Blank },
-    { path: '/dreame', name: 'dreame', component: Blank },
+    { path: '/command', name: 'command', component: Blank },
+    { path: '/chat', redirect: '/command' },   // back-compat: Chat -> Command (C2)
+    // Control surface: source (event producer) / target (output sink) / mapping
+    // (control scheme). All three ride the URL so a reload restores the selection
+    // instead of dropping to a default (the old reload-to-Disabled trap).
+    { path: '/control/:source?/:target?/:mapping?', name: 'control', component: Blank },
+    { path: '/dreame', redirect: '/control/dreame' },   // back-compat
     // Anything else falls back to the network view.
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

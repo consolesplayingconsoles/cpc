@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import PetIcon from './PetIcon.vue'
 import type { NodeMap } from '../composables/useNodes'
 
@@ -43,27 +44,42 @@ interface DreameData {
 }
 
 const props = defineProps<{ name: string; active: boolean; nodes?: NodeMap }>()
-const emit = defineEmits<{ back: [] }>()
 
 // The local emulator output is a LAB-only feature — you emulate on the dev
 // workstation, never on the headless C2 box (which has no display/emulator).
 const isLab = import.meta.env.DEV
 const API = `http://${window.location.hostname}:7700`
+const route  = useRoute()
+const router = useRouter()
 
-// Output target: where the playback clock is sent. 'none' = just animate the map.
-// 'pi' (real console via the Raspberry Pi) is only offered when the pi node is
-// present; 'keyboard' drives an emulator via synthesized keys.
+// Output target + mapping live in the URL (/control/{source}/{target}/{mapping}),
+// so a reload/HMR restores the selection instead of dropping to a default -- the
+// old reload-to-Disabled trap. source is 'dreame' for this surface.
+const DRIVE_SOURCE  = 'dreame'
+const driveError    = ref('')
+const driveMappings = ref<string[]>([])
+
 const piPresent  = computed(() => {
   const n = props.nodes?.['pi']
   return !!n && n.status !== 'unconfigured'
 })
-const driveTarget   = ref<'none' | 'keyboard' | 'pi'>('none')
-const driveError    = ref('')
-// This tab drives the vacuum, so the mapping source is always 'dreame'. The
-// target (which controller to emulate) is chosen from the API list for that source.
-const DRIVE_SOURCE  = 'dreame'
-const driveMapping  = ref('gamecube')
-const driveMappings = ref<string[]>([])
+// Default output when the URL pins none: real console if the Pi's here, else the
+// Lab's local emulator, else nothing. Never silently 'Disabled'.
+const defaultTarget = computed<'none' | 'keyboard' | 'pi'>(() =>
+  piPresent.value ? 'pi' : isLab ? 'keyboard' : 'none')
+
+function controlPath(target: string, mapping: string) {
+  return ['/control', DRIVE_SOURCE, target, mapping].filter((x, i) => i < 2 || x).join('/')
+}
+// v-model-able selections, but the URL is the source of truth (survives reload).
+const driveTarget = computed<'none' | 'keyboard' | 'pi'>({
+  get: () => ((route.params.target as string) || defaultTarget.value) as 'none' | 'keyboard' | 'pi',
+  set: (v) => router.push(controlPath(v, (route.params.mapping as string) || driveMappings.value[0] || '')),
+})
+const driveMapping = computed<string>({
+  get: () => (route.params.mapping as string) || driveMappings.value[0] || '',
+  set: (v) => router.push(controlPath(driveTarget.value, v)),
+})
 // Output + Mapping selectors visible? Collapse them (settings toggle) so a
 // recording needn't reveal it's emulation — the drive keeps running regardless.
 const showDrive     = ref(true)
@@ -258,6 +274,7 @@ watch(driveTarget, (t) => {
   if (!driveMappings.value.length) fetchMappings()
   if (playing.value) startDrive()
 })
+watch(driveMapping, () => { if (playing.value && driveTarget.value !== 'none') startDrive() })
 watch(driveMapping, () => { if (playing.value) startDrive() })
 watch(() => props.active, (a) => { if (!a) pause() })
 
@@ -496,13 +513,6 @@ async function signIn() {
 
     <!-- ── top bar: live tile (cache-first; needs session) + actions ── -->
     <header class="rb-bar">
-      <button class="rb-back" title="Back to Network" @click="emit('back')">
-        <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <span>Network</span>
-      </button>
-      <span class="rb-back-sep" aria-hidden="true"></span>
       <div class="rb-id">
         <span class="rb-dot" :class="status" :title="dev?.online ? 'online' : 'offline'"/>
         <span class="rb-id-name">{{ dev?.name ?? name ?? 'Robutek' }}</span>
