@@ -139,7 +139,7 @@ payload_server() {
   # move) takes effect; ExecStart points at ${REMOTE_ROOT}/serve.sh.
   echo "##STEP:restart"
   if $SSH "[ -d /run/systemd/system ]"; then
-    if $SSH "cp ${REMOTE_ROOT}/deploy/pluto.service /etc/systemd/system/pluto.service && systemctl daemon-reload && systemctl enable pluto >/dev/null 2>&1 && systemctl restart pluto"; then
+    if $SSH "sudo -n cp ${REMOTE_ROOT}/deploy/pluto.service /etc/systemd/system/pluto.service && sudo -n systemctl daemon-reload && sudo -n systemctl enable pluto >/dev/null 2>&1 && sudo -n systemctl restart pluto"; then
       echo "restarted via systemd (pluto.service synced to ${REMOTE_ROOT})"
     else
       echo "[note] could not sync/restart the unit (needs root). Re-point it once:"
@@ -200,7 +200,7 @@ payload_hub() {
   echo "##STEP:restart"
   HUB_UNIT="${REMOTE_ROOT}/pluto-pi-hub/deploy/cpc-hub.service"
   if $SSH "[ -d /run/systemd/system ]"; then
-    if $SSH "cp ${HUB_UNIT} /etc/systemd/system/cpc-hub.service && systemctl daemon-reload && systemctl enable cpc-hub >/dev/null 2>&1 && systemctl restart cpc-hub"; then
+    if $SSH "sudo -n cp ${HUB_UNIT} /etc/systemd/system/cpc-hub.service && sudo -n systemctl daemon-reload && sudo -n systemctl enable cpc-hub >/dev/null 2>&1 && sudo -n systemctl restart cpc-hub"; then
       echo "restarted via systemd (cpc-hub.service synced to ${REMOTE_ROOT})"
     else
       echo "[note] could not sync/restart the unit (needs root). Re-point it once:"
