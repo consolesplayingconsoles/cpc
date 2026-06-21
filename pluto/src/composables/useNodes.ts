@@ -9,6 +9,8 @@ export type NodeStatus = 'up' | 'down' | 'unconfigured' | 'cloud'
 // see what each locally-deployed board is for.
 export interface PicoInfo {
   chipid: string
+  alias:  string          // human label (dreamcast, wii) -- the rename-in-Pluto handle; empty when not declared
+  iface:  string          // USB/HID profile the board presents: ps3 | generic | switch | xinput ... -- empty when not declared
   role:   string          // firmware / purpose
   conn:   string          // 'usb' | 'uart' -- empty when not declared (shown as unspecified)
   dev:    string          // uart device path (uart only)
