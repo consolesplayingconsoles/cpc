@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "pluto",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "pluto", "run", "dev", "--", "--port", "5174"],
+      "runtimeExecutable": "/usr/local/Cellar/node/26.0.0/bin/node",
+      "runtimeArgs": ["pluto/node_modules/vite/bin/vite.js", "pluto", "--host", "--port", "5174", "--strictPort"],
       "port": 5174
     }
   ]

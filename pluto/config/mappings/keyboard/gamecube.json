@@ -1,8 +1,11 @@
 {
-  "_comment": "Dreame events => GameCube pad, d-pad. Loaded via controller.load_mapping('dreame', 'gamecube_dpad'). INTENT: open-world 'just move' (e.g. Wind Waker) -- the vacuum's route becomes the character's walk, so locomotion is the WHOLE mapping: heading -> MAIN axis, nothing else. That axis is quantised onto the d-pad by every live sink (4/8-way, no true analog). Drive a GameCube emulator via the keyboard target, bind the d-pad to arrows. The capture layer emits turn/reposition/battery/pet; turn/reposition stay unbound (a turn is just a new heading), but pet -> a quick A press, so the character reacts when the clean detected a pet (placed at the route midpoint, since the data is a per-clean boolean). A more button-heavy game would be a different mapping over the same events.",
-  "controller": "GameCube pad (d-pad)",
+  "_comment": "Keyboard source -> GameCube pad. The on-screen keyboard renders THIS file. 'layout' col/row MIRROR the real controller: shoulder triggers L/R on the top row with Z in front of (left of) R, d-pad left, Start centre, the GC cluster (Y top, B left, A big centre, X right). Keys stay intuitive: WASD d-pad, IJKL cluster, O=Z, Q/P shoulders, Enter=Start. Digital buttons only -- the C-stick is analog and omitted. 'colors' = the real GameCube palette (green A, red B, grey X/Y, indigo Z, grey triggers). 'keys' = the emulator(keyboard)-target binding only (edit to your Dolphin profile).",
+  "controller": "GameCube",
   "controls": { "Enter": "START", "action": "A", "cancel": "B" },
-  "move_duty": 0.1,
+  "keys": {
+    "D_UP": "up", "D_DOWN": "down", "D_LEFT": "left", "D_RIGHT": "right",
+    "A": "x", "B": "z", "X": "c", "Y": "s", "Z": "d", "L": "q", "R": "e", "START": "enter"
+  },
   "layout": [
     { "key": "q", "btn": "L", "label": "L", "col": 2, "row": 1 },
     { "key": "o", "btn": "Z", "label": "Z", "col": 8, "row": 1 },
@@ -22,10 +25,5 @@
     "D_UP": "#54595f", "D_DOWN": "#54595f", "D_LEFT": "#54595f", "D_RIGHT": "#54595f",
     "A": "#43b14b", "B": "#d3242b", "X": "#cfd2d4", "Y": "#cfd2d4",
     "Z": "#6e4fb0", "START": "#9aa0a6"
-  },
-  "rules": {
-    "move": { "axis": "MAIN", "from": "vector" },
-    "pet":  { "pulse": "A", "ms": 120 },
-    "end":  { "release_all": true }
   }
 }

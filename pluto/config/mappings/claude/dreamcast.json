@@ -1,7 +1,11 @@
 {
-  "_comment": "Dreame events => Dreamcast, d-pad. The route's heading becomes a MAIN axis, but every live sink quantises that axis onto the d-pad (the Pico firmware is digital; the KeyboardSink holds arrow keys), so this is 4/8-way movement, NOT true analog -- nothing renders analog anymore. DEV: Flycast on Mac is SDL2 (NSEvent keyboard) -- bind the DC d-pad (or stick) to the Arrow keys; the KeyboardSink emits the arrows. PROD: the real hardware target (USB-to-Maple -> Dreamcast), so dev + prod use the same console. Face buttons aren't pressed by the route (move-only); the Control remote's Action/Cancel use the 'controls' block below. For a relative/tank-steer game instead, use dreamcast_dpad_tank.",
-  "controller": "Dreamcast (d-pad)",
+  "_comment": "Claude source -> Dreamcast pad. Claude owns its own mappings (per-input is the rule; dups with keyboard/ are fine). The on-screen keyboard renders THIS file. 'layout' col/row MIRROR the real controller: shoulder triggers L/R on the top row, d-pad left, Start centre, face diamond right (Y-top/X-left/B-right/A-bottom). Keys stay intuitive: WASD d-pad, IJKL face diamond, Q/P shoulders, Enter=Start. 'colors' = real controller colour: the DC face buttons ARE coloured (A red, B blue, X yellow, Y green); the d-pad, Start, triggers and analog are grey. 'controls' = Enter/action/cancel hotkeys. 'keys' = the emulator(keyboard)-target binding only; the pi target sends button names straight to the Pico.",
+  "controller": "Dreamcast",
   "controls": { "Enter": "START", "action": "A", "cancel": "B" },
+  "keys": {
+    "D_UP": "up", "D_DOWN": "down", "D_LEFT": "left", "D_RIGHT": "right",
+    "A": "a", "B": "b", "X": "x", "Y": "y", "L": "q", "R": "e", "START": "enter"
+  },
   "layout": [
     { "key": "q", "btn": "L", "label": "L", "col": 2, "row": 1 },
     { "key": "p", "btn": "R", "label": "R", "col": 8, "row": 1 },
@@ -20,9 +24,5 @@
     "D_UP": "#4b5058", "D_DOWN": "#4b5058", "D_LEFT": "#4b5058", "D_RIGHT": "#4b5058",
     "A": "#d63b34", "B": "#2d8ec9", "X": "#edba1f", "Y": "#36a657",
     "START": "#8a9099"
-  },
-  "rules": {
-    "move": { "axis": "MAIN", "from": "vector" },
-    "end":  { "release_all": true }
   }
 }

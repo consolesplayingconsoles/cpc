@@ -1,12 +1,14 @@
 <script setup lang="ts">
-// Control surface: parent of the source/target/mapping rail + a virtual remote down
-// the right side. Owns the three selections (all in the URL:
-// /control/{source}/{target}/{mapping}) and renders the source-specific child. Today
-// the only source is Dreame Cloud (Robutek); the rail is the seam for a keyboard source.
+// Control surface: parent of the source/target/(subtarget)/mapping rail. Owns the
+// selections (all in the URL: /control/{source}/{target}/{mapping}[/{pico}]) and renders
+// the source child: Dreame Cloud (Robutek), Keyboard only (ControlKeyboard), or Claude
+// (ClaudeControl). The on-screen keyboard is the one unified controller across all three.
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { NodeMap } from '../composables/useNodes'
 import Robutek from './Robutek.vue'
+import ControlKeyboard from './ControlKeyboard.vue'
+import ClaudeControl from './ClaudeControl.vue'
 
 const props = defineProps<{ active: boolean; nodes?: NodeMap; name?: string; showOffline?: boolean }>()
 const route  = useRoute()
@@ -14,10 +16,14 @@ const router = useRouter()
 const API = `http://${window.location.hostname}:7700`
 const isLab = import.meta.env.DEV
 
-// ── SOURCE — configured producers appear; an unconfigured one (no .env) is hidden
-// unless "Show unconfigured nodes" is on, matching the map/member-list behaviour. ──
+// ── SOURCE — the event producer. Dreame Cloud is a configured pinged node (hidden
+// when unconfigured unless "Show unconfigured" is on). Keyboard + Claude are manual
+// input modes, always available: a human at a keyboard, or the Claude collaboration
+// screen. ──
 const sourceList = computed(() => {
   const out: { id: string; label: string }[] = []
+  out.push({ id: 'keyboard', label: 'Keyboard only' })
+  out.push({ id: 'claude', label: 'Claude' })
   const d = props.nodes?.['dreame']
   if (d && (d.status !== 'unconfigured' || props.showOffline)) out.push({ id: 'dreame', label: 'Dreame Cloud' })
   return out
@@ -30,7 +36,7 @@ const piPresent = computed(() => {
   return !!n && n.status !== 'unconfigured'
 })
 const targetOptions = computed(() => [
-  { id: 'none', label: 'Nothing (map only)', disabled: false },
+  { id: 'none', label: 'No output', disabled: false },
   ...(isLab ? [{ id: 'keyboard', label: 'Emulator (virtual keyboard)', disabled: false }] : []),
   { id: 'pi', label: 'Console (Raspberry Pi)', disabled: !piPresent.value },
 ])
@@ -41,7 +47,10 @@ const target = computed(() => (route.params.target as string) || '')
 const mappings = ref<string[]>([])
 const mapping  = computed(() => (route.params.mapping as string) || '')
 async function fetchMappings(src: string) {
-  if (!src) { mappings.value = []; return }
+  // Clear FIRST so the previous source's list can't be used while the new one loads
+  // (a stale mapping would get written into this source's URL and 404 on fetch).
+  mappings.value = []
+  if (!src) return
   try {
     const r = await fetch(`${API}/mappings/${src}`)
     const j = await r.json().catch(() => null)
@@ -50,41 +59,66 @@ async function fetchMappings(src: string) {
 }
 watch(source, (s) => fetchMappings(s), { immediate: true })
 
-function path(s: string, t: string, m: string) {
-  return ['/control', s, t, m].filter((x, i) => i === 0 || x).join('/')
+function path(s: string, t: string, m: string, p = '') {
+  const segs = ['/control', s, t, m]
+  if (t === 'pi' && m && p) segs.push(p)   // pico = 4th positional param, only under target=pi (and needs mapping filled, since positional)
+  return segs.filter((x, i) => i === 0 || x).join('/')
 }
-function pick(level: 'source' | 'target' | 'mapping', v: string) {
-  if (level === 'source')  router.push(path(v, '', ''))            // new source resets t + m
-  else if (level === 'target')  router.push(path(source.value, v, mapping.value))
-  else                           router.push(path(source.value, target.value, v))
+// Each picker keeps the OTHER two dimensions populated in the URL by pushing the
+// resolved (effective) values, never the raw param -- otherwise changing the target
+// drops the mapping from the path even though the dropdown still shows it.
+function pick(level: 'source' | 'target' | 'mapping' | 'pico', v: string) {
+  if (level === 'source')  router.push(path(v, '', '', ''))                                          // new source resets the rest (canon refills)
+  else if (level === 'target')  router.push(path(source.value, v, effMapping.value, effPico.value))  // canon fills pico when v becomes pi
+  else if (level === 'mapping') router.push(path(source.value, effTarget.value, v, effPico.value))
+  else                          router.push(path(source.value, effTarget.value, effMapping.value, v)) // pico
 }
 
 const effTarget  = computed(() => target.value || defaultTarget.value)
-const effMapping = computed(() => mapping.value || mappings.value[0] || '')
+// Only honour the URL's mapping if it's valid for THIS source's list; otherwise fall
+// back to the first available. Kills the stale/invalid mapping that rendered blank.
+const effMapping = computed(() =>
+  (mapping.value && mappings.value.includes(mapping.value)) ? mapping.value : (mappings.value[0] || ''))
+
+// ── PICO — shows ONLY when target === 'pi': which of the node's UART picos to drive.
+// A 4th URL param appended AFTER mapping (the first three never move). Options are the
+// pi node's declared picos, labelled by the alias earned off the wires; the resolved
+// `dev` (ttyAMA4 / ttyAMA0) is what the drive actually routes on. ──
+const picoList = computed(() => {
+  const list = ((props.nodes?.['pi'] as any)?.picos as Array<{ chipid: string; alias?: string; dev?: string; conn?: string }> | undefined) || []
+  return list.filter(p => (p.conn || '').toLowerCase() === 'uart' && p.dev)
+             .map(p => ({ id: p.alias || p.chipid, label: p.alias || p.chipid, dev: p.dev as string }))
+})
+const pico     = computed(() => (route.params.pico as string) || '')
+const showPico = computed(() => effTarget.value === 'pi' && picoList.value.length > 0)
+const effPico  = computed(() => {
+  if (!showPico.value) return ''
+  const ids = picoList.value.map(p => p.id)
+  return (pico.value && ids.includes(pico.value)) ? pico.value : (ids[0] || '')
+})
+const picoDev  = computed(() => picoList.value.find(p => p.id === effPico.value)?.dev || '')
 
 // URL-canonicalization: write the resolved defaults INTO the url so the dropdowns and
 // the path never disagree. replace() = no history entry. With no source in the path
 // (bare /control), land on the first available source; only an empty roster leaves
 // the pick-a-source state. Then fill target + mapping defaults.
-watch([source, target, mapping, mappings, sourceList, () => props.active], () => {
+watch([source, target, mapping, pico, mappings, picoList, sourceList, () => props.active], () => {
   if (!props.active) return
   if (!source.value) {
-    if (sourceList.value.length) router.replace(path(sourceList.value[0].id, '', ''))
+    if (sourceList.value.length) router.replace(path(sourceList.value[0].id, '', '', ''))
     return
   }
-  const t = target.value || defaultTarget.value
-  const m = mapping.value || mappings.value[0] || ''
-  if (t !== target.value || (m && m !== mapping.value)) router.replace(path(source.value, t, m))
+  const t = effTarget.value
+  const m = effMapping.value
+  const p = effPico.value   // '' unless target==='pi' with picos available
+  // pico canon: under pi, the resolved pico must be in the URL; off pi, no pico segment may linger.
+  const picoMismatch = (t === 'pi') ? (!!p && p !== pico.value) : (pico.value !== '')
+  if (t !== target.value || (m && m !== mapping.value) || picoMismatch) router.replace(path(source.value, t, m, p))
 }, { immediate: true })
 
-// ── virtual remote: one-off button presses to the current target. Useful while a game
-// is PAUSED (the route only steers) -- navigate a menu, hit Start/Action by hand. Reuses
-// the backend `press` action; disabled when target = nothing (no output). ──
-const canPress = computed(() => !!source.value && effTarget.value !== 'none')
-
-// Control OWNS the drive-error surface: the Robutek child reports up via @drive-error,
-// and the remote's own presses report here too -- all shown in the shared control bar
-// rather than buried in a source. Auto-clears so a transient failure doesn't linger.
+// Control OWNS the drive-error surface: the source children (Robutek / ControlKeyboard /
+// ClaudeControl) report up via @drive-error, shown in the shared control bar rather than
+// buried in a source. Auto-clears so a transient failure doesn't linger.
 const controlError = ref('')
 let errTimer = 0
 function setError(msg: string) {
@@ -93,20 +127,6 @@ function setError(msg: string) {
   if (msg) errTimer = window.setTimeout(() => { controlError.value = '' }, 5000)
 }
 
-// `p` is {btn} for universal buttons (d-pad, START) or {key} for semantic ones
-// (action/cancel) that the BACKEND resolves to the mapped console's main/secondary
-// via the mapping's `controls` -- that's why the labels are generic, not "A"/"B".
-async function press(p: { btn?: string; key?: string }) {
-  if (!canPress.value) return
-  try {
-    const r = await fetch(`${API}/robutek/drive`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'press', target: effTarget.value, source: source.value, mapping: effMapping.value, ...p }),
-    })
-    const j = await r.json().catch(() => null)
-    setError(j && j.ok === false ? (j.error || 'press failed') : '')
-  } catch { setError('API unreachable') }
-}
 // Lab dev escape hatch: open this source's mapping folder in your IDE to edit schemes.
 function openMappingDir() {
   fetch(`${API}/config/open`, {
@@ -122,7 +142,6 @@ function openMappingDir() {
       <div class="rail">
         <label class="rail-ctl"><span>Source</span>
           <select :value="source" @change="pick('source', ($event.target as HTMLSelectElement).value)">
-            <option value="" disabled>Pick a source…</option>
             <option v-for="s in sourceList" :key="s.id" :value="s.id">{{ s.label }}</option>
           </select>
         </label>
@@ -132,6 +151,14 @@ function openMappingDir() {
             <option v-for="t in targetOptions" :key="t.id" :value="t.id" :disabled="t.disabled">{{ t.label }}</option>
           </select>
         </label>
+        <template v-if="showPico">
+          <span class="rail-arrow" aria-hidden="true">›</span>
+          <label class="rail-ctl"><span>Subtarget</span>
+            <select :value="effPico" @change="pick('pico', ($event.target as HTMLSelectElement).value)">
+              <option v-for="pc in picoList" :key="pc.id" :value="pc.id">{{ pc.label }}</option>
+            </select>
+          </label>
+        </template>
         <span class="rail-arrow" aria-hidden="true">›</span>
         <label class="rail-ctl" :class="{ off: !source || !mappings.length }"><span>Mapping</span>
           <select :value="effMapping" :disabled="!source || !mappings.length" @change="pick('mapping', ($event.target as HTMLSelectElement).value)">
@@ -148,34 +175,23 @@ function openMappingDir() {
         </button>
 
         <span v-if="controlError" class="rail-err mono" :title="controlError">{{ controlError }}</span>
-
-        <!-- virtual remote: right-aligned IN the control row (margin-left:auto),
-             controller-shaped: D-pad | Start | Action/Cancel. Hand-driven for when
-             the route is paused (it only steers). Sent to the current target;
-             disabled when target = Nothing. -->
-        <div class="remote" :class="{ off: !canPress }">
-          <div class="dpad">
-            <button class="pad-btn up"    :disabled="!canPress" @click="press({ btn: 'D_UP' })"    aria-label="D-pad up">▲</button>
-            <button class="pad-btn left"  :disabled="!canPress" @click="press({ btn: 'D_LEFT' })"  aria-label="D-pad left">◀</button>
-            <button class="pad-btn right" :disabled="!canPress" @click="press({ btn: 'D_RIGHT' })" aria-label="D-pad right">▶</button>
-            <button class="pad-btn down"  :disabled="!canPress" @click="press({ btn: 'D_DOWN' })"  aria-label="D-pad down">▼</button>
-          </div>
-          <button class="rmt-start" :disabled="!canPress" @click="press({ btn: 'START' })" title="Start (also the Enter hotkey)">Start</button>
-          <div class="faces">
-            <button class="rmt-face" :disabled="!canPress" @click="press({ key: 'action' })" title="Main action — the mapped console's primary button">Action</button>
-            <button class="rmt-face" :disabled="!canPress" @click="press({ key: 'cancel' })" title="Back / cancel — the mapped console's secondary button">Cancel</button>
-          </div>
-        </div>
       </div>
     </div>
 
     <div class="control-body">
       <div class="control-stage">
         <Robutek v-if="source === 'dreame'"
-          :source="source" :target="effTarget" :mapping="effMapping"
+          :source="source" :target="effTarget" :mapping="effMapping" :target-dev="effTarget === 'pi' ? picoDev : ''"
           :active="active" :nodes="nodes" :name="name || 'dreame'"
           @drive-error="setError" />
-        <div v-else class="control-empty">Pick a source to begin.</div>
+        <ControlKeyboard v-else-if="source === 'keyboard'"
+          :active="active" :map-source="source" :target="effTarget" :mapping="effMapping"
+          :target-dev="effTarget === 'pi' ? picoDev : ''"
+          @drive-error="setError" />
+        <ClaudeControl v-else-if="source === 'claude'"
+          :active="active" :nodes="nodes" :map-source="source" :target="effTarget" :mapping="effMapping"
+          :target-dev="effTarget === 'pi' ? picoDev : ''"
+          @drive-error="setError" />
       </div>
     </div>
   </div>
@@ -200,23 +216,7 @@ function openMappingDir() {
 .rail-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; color: var(--text-muted); background: transparent; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; transition: color .15s, border-color .15s, background .15s; }
 .rail-icon:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 
-/* body = the source stage (Robutek); the remote rides up in the control row above. */
+/* body = the source stage: Robutek / ControlKeyboard / ClaudeControl. */
 .control-body { display: flex; flex: 1 1 auto; min-height: 0; }
-.control-stage { flex: 1 1 auto; min-width: 0; position: relative; }
-.control-empty { display: grid; place-items: center; height: 100%; color: var(--text-muted); font-family: var(--font-sans); }
-
-/* virtual remote: a controller-shaped cluster (D-pad | Start | Action/Cancel),
-   right-aligned in the control row via margin-left:auto. */
-.remote { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-.remote.off { opacity: 0.5; }
-.dpad { display: grid; grid-template-columns: repeat(3, 24px); grid-template-rows: repeat(3, 24px); gap: 3px; }
-.pad-btn { display: inline-flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; padding: 0; }
-.pad-btn.up { grid-column: 2; grid-row: 1; } .pad-btn.left { grid-column: 1; grid-row: 2; }
-.pad-btn.right { grid-column: 3; grid-row: 2; } .pad-btn.down { grid-column: 2; grid-row: 3; }
-.rmt-start { min-width: 48px; font-family: var(--font-sans); font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: 7px; padding: 7px 12px; cursor: pointer; }
-.faces { display: flex; flex-direction: column; gap: 5px; }
-.rmt-face { min-width: 76px; font-family: var(--font-sans); font-size: 11.5px; font-weight: 600; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: 7px; padding: 6px 0; cursor: pointer; }
-.pad-btn:hover:not(:disabled), .rmt-start:hover:not(:disabled), .rmt-face:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.pad-btn:active:not(:disabled), .rmt-start:active:not(:disabled), .rmt-face:active:not(:disabled) { background: var(--accent-soft); }
-.pad-btn:disabled, .rmt-start:disabled, .rmt-face:disabled { cursor: default; opacity: 0.4; }
+.control-stage { flex: 1 1 auto; min-width: 0; min-height: 0; position: relative; }
 </style>

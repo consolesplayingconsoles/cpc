@@ -243,3 +243,5 @@ pluto/.vite/
 .DS_Store
 _Gemini*
 dc-test.sh
+dist
+.vite

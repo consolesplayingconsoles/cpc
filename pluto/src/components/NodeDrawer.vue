@@ -243,13 +243,17 @@ function postCommand(text: string) {
       <section v-if="picos.length" class="nd__sec">
         <p class="nd__lbl">Picos</p>
         <div v-for="p in picos" :key="p.chipid" class="nd__pico">
-          <!-- chip id is the board's identity — full, prominent, the lead line, copyable. -->
+          <!-- Title = alias (human name) when set, with the chip id shown after it in
+               parens (still nice to see the real id); just the chip id when no alias.
+               The copy button ALWAYS copies the chip id, whatever shows. -->
           <div class="nd__pico-id">
-            <span class="nd__pico-id-text">{{ p.chipid }}</span>
+            <span class="nd__pico-id-text" :class="{ 'is-alias': p.alias }">{{ p.alias || p.chipid }}</span>
+            <span v-if="p.alias" class="nd__pico-id-sub">({{ p.chipid }})</span>
             <CopyButton :text="p.chipid" :title="'copy chip id\n' + p.chipid" />
           </div>
           <div class="nd__pico-main">
             <span class="nd__pico-role">{{ p.role || 'unassigned' }}</span>
+            <span v-if="p.iface" class="nd__pico-badge is-iface" title="HID mode the board presents to the console (generic / ps3 / switch …)">{{ p.iface }}</span>
             <span class="nd__pico-badge" :class="deployClass(p.deploy)"
                   :title="p.deploy === 'pluto' ? 'Flashed by the Pluto deploy pipeline (firmware/' + p.role + '/ exists)'
                         : p.deploy === 'pi' ? 'Deployed locally on the Pi — Pluto does not flash it'
@@ -335,6 +339,10 @@ function postCommand(text: string) {
 .nd__pico { padding: 8px 10px; margin-bottom: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
 .nd__pico-id { display: flex; align-items: center; gap: 4px; margin-bottom: 5px; }
 .nd__pico-id-text { font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; color: var(--text); word-break: break-all; }
+/* an alias is a human NAME, not an ID -> sans + a touch larger; raw chip-id fallback stays mono. */
+.nd__pico-id-text.is-alias { font-family: var(--font-sans); font-size: 13.5px; word-break: normal; }
+/* the chip id shown after an alias: mono + muted, the data behind the name. */
+.nd__pico-id-sub { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); word-break: break-all; }
 .nd__pico-main { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
 .nd__pico-role { font-size: 13px; font-weight: 600; color: var(--text-muted); }
 /* Pills: every badge carries the SAME visible border (surface-3 fill, line-strong
@@ -343,5 +351,7 @@ function postCommand(text: string) {
 .nd__pico-badge { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--surface-3); color: var(--text); }
 .nd__pico-badge.is-pluto   { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
 .nd__pico-badge.is-unknown { color: var(--text-muted); background: transparent; border-style: dashed; }
+/* HID mode (generic/ps3/switch): the profile the board presents to the console. */
+.nd__pico-badge.is-iface { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
 .nd__pico-uart { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 </style>
