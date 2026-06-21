@@ -3,6 +3,26 @@
   "controller": "GameCube pad (d-pad)",
   "controls": { "Enter": "START", "action": "A", "cancel": "B" },
   "move_duty": 0.1,
+  "layout": [
+    { "key": "q", "btn": "L", "label": "L", "col": 2, "row": 1 },
+    { "key": "o", "btn": "Z", "label": "Z", "col": 8, "row": 1 },
+    { "key": "p", "btn": "R", "label": "R", "col": 9, "row": 1 },
+    { "key": "w", "btn": "D_UP",    "label": "Up",    "col": 2, "row": 2 },
+    { "key": "a", "btn": "D_LEFT",  "label": "Left",  "col": 1, "row": 3 },
+    { "key": "d", "btn": "D_RIGHT", "label": "Right", "col": 3, "row": 3 },
+    { "key": "s", "btn": "D_DOWN",  "label": "Down",  "col": 2, "row": 4 },
+    { "key": "Enter", "btn": "START", "label": "Start", "col": 5, "row": 3 },
+    { "key": "i", "btn": "Y", "label": "Y", "col": 8, "row": 2 },
+    { "key": "j", "btn": "B", "label": "B", "col": 7, "row": 3 },
+    { "key": "k", "btn": "A", "label": "A", "col": 8, "row": 3 },
+    { "key": "l", "btn": "X", "label": "X", "col": 9, "row": 3 }
+  ],
+  "colors": {
+    "L": "#9aa0a6", "R": "#9aa0a6",
+    "D_UP": "#54595f", "D_DOWN": "#54595f", "D_LEFT": "#54595f", "D_RIGHT": "#54595f",
+    "A": "#43b14b", "B": "#d3242b", "X": "#cfd2d4", "Y": "#cfd2d4",
+    "Z": "#6e4fb0", "START": "#9aa0a6"
+  },
   "rules": {
     "move": { "axis": "MAIN", "from": "vector" },
     "pet":  { "pulse": "A", "ms": 120 },

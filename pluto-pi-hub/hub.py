@@ -85,13 +85,17 @@ def build_bridges(cfg):
 IDLE_TIMEOUT = 6.0
 
 
-def _pump(conn, bridge, stop):
+def _pump(conn, bridges, stop):
     """Read newline-delimited JSON op-lists off one connection and apply them to the
-    bridge until the client closes (or SIGTERM). A blank line is a keepalive. On
-    prolonged silence, release everything once (the dead-man's switch); on any data,
-    re-arm. Always releases on the way out so a dropped link can't leave keys held."""
+    bridges until the client closes (or SIGTERM). Each op-list is ROUTED by the `dev`
+    the API tags onto its ops (multi-Pico); untagged or an unknown dev -> the first
+    bridge (back-compat single-pico path). A blank line is a keepalive. On prolonged
+    silence, release everything once (dead-man's switch); on any data, re-arm. Always
+    releases on the way out so a dropped link can't leave keys held."""
     import json
     import socket
+    by_dev = {b.device: b for b in bridges}
+    default = bridges[0]
     conn.settimeout(1.0)                    # so SIGTERM + the idle check are noticed
     buf = b""
     last = time.time()
@@ -101,9 +105,14 @@ def _pump(conn, bridge, stop):
             try:
                 chunk = conn.recv(4096)
             except socket.timeout:
-                if not released and time.time() - last > IDLE_TIMEOUT:
-                    bridge.release_all()
-                    released = True
+                if time.time() - last > IDLE_TIMEOUT:
+                    # Stale client: neutralise AND drop the connection so the single
+                    # accept slot frees up -- otherwise a lingering press-and-hold sink
+                    # squats it and every NEW drive (incl. the UI's) silently can't get
+                    # in. The real sink reconnects on its next op (_live_ensure remakes).
+                    for b in bridges:
+                        b.release_all()
+                    break
                 continue
             if not chunk:
                 break                       # client closed the connection
@@ -120,9 +129,12 @@ def _pump(conn, bridge, stop):
                 except (ValueError, UnicodeDecodeError):
                     continue                # ignore a garbled line, stay up
                 if ops:
-                    bridge.apply(ops)
+                    # Route by the dev the API tagged onto the ops; untagged/unknown -> first.
+                    dev = ops[0].get("dev") if isinstance(ops[0], dict) else None
+                    (by_dev.get(dev, default)).apply(ops)
     finally:
-        bridge.release_all()
+        for b in bridges:
+            b.release_all()
         try:
             conn.close()
         except Exception:
@@ -146,8 +158,8 @@ def serve(cfg):
     if not bridges:
         print("  serve: no controller bridge (no UART Pico in the .env) -- nothing to drive")
         return 0
-    bridge = bridges[0]          # the op stream drives the first UART Pico
-    bridge.start()                          # opens the UART, sends a neutral frame
+    for b in bridges:            # start ALL: the op stream routes to each by its dev
+        b.start()                           # opens the UART, sends a neutral frame
 
     stop = {"flag": False}
     def _term(*_):
@@ -160,8 +172,8 @@ def serve(cfg):
     srv.bind(("0.0.0.0", port))
     srv.listen(1)
     srv.settimeout(1.0)                     # so SIGTERM is noticed between accepts
-    print("CPC Pi-Hub op receiver up -- :%d -> %s (%s)" % (
-        port, bridge.name, bridge.device))
+    print("CPC Pi-Hub op receiver up -- :%d -> %s" % (
+        port, ", ".join("%s(%s)" % (b.name, b.device) for b in bridges)))
     try:
         while not stop["flag"]:
             try:
@@ -169,7 +181,7 @@ def serve(cfg):
             except socket.timeout:
                 continue
             print("  client %s:%d connected" % addr)
-            _pump(conn, bridge, stop)
+            _pump(conn, bridges, stop)
             print("  client gone -- released")
     finally:
         try:

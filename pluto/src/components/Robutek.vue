@@ -3,6 +3,7 @@ import { ref, computed, watch, onBeforeUnmount, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import PetIcon from './PetIcon.vue'
 import CopyButton from './CopyButton.vue'
+import ControlKeyboard from './ControlKeyboard.vue'
 import type { NodeMap } from '../composables/useNodes'
 
 interface Point { x: number; y: number }
@@ -50,6 +51,7 @@ interface DreameData {
 const props = defineProps<{
   name: string; active: boolean; nodes?: NodeMap
   source: string; target: string; mapping: string
+  targetDev?: string   // when target === 'pi': which pico's UART dev to route to (ttyAMA4/ttyAMA0)
 }>()
 // Drive errors are OWNED by the Control parent (shown in the shared control bar),
 // not here -- this child just reports them up. '' clears.
@@ -168,14 +170,9 @@ function onPlaybackKey(e: KeyboardEvent) {
   if (e.code === 'Space') {
     e.preventDefault(); e.stopPropagation(); togglePlay(); return
   }
-  if (e.key === 'Enter' && driveTarget.value !== 'none') {
-    // Hidden hotkey: Enter -> Start. The key->button binding lives in the mapping's
-    // `controls`; the route only steers, so this is how you dismiss a console menu
-    // (e.g. the DC's VMU-removed prompt) by hand. Natural reflex for anyone stuck.
-    e.preventDefault()
-    drivePost({ action: 'press', target: driveTarget.value, source: props.source, mapping: driveMapping.value, key: 'Enter' })
-    return
-  }
+  // Start (and every other button) now lives on the on-screen keyboard's full mapping,
+  // so there's no custom Enter hotkey here anymore. Arrow keys still get swallowed while
+  // driving so they can't scroll the page.
   if (driveTarget.value !== 'none' && e.key.indexOf('Arrow') === 0) e.preventDefault()
 }
 onMounted(() => {
@@ -194,10 +191,13 @@ onBeforeUnmount(() => {
 // Backend-paced: each play/seek/speed/target change (re)starts a paced replay at
 // the current clock offset, so the emulator/console stays in step with the map.
 async function drivePost(payload: Record<string, unknown>) {
+  // Route to the picked pico when driving the Pi: tag the batch with its dev (the API
+  // forwards it onto the ops; the hub frames to bridges[dev]). No-op for non-pi payloads.
+  const body = (payload.target === 'pi' && props.targetDev) ? { ...payload, dev: props.targetDev } : payload
   try {
     const r = await fetch(`${API}/robutek/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     })
     const j = await r.json().catch(() => null)
     emit('drive-error', j && j.ok === false ? (j.error || 'drive error') : '')
@@ -569,9 +569,9 @@ async function signIn() {
         {{ collapsed ? '›' : '‹' }}
       </button>
 
-      <!-- stage: map (+ video when present) -->
+      <!-- stage: map | side column (controller on top, robot clip below if present) -->
       <section class="rb-stage">
-        <div class="rb-map" :class="{ wide: !hasVideo }">
+        <div class="rb-map">
           <!-- the pet "encounter" is now a placed paw pin inside the route SVG
                (below), appearing as playback reaches the representative midpoint -->
 
@@ -644,12 +644,19 @@ async function signIn() {
           </template>
         </div>
 
-        <div v-if="hasVideo" class="rb-video">
-          <video ref="videoEl" :src="videoUrl || undefined" muted playsinline preload="auto"
-                 @loadedmetadata="syncVideo"></video>
-          <button class="rb-video-x" @click="clearVideo" title="Remove clip" aria-label="Remove clip">×</button>
-          <p class="rb-video-note"><strong>Actual footage:</strong> The game moves at the map's speed, which is constant because the robot stores the route but not the pace.</p>
-        </div>
+        <aside class="rb-side">
+          <div class="rb-ctrl">
+            <ControlKeyboard :active="active" :map-source="source" :target="target" :mapping="mapping"
+                             :target-dev="targetDev" compact heading="Manual Assistance"
+                             @drive-error="emit('drive-error', $event)" />
+          </div>
+          <div v-if="hasVideo" class="rb-video">
+            <video ref="videoEl" :src="videoUrl || undefined" muted playsinline preload="auto"
+                   @loadedmetadata="syncVideo"></video>
+            <button class="rb-video-x" @click="clearVideo" title="Remove clip" aria-label="Remove clip">×</button>
+            <p class="rb-video-note"><strong>Actual footage:</strong> The game moves at the map's speed, which is constant because the robot stores the route but not the pace.</p>
+          </div>
+        </aside>
       </section>
     </div>
 
@@ -823,7 +830,12 @@ async function signIn() {
   padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); cursor: pointer;
 }
 .rb-chip.off { opacity: 0.7; }
-.rb-video { width: 50%; position: relative; display: flex; flex-direction: column; gap: var(--sp-2); border-left: 1px solid var(--line); background: #000; padding: var(--sp-3); }
+/* right column: the unified on-screen controller on top, the robot clip below if
+   loaded. No clip -> the controller takes the whole column (dynamic). */
+.rb-side { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); }
+.rb-ctrl { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; background: var(--surface-2); }
+.rb-ctrl > * { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.rb-video { flex: 0 0 42%; min-height: 0; position: relative; display: flex; flex-direction: column; gap: var(--sp-2); border-top: 1px solid var(--line); background: #000; padding: var(--sp-3); }
 .rb-video video { flex: 1; min-height: 0; width: 100%; object-fit: contain; display: block; }
 .rb-video-note {
   flex-shrink: 0; margin: 0; padding-top: var(--sp-2);
@@ -862,13 +874,12 @@ async function signIn() {
 .rb-step:hover:not(:disabled) { border-color: var(--accent); }
 .rb-step:disabled { opacity: 0.4; cursor: default; }
 
-/* Tall/narrow window (e.g. Pluto docked beside an emulator): stack map over video
-   instead of side-by-side, so each keeps usable width. No video yet -> the map
-   just takes the whole stage as today; this only kicks in once a video pane
-   renders. */
+/* Tall/narrow window (e.g. Pluto docked beside an emulator): stack the map over the
+   side column so each keeps usable width; the side then runs controller | clip. */
 @media (max-aspect-ratio: 1 / 1) {
   .rb-stage { flex-direction: column; }
-  .rb-video { width: 100%; height: 42%; border-left: 0; border-top: 1px solid var(--line); }
+  .rb-side { flex-direction: row; flex: 0 0 auto; min-height: 220px; border-left: 0; border-top: 1px solid var(--line); }
+  .rb-video { flex: 1 1 0; border-top: 0; border-left: 1px solid var(--line); }
 }
 
 /* ── transport ── */

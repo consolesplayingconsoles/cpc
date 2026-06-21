@@ -396,9 +396,10 @@ def picos_from_env(cfg, fw_root=None):
     'usb'. `deploy` is DERIVED, never declared: a board is pluto-deployed IFF its role
     has firmware here -- the exact condition propagate.py flashes on -- so the badge
     reflects what pluto ACTUALLY does, not a flag that can drift. '' when we can't see
-    the firmware tree (a deployed node without the hub checkout). Sorted by chip id."""
+    the firmware tree (a deployed node without the hub checkout). In .env declaration
+    order (load_env preserves file order), so the UI mirrors the .env top-to-bottom."""
     out = []
-    for k in sorted(cfg):
+    for k in cfg:
         if not k.startswith("PICO_"):
             continue
         spec = parse_pico(cfg[k])
@@ -408,6 +409,8 @@ def picos_from_env(cfg, fw_root=None):
             deploy = "pluto" if os.path.exists(os.path.join(fw_root, role, "main.py")) else "pi"
         out.append({
             "chipid": k[len("PICO_"):],
+            "alias":  spec.get("alias", ""),    # human label (sega, nintendo) -- the rename-in-Pluto handle
+            "iface":  spec.get("iface", ""),    # USB profile the board presents: ps3 | switch | xinput ...
             "role":   role,
             "conn":   spec.get("conn", ""),     # usb | uart -- empty if not declared
             "dev":    spec.get("dev", ""),
@@ -553,8 +556,276 @@ def _mention_index(roster, chat_config):
 # working sink (KeyboardSink) needs pynput + macOS Accessibility -- so this whole
 # feature degrades to a clean JSON error anywhere but the dev Mac.
 _drive_lock  = threading.Lock()
-_drive_state = {"sink": None, "thread": None, "stop": None, "last_seen": 0.0}
+_drive_state = {"sink": None, "thread": None, "stop": None, "last_seen": 0.0,
+                "live_target": None}
 DRIVE_TIMEOUT = 6.0   # stop the drive if the frontend hasn't checked in for this long
+
+
+def _control_log_path():
+    """The WAIT/GO collaboration log -- a gitignored JSONL file (logs/*.log) that the
+    chat-agreed 'Claude plays the console' flow tails: GO = play, WAIT = stop. The
+    Claude source's big button appends here; Pluto only logs, it drives nothing off it.
+    Rooted at pluto/logs/ so it sits beside the app, never committed."""
+    d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    return os.path.normpath(os.path.join(d, "control.log"))
+
+
+# ── HDMI capture: the WHOLE point of the Claude source ────────────────────────
+# Claude plays a console; to *see* what's happening it reads a still frame off the
+# HDMI capture card. Claude is NOT allowed to start that capture itself -- Pluto owns
+# the camera lifecycle, and that ownership IS the abstraction/safety boundary. The
+# operator's GO starts a persistent ffmpeg that overwrites one rolling JPEG
+# (dist/latest.jpg); Claude only ever READS that file.
+#
+# Lifecycle is governed by a KILL-SWITCH FILE: dist/capture.flag (a tiny JSON
+# {"state","ts","by"}). Anyone may write it -- Pluto on GO, the open page as a
+# heartbeat, Claude bumping it on each frame read, or a manual Stop. A watchdog polls
+# it and kills ffmpeg when it reads "stop" or goes STALE (no refresh within
+# CAPTURE_STALE_SECS = everyone walked away). This is idle-on-read without trusting
+# the OS atime: the reader self-reports by touching the flag.
+_capture_lock  = threading.Lock()
+_capture_state = {"proc": None, "thread": None, "stop": None, "device": None, "started": 0.0}
+CAPTURE_STALE_SECS  = 180.0   # no flag refresh for this long => the session ended; stop
+# HARD PRIVACY RULE (paramount): capture is ONLY ever a real (non-camera) capture device,
+# matched BY NAME -- the NAME is the guarantee, the index is NOT (it shifts between sessions,
+# so "never index 0" was wrong and is gone). Prefer this card; never a camera/mic.
+CAPTURE_DEVICE_NAME = os.environ.get("CAPTURE_DEVICE_NAME", "USB3 Video")
+
+# NOGO KEYWORDS (user rule, 2026-06-21): the camera check applies to EVERY device -- any
+# whose name contains one of these is NEVER a valid source, whatever CAPTURE_DEVICE_NAME
+# says and whatever index it sits at. If every input is a camera, capture FAILS rather than
+# ever falling back to one.
+CAPTURE_NOGO_KEYWORDS = ("camera", "facetime", "built-in", "builtin", "microphone")
+# Screen-grab inputs ("Capture screen N") are non-camera but they record the DESKTOP, not
+# the console feed -- excluded from the auto-fallback so GO can never silently film the
+# screen. (Set CAPTURE_ALLOW_SCREEN=1 to include them.)
+CAPTURE_SCREEN_KEYWORDS = ("capture screen",)
+
+def _capture_name_forbidden(dev_name):
+    low = (dev_name or "").lower()
+    return any(k in low for k in CAPTURE_NOGO_KEYWORDS)
+
+
+# Resolved at import (NOT lazily): the atexit capture-stop runs during interpreter
+# shutdown, when module globals like __file__ are already torn down -- computing it then
+# raised NameError. Cache it now while __file__ is still live.
+_REPO_DIST = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "dist"))
+
+
+def _dist_dir():
+    """Repo-root dist/ (gitignored) -- the build/byproduct drawer."""
+    return _REPO_DIST
+
+
+def _capture_dir():
+    """dist/capture/ -- all live-capture artifacts namespaced under one dir (the
+    rolling frame + the kill-switch flag), so dist/ stays tidy."""
+    return os.path.join(_dist_dir(), "capture")
+
+
+def _capture_frame_path(): return os.path.join(_capture_dir(), "latest.jpg")
+def _capture_flag_path():  return os.path.join(_capture_dir(), "state.flag")
+
+
+def _flag_write(state, by):
+    """Atomically write the kill-switch flag. state is 'go' | 'stop'."""
+    rec = {"state": state, "ts": round(time.time(), 3), "by": by}
+    try:
+        os.makedirs(_capture_dir(), exist_ok=True)
+        tmp = _capture_flag_path() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(json.dumps(rec))
+        os.replace(tmp, _capture_flag_path())
+    except OSError:
+        pass
+    return rec
+
+
+def _flag_read():
+    try:
+        with open(_capture_flag_path(), encoding="utf-8") as f:
+            return json.loads(f.read() or "{}")
+    except (OSError, ValueError):
+        return None
+
+
+def _list_video_devices():
+    """Parsed avfoundation VIDEO inputs as [(index, name)]. Read-only enumeration."""
+    try:
+        out = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-f", "avfoundation",
+             "-list_devices", "true", "-i", ""],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
+        text = out.stdout.decode("utf-8", "replace")
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError("can't list capture devices (is ffmpeg installed?): %s" % exc)
+    devs, in_video = [], False
+    for line in text.splitlines():
+        low = line.lower()
+        if "avfoundation video devices" in low:
+            in_video = True;  continue
+        if "avfoundation audio devices" in low:
+            in_video = False; continue
+        if in_video:
+            m = re.search(r"\[(\d+)\]\s+(.*\S)", line)
+            if m:
+                devs.append((m.group(1), m.group(2).strip()))
+    return devs
+
+
+def _capture_candidates():
+    """Ordered acceptable capture devices [(index, name)]. HARD PRIVACY RULE: the camera
+    check applies to EVERY device -- reject any whose name says camera/built-in/mic. The
+    NAME is the only guarantee; the index shifts between sessions and is never trusted.
+    Prefer the configured card name, then ANY other non-camera video input as recovery.
+    If nothing non-camera is left (e.g. every input is a camera) raise -- capture never
+    falls back to a camera."""
+    allow_screen = os.environ.get("CAPTURE_ALLOW_SCREEN", "") == "1"
+    def ok(n):
+        low = (n or "").lower()
+        if _capture_name_forbidden(n):
+            return False
+        if not allow_screen and any(k in low for k in CAPTURE_SCREEN_KEYWORDS):
+            return False            # screen-grab records the desktop, not the console feed
+        return True
+    safe = [(i, n) for (i, n) in _list_video_devices() if ok(n)]
+    want = CAPTURE_DEVICE_NAME.lower()
+    cands = ([(i, n) for (i, n) in safe if n.lower() == want] +
+             [(i, n) for (i, n) in safe if n.lower() != want])
+    if not cands:
+        raise ValueError("No non-camera capture device present. Stopping to protect your privacy.")
+    return cands
+
+
+def _capture_terminate(proc):
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=2.0)
+        except Exception:
+            proc.kill()
+    except Exception:
+        pass
+
+
+def _capture_clear(proc):
+    with _capture_lock:
+        if _capture_state.get("proc") is proc:
+            _capture_state.update(proc=None, thread=None, stop=None, device=None, started=0.0)
+
+
+def _capture_running():
+    with _capture_lock:
+        proc = _capture_state.get("proc")
+    return bool(proc and proc.poll() is None)
+
+
+def _capture_watchdog(proc, stop):
+    """Poll the kill-switch flag every few seconds; stop ffmpeg when it dies on its
+    own, when the flag says 'stop'/is missing, or when it has gone stale."""
+    while not stop.wait(3.0):
+        if proc.poll() is not None:                 # ffmpeg exited by itself
+            _flag_write("stop", "ffmpeg-exit")
+            _capture_clear(proc)
+            return
+        flag = _flag_read()
+        ts = (flag or {}).get("ts", 0.0)
+        stale = (time.time() - ts) > CAPTURE_STALE_SECS if ts else True
+        if flag is None or flag.get("state") == "stop" or stale:
+            _capture_terminate(proc)
+            _flag_write("stop", "stale" if stale else "flag-stop")
+            _capture_clear(proc)
+            return
+
+
+def _capture_try(name, frame):
+    """Start ffmpeg on ONE non-camera device (BY NAME, never index -- a name matches
+    atomically inside ffmpeg and can't slide onto the camera between enumerate and launch)
+    and VERIFY it actually captures: the process must stay up AND write a FRESH frame within
+    a short grace. On success leaves the live state + watchdog running and returns
+    (True, ""); on failure terminates the process and returns (False, reason) so the caller
+    can try the next device. Low-res by design (console video): 1280x720@10, don't tune."""
+    cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+           "-f", "avfoundation", "-video_size", "1280x720", "-framerate", "10",
+           "-pixel_format", "uyvy422", "-i", name, "-update", "1", "-y", frame]
+    t0 = time.time()
+    try:
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        return False, "ffmpeg failed to start: %s" % exc
+    captured = False
+    deadline = t0 + 4.0   # a valid device opens + writes a frame in ~1-2s (avfoundation warm-up); a bad/busy one exits fast
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            return False, "ffmpeg exited (rc=%s)" % proc.returncode
+        try:
+            if os.path.getmtime(frame) >= t0:
+                captured = True
+                break
+        except OSError:
+            pass
+        time.sleep(0.2)
+    if not captured:
+        _capture_terminate(proc)
+        return False, "no frame produced in time"
+    stop = threading.Event()
+    with _capture_lock:
+        _capture_state.update(proc=proc, stop=stop, device=name, started=time.time())
+    _flag_write("go", "pluto-start")
+    th = threading.Thread(target=_capture_watchdog, args=(proc, stop), daemon=True)
+    with _capture_lock:
+        _capture_state["thread"] = th
+    th.start()
+    print("  [capture] started %s -> %s" % (name, frame))
+    return True, ""
+
+
+def _capture_start():
+    """Start the persistent HDMI capture (idempotent). Tries each NON-camera device in
+    turn (configured card first, then any other) and keeps the first that actually
+    captures -- recover, don't error on the first miss. Returns (ok, info|error_str)."""
+    if _capture_running():
+        _flag_write("go", "go-refresh")
+        with _capture_lock:
+            return True, {"running": True, "device": _capture_state["device"], "reused": True}
+    try:
+        cands = _capture_candidates()
+    except ValueError as exc:
+        return False, str(exc)
+    frame = _capture_frame_path()
+    try:
+        os.makedirs(_capture_dir(), exist_ok=True)
+    except OSError:
+        pass
+    errors = []
+    for idx, name in cands:
+        ok, err = _capture_try(name, frame)
+        if ok:
+            return True, {"running": True, "device": name, "frame": frame}
+        errors.append("%s[%s]: %s" % (name, idx, err))
+    return False, "no working capture device (tried %d) -> %s" % (len(cands), " | ".join(errors))
+
+
+def _capture_stop(reason="manual"):
+    with _capture_lock:
+        proc = _capture_state.get("proc")
+        stop = _capture_state.get("stop")
+    if stop:
+        stop.set()
+    if proc:
+        _capture_terminate(proc)
+        _capture_clear(proc)
+        print("  [capture] stopped (%s)" % reason)
+    _flag_write("stop", reason)
+
+
+atexit.register(lambda: _capture_stop("shutdown"))
 
 
 def _drive_libs():
@@ -570,6 +841,7 @@ def _drive_stop():
         st = _drive_state
         stop, th, sink = st["stop"], st["thread"], st["sink"]
         st["stop"] = st["thread"] = st["sink"] = None
+        st["live_target"] = None
     if stop:
         stop.set()
     if th:
@@ -853,6 +1125,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parts and parts[0] == "mappings":
             self._handle_mappings(parts)
 
+        elif parsed.path == "/control/signal":
+            self._handle_control_signal_get()
+
+        elif parsed.path == "/control/capture":
+            self._handle_capture_status()
+
         else:
             self._send(404, {"error": "not found"})
 
@@ -890,6 +1168,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_dreame_logout()
         elif parsed.path == "/robutek/drive":
             self._handle_drive()
+        elif parsed.path == "/control/signal":
+            self._handle_control_signal()
+        elif parsed.path == "/control/capture":
+            body = self._read_json_body()
+            if body is not None:
+                self._handle_capture(body)
         elif len(parts) == 2 and parts[0] == "workspace":
             self._handle_open(action=parts[0], target_node=parts[1])
         elif parsed.path == "/config/open":
@@ -1086,7 +1370,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not host or not port:
                     self._send(200, {"ok": False, "error": "pi node has no HOST_IP/PI_BRIDGE_PORT"})
                     return
-                sink = controller.NetworkSink(host, port)
+                sink = controller.NetworkSink(host, port, dev=body.get("dev"))
             elif target == "keyboard":
                 sink = controller.KeyboardSink(button_keys=mapping.get("keys"))
             else:
@@ -1103,6 +1387,197 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 pass
         self._send(200, {"ok": True, "pressed": btn, "via": "transient"})
+
+    def _read_json_body(self):
+        """Parse a JSON request body, or send 400 and return None."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            return json.loads(self.rfile.read(length)) if length else {}
+        except (ValueError, json.JSONDecodeError):
+            self._send(400, {"error": "invalid json"})
+            return None
+
+    def _handle_control_signal(self):
+        """POST /control/signal {state:'wait'|'go', source, target, mapping}. Appends
+        one JSONL line to the gitignored collaboration log (logs/control.log) that the
+        chat-agreed 'Claude plays the console' flow tails: GO = play, WAIT = stop.
+        GO also STARTS the HDMI capture (Claude can't -- Pluto owns that); WAIT only
+        logs, it never stops the stream (the capture.flag kill-switch does)."""
+        body = self._read_json_body()
+        if body is None:
+            return
+        state = str(body.get("state", "")).strip().lower()
+        if state not in ("wait", "go"):
+            self._send(400, {"error": "state must be 'wait' or 'go'"})
+            return
+        rec = {"ts": round(time.time(), 3),
+               "iso": datetime.now().isoformat(timespec="seconds"),
+               "state": state,
+               "source": str(body.get("source", "")) or None,
+               "target": str(body.get("target", "")) or None,
+               "mapping": str(body.get("mapping", "")) or None,
+               "by": self._identify()}
+        try:
+            with open(_control_log_path(), "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec) + "\n")
+        except OSError as exc:
+            self._send(200, {"ok": False, "error": "log write failed: %s" % exc})
+            return
+        print("  [control] %s (%s)" % (state.upper(), rec["by"] or "?"))
+        resp = {"ok": True, "state": state}
+        if state == "go":                          # GO begins the session -> roll capture
+            ok, info = _capture_start()
+            resp["capture"] = info if ok else {"error": info}
+        self._send(200, resp)
+
+    def _handle_control_signal_get(self):
+        """GET /control/signal -> the latest logged WAIT/GO record (or null). A cheap
+        point-read of the collaboration log's tail."""
+        last = None
+        try:
+            with open(_control_log_path(), encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        last = line
+        except OSError:
+            last = None
+        rec = None
+        if last:
+            try:
+                rec = json.loads(last)
+            except ValueError:
+                rec = None
+        self._send(200, {"latest": rec})
+
+    def _handle_capture(self, body):
+        """POST /control/capture {action}. start (idempotent) | stop | keepalive.
+        Pluto owns the capture lifecycle so Claude can't -- start is reachable only
+        through Pluto (and is what GO triggers). Keepalive bumps the kill-switch flag
+        so an open page keeps a running capture alive."""
+        action = str(body.get("action", "")).strip()
+        if action == "start":
+            ok, info = _capture_start()
+            if ok:
+                resp = {"ok": True}
+                resp.update(info)
+                self._send(200, resp)
+            else:
+                self._send(200, {"ok": False, "error": info})
+        elif action == "stop":
+            _capture_stop("stop-button")
+            self._send(200, {"ok": True, "running": False})
+        elif action == "keepalive":
+            running = _capture_running()
+            flag = _flag_read()
+            if running and flag and flag.get("state") == "go":
+                _flag_write("go", "keepalive")     # don't resurrect a stopped capture
+            self._send(200, {"ok": True, "running": running})
+        else:
+            self._send(400, {"error": "unknown capture action"})
+
+    def _handle_capture_status(self):
+        """GET /control/capture -> {running, device, started, flag, frame_mtime}."""
+        with _capture_lock:
+            proc = _capture_state.get("proc")
+            info = {"running": bool(proc and proc.poll() is None),
+                    "device": _capture_state.get("device"),
+                    "started": _capture_state.get("started") or None}
+        info["flag"] = _flag_read()
+        try:
+            info["frame_mtime"] = round(os.path.getmtime(_capture_frame_path()), 3)
+        except OSError:
+            info["frame_mtime"] = None
+        self._send(200, info)
+
+    def _make_sink(self, controller, target, mapping, dev=None):
+        """Open a FRESH sink for `target` (pi -> NetworkSink to the hub; keyboard ->
+        KeyboardSink for a local emulator). `dev` selects WHICH pico when the Pi runs
+        more than one (the hub routes by it); None = the hub's default bridge. Raises
+        ValueError(msg) on a bad or unreachable target so callers return a clean JSON error."""
+        if target == "pi":
+            pi_cfg = self.__class__.node_roster.get("pi") or {}
+            host = pi_cfg.get("HOST_IP", "").strip()
+            port = pi_cfg.get("PI_BRIDGE_PORT", "").strip()
+            if not host or not port:
+                raise ValueError("pi node has no HOST_IP/PI_BRIDGE_PORT in its .env")
+            try:
+                return controller.NetworkSink(host, port, dev=dev)
+            except Exception as exc:
+                raise ValueError("can't reach the Pi receiver at %s:%s (%s) -- is the "
+                                 "hub up (run.sh serve / cpc-hub.service)?" % (host, port, exc))
+        if target == "keyboard":
+            try:
+                return controller.KeyboardSink(button_keys=mapping.get("keys"))
+            except Exception as exc:
+                raise ValueError("keyboard sink: %s -- pip install pynput + grant the "
+                                 "terminal Accessibility" % exc)
+        raise ValueError("unknown target: %s" % target)
+
+    def _live_ensure(self, controller, target, mapping, dev=None):
+        """Ensure a PERSISTENT live-input sink for `target` is open (held across
+        keydowns for true press-and-hold) with a watchdog that releases everything if
+        the page goes quiet. Unlike a paced replay there's no drive thread -- just a
+        held sink + watchdog reusing the single _drive_state slot (so it tears down any
+        running replay first). Returns the sink; raises ValueError on a bad target."""
+        with _drive_lock:
+            sink = _drive_state.get("sink")
+            if sink is not None and _drive_state.get("live_target") == target and _drive_state.get("live_dev") == dev:
+                _drive_state["last_seen"] = time.time()
+                return sink
+        _drive_stop()                      # no sink, target changed, or pico changed: drop any prior drive
+        sink = self._make_sink(controller, target, mapping, dev=dev)
+        stop = threading.Event()
+
+        def watchdog():
+            while not stop.wait(2.0):
+                with _drive_lock:
+                    current = _drive_state.get("stop") is stop
+                    last = _drive_state.get("last_seen", 0.0)
+                if not current:
+                    return                 # a newer drive/live-session took over
+                if time.time() - last > DRIVE_TIMEOUT:
+                    _drive_stop()
+                    return
+
+        with _drive_lock:
+            _drive_state.update(sink=sink, thread=None, stop=stop,
+                                last_seen=time.time(), live_target=target, live_dev=dev)
+        threading.Thread(target=watchdog, daemon=True).start()
+        return sink
+
+    def _handle_hold(self, body):
+        """POST /robutek/drive {action:'hold', down, btn|key, target, source, mapping}.
+        Live press/release: down=true holds the button, down=false releases it. The
+        button resolves from an explicit `btn` or a `key` via the mapping's `controls`.
+        Keepalive (the page heartbeat) keeps the held sink alive between keystrokes."""
+        try:
+            controller, _ = _drive_libs()
+        except Exception as exc:
+            self._send(200, {"ok": False, "error": "drive libs: %s" % exc})
+            return
+        try:
+            mapping = controller.load_mapping(body.get("source") or "keyboard",
+                                              body.get("mapping") or "")
+        except Exception as exc:
+            self._send(200, {"ok": False, "error": "mapping: %s" % exc})
+            return
+        btn = body.get("btn") or (mapping.get("controls") or {}).get(body.get("key") or "")
+        if not btn:
+            self._send(200, {"ok": True, "ignored": body.get("key")})   # unbound key: no-op
+            return
+        try:
+            sink = self._live_ensure(controller, body.get("target"), mapping, dev=body.get("dev"))
+        except ValueError as exc:
+            self._send(200, {"ok": False, "error": str(exc)})
+            return
+        op = "press" if body.get("down") else "release"
+        try:
+            sink.apply([{"op": op, "btn": btn}])
+        except Exception as exc:
+            self._send(200, {"ok": False, "error": "%s: %s" % (op, exc)})
+            return
+        self._send(200, {"ok": True, op: btn})
 
     def _handle_drive(self):
         """POST /robutek/drive {action, target, session, t, speed, mapping}.
@@ -1126,9 +1601,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if action == "keepalive":
             # heartbeat from the playing page; the watchdog stops the drive if these
-            # go silent (browser closed/crashed before a 'pause' reached us).
+            # go silent (browser closed/crashed before a 'pause' reached us). Also FORWARD
+            # it to the live sink so the Pi-Hub doesn't idle-release a HELD input after ~6s
+            # ("works a bit then stops" on press-and-hold). No-op on sinks without keepalive.
             with _drive_lock:
                 _drive_state["last_seen"] = time.time()
+                live = _drive_state.get("sink")
+            if live is not None:
+                try:
+                    live.keepalive()
+                except Exception:
+                    pass
             self._send(200, {"ok": True})
             return
         if action == "press":
@@ -1137,6 +1620,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # you dismiss a console menu (e.g. the DC's VMU-removed prompt) by hand. Goes
             # through the LIVE drive if one's running, else a transient link to the target.
             self._handle_press(body)
+            return
+        if action == "hold":
+            # Live press-and-HOLD for the keyboard/Claude sources: keydown holds the
+            # button, keyup releases it, over a persistent sink so movement sustains.
+            self._handle_hold(body)
             return
         if action != "play":
             self._send(400, {"error": "unknown action"})
@@ -1170,7 +1658,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "error": "pi node has no HOST_IP/PI_BRIDGE_PORT in its .env"})
                 return
             try:
-                sink = controller.NetworkSink(host, port)
+                sink = controller.NetworkSink(host, port, dev=body.get("dev"))
             except Exception as exc:
                 self._send(200, {"ok": False,
                     "error": "can't reach the Pi receiver at %s:%s (%s) -- is the hub up "

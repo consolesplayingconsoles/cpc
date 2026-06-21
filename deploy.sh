@@ -118,9 +118,10 @@ payload_server() {
   tar --no-xattrs --no-fflags --no-mac-metadata -cf - nodes/cloud/*/.env.sample \
       | $SSH "tar -xf - --strip-components=1 -C /opt/nodes"
 
-  # Local LAN nodes: the server pings them, so it needs identity + IP, but it never
-  # deploys (that's the Lab), so ship a SANITISED .env -- identity/IP/display only,
-  # SSH + deploy creds + workspace path stripped. Placeholders ship their .sample.
+  # Local LAN nodes: the server pings them AND drives them (C2 dials each node's op
+  # receiver), so it needs identity + IP + bridge port -- but it never DEPLOYS (that's
+  # the Lab), so ship a SANITISED .env: identity/IP/display + the non-secret bridge
+  # port, with SSH + deploy creds + workspace path stripped. Placeholders ship .sample.
   $SSH "rm -rf /opt/nodes/local && mkdir -p /opt/nodes/local"
   if ls nodes/local/*/.env.sample >/dev/null 2>&1; then
     tar --no-xattrs --no-fflags --no-mac-metadata -cf - nodes/local/*/.env.sample \
@@ -129,7 +130,7 @@ payload_server() {
   for envf in nodes/local/*/.env; do
     [ -f "$envf" ] || continue
     name=$(basename "$(dirname "$envf")")
-    grep -E '^(NODE_NAME|HOST_IP|UI_PRIMARY_COLOR|UI_SECONDARY_COLOR|SMB_PATH|OS)=' "$envf" \
+    grep -E '^(NODE_NAME|HOST_IP|PI_BRIDGE_PORT|UI_PRIMARY_COLOR|UI_SECONDARY_COLOR|SMB_PATH|OS)=' "$envf" \
         | $SSH "mkdir -p /opt/nodes/local/${name} && cat > /opt/nodes/local/${name}/.env"
   done
   echo "sync ok"

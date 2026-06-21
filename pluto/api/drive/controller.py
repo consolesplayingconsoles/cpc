@@ -323,7 +323,7 @@ class NetworkSink(Sink):
     stdlib, 3.6+, ASCII.
     """
 
-    def __init__(self, host, port, timeout=4.0):
+    def __init__(self, host, port, timeout=4.0, dev=None):
         super(NetworkSink, self).__init__()
         import socket
         sock = socket.create_connection((host, int(port)), timeout=timeout)
@@ -331,11 +331,18 @@ class NetworkSink(Sink):
         sock.settimeout(None)               # blocking writes once connected
         self._sock = sock
         self._closed = False
+        # Which Pico to route to when the Pi runs more than one (multi-UART). None =
+        # let the hub use its default (first) bridge -- back-compatible single-pico path.
+        self._dev = dev or None
 
     def _send(self, obj):
         if self._closed:
             return
         import json
+        # Tag every op with the target dev so the hub frames it to bridges[dev]; done
+        # centrally here so apply() AND release_all() both route to the right Pico.
+        if self._dev and isinstance(obj, list):
+            obj = [dict(o, dev=self._dev) if isinstance(o, dict) else o for o in obj]
         try:
             self._sock.sendall((json.dumps(obj) + "\n").encode("ascii"))
         except OSError:
@@ -347,6 +354,19 @@ class NetworkSink(Sink):
         # one op so the press/release sleep happens at the hardware, not over the net.
         if ops:
             self._send(ops)
+
+    def keepalive(self):
+        # A bare newline: the Pi-Hub's _pump treats an empty line as a no-op but it
+        # resets the idle clock -- so a HELD input isn't neutralised (and the connection
+        # isn't dropped) while the page is paused-but-alive. Without forwarding the UI's
+        # heartbeat here, the hub releases after ~6s of no ops: the "works a bit then
+        # stops for a long time" symptom on press-and-hold.
+        if self._closed:
+            return
+        try:
+            self._sock.sendall(b"\n")
+        except OSError:
+            self._closed = True
 
     def release_all(self):
         # Terminal: tell the Pi to neutralise, then drop the link (its watchdog would

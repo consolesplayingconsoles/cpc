@@ -1,0 +1,29 @@
+{
+  "_comment": "Claude source -> GameCube pad. Claude owns its own mappings (per-input is the rule; dups with keyboard/ are fine). 'layout' col/row MIRROR the real controller: shoulder triggers L/R on the top row with Z in front of (left of) R, d-pad left, Start centre, the GC cluster (Y top, B left, A big centre, X right). Keys stay intuitive: WASD d-pad, IJKL cluster, O=Z, Q/P shoulders, Enter=Start. Digital buttons only -- the analog C-stick is omitted. 'colors' = the real GameCube palette (green A, red B, grey X/Y, indigo Z, grey triggers). 'keys' = the emulator(keyboard)-target binding only.",
+  "controller": "GameCube",
+  "controls": { "Enter": "START", "action": "A", "cancel": "B" },
+  "keys": {
+    "D_UP": "up", "D_DOWN": "down", "D_LEFT": "left", "D_RIGHT": "right",
+    "A": "x", "B": "z", "X": "c", "Y": "s", "Z": "d", "L": "q", "R": "e", "START": "enter"
+  },
+  "layout": [
+    { "key": "q", "btn": "L", "label": "L", "col": 2, "row": 1 },
+    { "key": "o", "btn": "Z", "label": "Z", "col": 8, "row": 1 },
+    { "key": "p", "btn": "R", "label": "R", "col": 9, "row": 1 },
+    { "key": "w", "btn": "D_UP",    "label": "Up",    "col": 2, "row": 2 },
+    { "key": "a", "btn": "D_LEFT",  "label": "Left",  "col": 1, "row": 3 },
+    { "key": "d", "btn": "D_RIGHT", "label": "Right", "col": 3, "row": 3 },
+    { "key": "s", "btn": "D_DOWN",  "label": "Down",  "col": 2, "row": 4 },
+    { "key": "Enter", "btn": "START", "label": "Start", "col": 5, "row": 3 },
+    { "key": "i", "btn": "Y", "label": "Y", "col": 8, "row": 2 },
+    { "key": "j", "btn": "B", "label": "B", "col": 7, "row": 3 },
+    { "key": "k", "btn": "A", "label": "A", "col": 8, "row": 3 },
+    { "key": "l", "btn": "X", "label": "X", "col": 9, "row": 3 }
+  ],
+  "colors": {
+    "L": "#9aa0a6", "R": "#9aa0a6",
+    "D_UP": "#54595f", "D_DOWN": "#54595f", "D_LEFT": "#54595f", "D_RIGHT": "#54595f",
+    "A": "#43b14b", "B": "#d3242b", "X": "#cfd2d4", "Y": "#cfd2d4",
+    "Z": "#6e4fb0", "START": "#9aa0a6"
+  }
+}

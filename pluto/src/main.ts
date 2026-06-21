@@ -20,7 +20,10 @@ const router = createRouter({
     // Control surface: source (event producer) / target (output sink) / mapping
     // (control scheme). All three ride the URL so a reload restores the selection
     // instead of dropping to a default (the old reload-to-Disabled trap).
-    { path: '/control/:source?/:target?/:mapping?', name: 'control', component: Blank, meta: { hashtag: '#anything-playing-consoles' } },
+    // pico is a PURE APPEND after mapping (4th positional param) so existing
+    // /control/source/target/mapping links keep parsing; it's only meaningful when
+    // target === 'pi' (which of the node's picos to drive).
+    { path: '/control/:source?/:target?/:mapping?/:pico?', name: 'control', component: Blank, meta: { hashtag: '#anything-playing-consoles' } },
     { path: '/dreame', redirect: '/control/dreame' },   // back-compat
     // Anything else falls back to the network view.
     { path: '/:pathMatch(.*)*', redirect: '/' },
