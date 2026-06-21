@@ -91,6 +91,25 @@ async function stopCapture() {
 // stop / restart handle, never a second button you're forced to press).
 function toggleCapture() { capture.value.running ? stopCapture() : startCapture() }
 
+// ── operator -> Claude messages ──────────────────────────────────
+// Free-text commands ("walk to the door", "left or right?") and the Look key go to the
+// SAME control log Claude tails (no extra endpoint -- the signal endpoint takes free
+// text now). They don't touch the GO/WAIT toggle; that stays sendSignal's job.
+const cmd = ref('')
+async function postLog(value: string) {
+  const v = value.trim()
+  if (!v) return
+  try {
+    await fetch(`${API}/control/signal`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state: v, source: 'claude', target: props.target, mapping: props.mapping }),
+    })
+    emit('drive-error', '')
+  } catch { emit('drive-error', 'API unreachable') }
+}
+function sendCommand() { if (cmd.value.trim()) { postLog(cmd.value); cmd.value = '' } }
+function takeLook() { postLog('look') }
+
 // keep a running capture alive while this screen is open (one of several refreshers
 // of the kill-switch flag; Claude bumps it too on each frame read).
 let poll = 0, ka = 0
@@ -130,11 +149,24 @@ watch(() => props.active, (on) => { if (on) activate(); else stopLoops() })
   <div class="cc">
     <!-- LEFT: Claude is the core of this screen, not a side rail -->
     <aside class="cc-claude">
+      <!-- one framed body (TV-remote vibe) instead of divider lines -->
+      <div class="cc-remote">
       <div class="cc-sig">
-        <button class="cc-go" :class="nextState" :disabled="sending" @click="sendSignal(nextState)"
-          :title="nextState === 'go' ? 'Let Claude play (also starts capture)' : 'Tell Claude to wait'">
-          {{ nextState.toUpperCase() }}
-        </button>
+        <div class="cc-go-wrap">
+          <button class="cc-go" :class="nextState" :disabled="sending" @click="sendSignal(nextState)"
+            :title="nextState === 'go' ? 'Let Claude play (also starts capture)' : 'Tell Claude to wait'">
+            {{ nextState.toUpperCase() }}
+          </button>
+          <!-- camera satellite (the "B" to GO's "A"): one-off "read this frame now" -->
+          <button class="cc-look" @click="takeLook" aria-label="Take a look"
+            title="Take a look — have Claude read the current frame now">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 7h3l1.5-2h7L17 7h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z" />
+              <circle cx="12" cy="13" r="3.5" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div class="cc-cap">
@@ -146,6 +178,15 @@ watch(() => props.active, (on) => { if (on) activate(); else stopLoops() })
           <div v-if="capture.device">{{ capture.device }}</div>
           <div v-if="capture.running && frameAge !== null">frame {{ frameAge }}s ago</div>
         </div>
+      </div>
+
+      <!-- operator -> Claude: free-text command (the Look key is the camera satellite by GO) -->
+      <div class="cc-msg">
+        <div class="cc-cmd">
+          <input class="cc-cmd-in" v-model="cmd" placeholder="Tell Claude…" @keydown.enter="sendCommand" />
+          <button class="cc-cmd-send" :disabled="!cmd.trim()" @click="sendCommand">Send</button>
+        </div>
+      </div>
       </div>
     </aside>
 
@@ -166,11 +207,19 @@ watch(() => props.active, (on) => { if (on) activate(); else stopLoops() })
   align-items: center; justify-content: center; gap: var(--sp-6);
   padding: var(--sp-5); border-right: 1px solid var(--line); background: var(--surface);
 }
+/* the framed body -- TV-remote vibe; replaces the divider lines */
+.cc-remote {
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-5);
+  padding: var(--sp-6) var(--sp-6) var(--sp-5);
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 22px;
+  box-shadow: var(--shadow-sm);
+}
 .cc-board { flex: 1 1 0; min-width: 0; }
 .mono { font-family: var(--font-mono); }
 
-/* big round WAIT/GO */
+/* big round WAIT/GO ("A") + the camera satellite ("B") */
 .cc-sig { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); }
+.cc-go-wrap { position: relative; display: inline-flex; }
 .cc-go {
   width: 132px; height: 132px; border-radius: 50%; border: 0; cursor: pointer;
   font-family: var(--font-sans); font-size: 26px; font-weight: 800; letter-spacing: 0.06em; color: #fff;
@@ -183,7 +232,7 @@ watch(() => props.active, (on) => { if (on) activate(); else stopLoops() })
 .cc-go:disabled { opacity: 0.7; cursor: default; }
 
 /* capture: a manage button (start/stop) + status meta */
-.cc-cap { display: flex; flex-direction: column; gap: var(--sp-2); padding-top: var(--sp-4); border-top: 1px solid var(--line); }
+.cc-cap { display: flex; flex-direction: column; gap: var(--sp-2); }
 .cc-cap-btn {
   display: flex; align-items: center; justify-content: center; gap: 8px;
   font: inherit; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer;
@@ -196,4 +245,30 @@ watch(() => props.active, (on) => { if (on) activate(); else stopLoops() })
 .cc-rec.live { background: var(--bad); animation: cc-pulse 1.4s ease-in-out infinite; }
 @keyframes cc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 .cc-cap-meta { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-muted); text-align: center; }
+
+/* operator -> Claude: free-text command + Look */
+.cc-msg { display: flex; flex-direction: column; gap: var(--sp-2); width: 232px; }
+.cc-cmd { display: flex; gap: var(--sp-2); }
+.cc-cmd-in {
+  flex: 1 1 auto; min-width: 0; font: inherit; font-size: 13px; color: var(--text);
+  padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface);
+}
+.cc-cmd-in:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.cc-cmd-send {
+  flex: 0 0 auto; font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink); cursor: pointer;
+  padding: 8px 12px; border: 0; border-radius: var(--r-sm); background: var(--accent);
+}
+.cc-cmd-send:hover:not(:disabled) { background: var(--accent-hover); }
+.cc-cmd-send:disabled { opacity: 0.5; cursor: default; }
+/* camera satellite: small round button to GO's RIGHT (left = the important side),
+   not overlapping, and BLUE so it reads distinct from GO/WAIT/capture/send */
+.cc-look {
+  position: absolute; right: -10px; bottom: -8px;
+  width: 66px; height: 66px; border-radius: 50%; display: grid; place-items: center;
+  color: #fff; background: #2f74c0; border: 3px solid var(--surface-2); cursor: pointer;
+  box-shadow: 0 0 0 4px rgba(47, 116, 192, 0.16), var(--shadow-sm);
+  transition: background 0.15s, transform 0.08s;
+}
+.cc-look:hover { background: #2861a6; }
+.cc-look:active { transform: scale(0.92); }
 </style>

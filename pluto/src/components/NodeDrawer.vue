@@ -168,7 +168,7 @@ function postCommand(text: string) {
           <p class="nd__lbl">{{ instanceSuffix }}</p>
           <!-- "Lab" + folder + gear reads as "Lab config dir": the section label IS
                the label, the icon (no text) is the action — open it in your IDE. -->
-          <button v-if="showLabConfig" class="nd__cfg" title="Open the Lab config folder in your IDE" @click="emit('open-config')">
+          <button v-if="showLabConfig" class="nd__cfg" title="Open the Lab config folder in your disk" @click="emit('open-config')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 6A1.5 1.5 0 0 1 4.5 4.5H7.5L9 6h3.5A1.5 1.5 0 0 1 14 7.5V9"/>
               <path d="M3 6v8A1.5 1.5 0 0 0 4.5 15.5H8"/>

@@ -1406,9 +1406,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = self._read_json_body()
         if body is None:
             return
-        state = str(body.get("state", "")).strip().lower()
-        if state not in ("wait", "go"):
-            self._send(400, {"error": "state must be 'wait' or 'go'"})
+        # Free-form on purpose: the client sends whatever -- the "go"/"wait"/"look" keys
+        # from the buttons, or a free-text command from the input box ("left or right?").
+        # Pluto just logs it; Claude (tailing the log) interprets. Only "go" has a side
+        # effect (rolls capture). No per-message endpoint needed -- it's all this log.
+        state = str(body.get("state", "")).strip()
+        if not state:
+            self._send(400, {"error": "empty message"})
             return
         rec = {"ts": round(time.time(), 3),
                "iso": datetime.now().isoformat(timespec="seconds"),
@@ -1423,7 +1427,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except OSError as exc:
             self._send(200, {"ok": False, "error": "log write failed: %s" % exc})
             return
-        print("  [control] %s (%s)" % (state.upper(), rec["by"] or "?"))
+        print("  [control] %s (%s)" % (state[:60], rec["by"] or "?"))
         resp = {"ok": True, "state": state}
         if state == "go":                          # GO begins the session -> roll capture
             ok, info = _capture_start()
