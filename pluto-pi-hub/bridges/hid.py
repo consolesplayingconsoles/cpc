@@ -10,11 +10,12 @@ same abstract ops the server's pluto/api/drive/controller.py emits
 (press/release/pulse/axis/release_all) and renders each into GP2040's frame.
 
 Wire frame (must match the UartInput addon):
-    0xAA 0x55  <dpad>  <btnL>  <btnH>  <xor>
+    0xAA 0x55  <dpad>  <btnL>  <btnH>  <lx> <ly> <rx> <ry>  <xor>
       dpad : bit0 UP, bit1 DOWN, bit2 LEFT, bit3 RIGHT
       btnL : buttons B1..B8  (bit = button index - 1)
       btnH : buttons B9..B16
-      xor  : dpad ^ btnL ^ btnH   (the firmware rejects a bad checksum)
+      lx ly: LEFT stick  (8-bit, 0x80 = center); rx ry: RIGHT stick
+      xor  : dpad ^ btnL ^ btnH ^ lx ^ ly ^ rx ^ ry   (firmware rejects a bad checksum)
 A control frame (dpad=0xFF, btnL=0x01) asks the firmware to reboot to BOOTSEL, so
 the hub can reflash over the same wire with no physical button.
 
@@ -35,7 +36,12 @@ BUTTON_BITS = {"A": 0, "B": 1, "X": 2, "Y": 3, "L": 4, "R": 5, "Z": 7,
                "SELECT": 8, "START": 9}
 DPAD_BITS = {"D_UP": 0, "D_DOWN": 1, "D_LEFT": 2, "D_RIGHT": 3,
              "UP": 0, "DOWN": 1, "LEFT": 2, "RIGHT": 3}
-_AXIS_DEADZONE = 0.30                      # quantise an analog axis onto the d-pad
+_STICK_MID = 0x80                          # 8-bit stick center (0x80 << 8 ~ GAMEPAD_JOYSTICK_MID)
+
+
+def _to8(v):
+    """A 0..1 axis value -> an 8-bit stick byte (0..255), clamped."""
+    return max(0, min(255, int(round(v * 255.0))))
 
 
 class HidBridge(object):
@@ -50,6 +56,7 @@ class HidBridge(object):
         self.repeat = repeat               # frames per change; link's solid, >1 = belt+braces
         self.dpad = 0
         self.buttons = 0
+        self.lx = self.ly = self.rx = self.ry = _STICK_MID
         self._open = False
 
     # -- lifecycle (the hub supervises this) ----------------------------------
@@ -91,19 +98,24 @@ class HidBridge(object):
         self._set(btn, False)
 
     def axis(self, name, x, y):
-        """Analog axis -> d-pad (the firmware is digital for now). 0..1, 0.5=center,
-        +y = up. This is what turns a vacuum's heading into a direction."""
-        if name not in ("MAIN", None):
+        """Analog axis -> the real GP2040 stick. Op space is 0..1 (0.5=center,
+        +x = right, +y = up). The stick byte is 0x80=center; on the DC the Y byte
+        is inverted (0x00 = up), so flip y here -- proven on the date BIOS sweep.
+        name MAIN/None/LEFT -> left stick; RIGHT or C (the GameCube C-stick) ->
+        right stick. (The C-stick's Y sign is unverified -- calibrate it on the GC
+        the same way the DC MAIN stick was proven on the date BIOS.)"""
+        bx, by = _to8(x), _to8(1.0 - y)        # op +y=up -> 0x00=up on the stick
+        if name in ("MAIN", None, "LEFT", "L"):
+            self.lx, self.ly = bx, by
+        elif name in ("RIGHT", "R", "C"):
+            self.rx, self.ry = bx, by
+        else:
             return
-        self.dpad &= ~0x0F
-        if y > 0.5 + _AXIS_DEADZONE:   self.dpad |= 1 << 0      # up
-        elif y < 0.5 - _AXIS_DEADZONE: self.dpad |= 1 << 1      # down
-        if x > 0.5 + _AXIS_DEADZONE:   self.dpad |= 1 << 3      # right
-        elif x < 0.5 - _AXIS_DEADZONE: self.dpad |= 1 << 2      # left
         self._send()
 
     def release_all(self):
         self.dpad = self.buttons = 0
+        self.lx = self.ly = self.rx = self.ry = _STICK_MID
         self._send()
 
     # -- encoding / wire ------------------------------------------------------
@@ -118,13 +130,15 @@ class HidBridge(object):
             return                         # unmapped: ignore (a partial map is fine)
         self._send()
 
-    def _frame(self, dpad, btnL, btnH):
-        return bytes((0xAA, 0x55, dpad, btnL, btnH, dpad ^ btnL ^ btnH))
+    def _frame(self, dpad, btnL, btnH, lx=_STICK_MID, ly=_STICK_MID, rx=_STICK_MID, ry=_STICK_MID):
+        xor = dpad ^ btnL ^ btnH ^ lx ^ ly ^ rx ^ ry
+        return bytes((0xAA, 0x55, dpad, btnL, btnH, lx, ly, rx, ry, xor))
 
     def _send(self):
         if not self._open:
             return
-        frame = self._frame(self.dpad & 0x0F, self.buttons & 0xFF, (self.buttons >> 8) & 0xFF)
+        frame = self._frame(self.dpad & 0x0F, self.buttons & 0xFF, (self.buttons >> 8) & 0xFF,
+                            self.lx & 0xFF, self.ly & 0xFF, self.rx & 0xFF, self.ry & 0xFF)
         for _ in range(self.repeat):
             self.link.send(frame)
 

@@ -1583,6 +1583,41 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         self._send(200, {"ok": True, op: btn})
 
+    def _handle_axis(self, body):
+        """POST /robutek/drive {action:'axis', name, x, y, target, source, mapping}.
+        Live analog stick: x/y in 0..1 (0.5 = center). `name` picks the stick
+        (MAIN -> left, C/RIGHT -> right); the sink/Pico maps the axis, so no mapping
+        entry is needed. Shares the live sink with hold, so sticks + buttons go over
+        one link to the Pico (and recentre via the watchdog's release_all on silence)."""
+        try:
+            controller, _ = _drive_libs()
+        except Exception as exc:
+            self._send(200, {"ok": False, "error": "drive libs: %s" % exc})
+            return
+        try:
+            mapping = controller.load_mapping(body.get("source") or "keyboard",
+                                              body.get("mapping") or "")
+        except Exception as exc:
+            self._send(200, {"ok": False, "error": "mapping: %s" % exc})
+            return
+        try:
+            sink = self._live_ensure(controller, body.get("target"), mapping, dev=body.get("dev"))
+        except ValueError as exc:
+            self._send(200, {"ok": False, "error": str(exc)})
+            return
+        try:
+            x = float(body.get("x", 0.5)); y = float(body.get("y", 0.5))
+        except (TypeError, ValueError):
+            self._send(200, {"ok": False, "error": "axis x/y must be numbers"})
+            return
+        name = body.get("name") or "MAIN"
+        try:
+            sink.apply([{"op": "axis", "name": name, "x": x, "y": y}])
+        except Exception as exc:
+            self._send(200, {"ok": False, "error": "axis: %s" % exc})
+            return
+        self._send(200, {"ok": True, "axis": name})
+
     def _handle_drive(self):
         """POST /robutek/drive {action, target, session, t, speed, mapping}.
 
@@ -1629,6 +1664,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # Live press-and-HOLD for the keyboard/Claude sources: keydown holds the
             # button, keyup releases it, over a persistent sink so movement sustains.
             self._handle_hold(body)
+            return
+        if action == "axis":
+            # Live analog stick (the on-screen joysticks, name MAIN/C): same live
+            # sink as hold, so sticks and buttons share one link to the Pico.
+            self._handle_axis(body)
             return
         if action != "play":
             self._send(400, {"error": "unknown action"})
