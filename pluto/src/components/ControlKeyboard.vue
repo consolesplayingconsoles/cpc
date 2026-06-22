@@ -10,6 +10,7 @@
 // sustains while held. Pressed keys light up for feedback either way. The same component
 // is the human's collaboration surface on the Claude screen.
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import Joystick from 'vue-joystick-component'
 
 interface LayoutKey { key: string; btn: string; label: string; col: number; row: number }
 interface Mapping { controller?: string; layout?: LayoutKey[]; colors?: Record<string, string> }
@@ -45,6 +46,15 @@ const boardStyle = computed(() => ({
   gridTemplateColumns: `repeat(${cols.value}, var(--cap))`,
   gridTemplateRows: `repeat(${rows.value}, var(--cap))`,
 }))
+
+// Analog sticks are a per-CONSOLE UI element (not mapping data): both have a main
+// stick; the GameCube adds the yellow C-stick. Detected from the controller name.
+const ctrl   = computed(() => (def.value?.controller || props.mapping || '').toLowerCase())
+const isGC   = computed(() => ctrl.value.includes('gamecube'))
+const isDC   = computed(() => ctrl.value.includes('dreamcast'))
+const hasMain = computed(() => isGC.value || isDC.value)
+const hasC    = computed(() => isGC.value)
+const stickSize = computed(() => (props.compact ? 62 : 92))
 
 async function fetchMapping() {
   if (!props.mapSource || !props.mapping) { def.value = null; return }
@@ -88,6 +98,28 @@ function release(btn: string) {
   holdPost(btn, false)
 }
 function releaseAll() { for (const b of Array.from(pressed.value)) release(b) }
+
+// Analog: the joystick move event gives pixel offsets from centre; normalise to an
+// axis op (0..1, 0.5 = centre; screen-up = axis-up, so y is inverted). Sent as an
+// `axis` action by NAME (MAIN / C) -- no mapping needed, the Pico maps the axis.
+async function axisPost(name: string, x: number, y: number) {
+  if (!canDrive.value) return
+  try {
+    await fetch(`${API}/robutek/drive`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'axis', name, x, y, target: props.target, source: props.mapSource, mapping: props.mapping, ...(props.target === 'pi' && props.targetDev ? { dev: props.targetDev } : {}) }),
+    })
+    emit('drive-error', '')
+  } catch { emit('drive-error', 'API unreachable') }
+}
+function stickMove(name: string, e: { x?: number; y?: number }) {
+  const half = stickSize.value / 2
+  const nx = Math.max(-1, Math.min(1, (e?.x ?? 0) / half))
+  const ny = Math.max(-1, Math.min(1, (e?.y ?? 0) / half))
+  startKeepalive()
+  axisPost(name, +(0.5 + 0.5 * nx).toFixed(3), +(0.5 - 0.5 * ny).toFixed(3))
+}
+function stickStop(name: string) { axisPost(name, 0.5, 0.5) }   // recentre on release
 
 // keepalive: hold the live sink open the whole time the board is active so each keypress
 // is low-latency (no reconnect). The backend watchdog releases everything if these stop
@@ -188,18 +220,34 @@ function capStyle(it: LayoutKey) {
       <span class="ck-title">{{ def?.controller || mapping || 'Controller' }}</span>
     </div>
 
-    <div v-if="layout.length" class="ck-board" :class="{ off: !canDrive }" :style="boardStyle">
-      <button
-        v-for="it in layout" :key="it.btn"
-        class="cap" :class="{ down: isDown(it.btn) }" :style="capStyle(it)"
-        @pointerdown.prevent="onCapDown($event, it.btn)"
-        @pointerup="onCapUp($event, it.btn)"
-        @pointercancel="onCapUp($event, it.btn)"
-        @pointerleave="onCapUp($event, it.btn)"
-      >
-        <span class="cap-key">{{ keyGlyph(it.key) }}</span>
-        <span class="cap-btn">{{ it.label }}</span>
-      </button>
+    <div v-if="layout.length" class="ck-pad" :class="{ off: !canDrive }">
+      <!-- main analog stick (grey): top-left, above the d-pad -->
+      <div v-if="hasMain" class="ck-stick main">
+        <Joystick :size="stickSize" base-color="#cdd0d4" stick-color="#5b6068" :throttle="80"
+          :disabled="!canDrive" @move="stickMove('MAIN', $event)" @stop="stickStop('MAIN')" />
+        <span class="ck-stick-tag">Analog</span>
+      </div>
+
+      <div class="ck-board" :style="boardStyle">
+        <button
+          v-for="it in layout" :key="it.btn"
+          class="cap" :class="{ down: isDown(it.btn) }" :style="capStyle(it)"
+          @pointerdown.prevent="onCapDown($event, it.btn)"
+          @pointerup="onCapUp($event, it.btn)"
+          @pointercancel="onCapUp($event, it.btn)"
+          @pointerleave="onCapUp($event, it.btn)"
+        >
+          <span class="cap-key">{{ keyGlyph(it.key) }}</span>
+          <span class="cap-btn">{{ it.label }}</span>
+        </button>
+      </div>
+
+      <!-- GameCube C-stick (yellow): bottom-right -->
+      <div v-if="hasC" class="ck-stick cstick">
+        <Joystick :size="stickSize" base-color="#fbeca0" stick-color="#eab308" :throttle="80"
+          :disabled="!canDrive" @move="stickMove('C', $event)" @stop="stickStop('C')" />
+        <span class="ck-stick-tag c">C</span>
+      </div>
     </div>
   </div>
 </template>
@@ -212,12 +260,22 @@ function capStyle(it: LayoutKey) {
 .ck-hint { font-size: 12px; color: var(--text-muted); }
 .ck.compact .ck-assist { font-size: 10px; }
 
+/* the controller area: button grid centred, analog sticks in the corners
+   (main upper-left above the d-pad, C-stick lower-right) -- positions are UI, not data */
+.ck-pad { position: relative; display: flex; align-items: center; justify-content: center; padding: 78px 92px; }
+.ck-pad.off { opacity: 0.5; }
+.ck-stick { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 4px; user-select: none; }
+.ck-stick.main { top: 0; left: 0; }
+.ck-stick.cstick { bottom: 0; right: 0; }
+.ck-stick-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); }
+.ck-stick-tag.c { color: #a9820a; }
+
 .ck-board { display: grid; gap: 8px; --cap: 58px; }
-.ck-board.off { opacity: 0.5; }
 
 /* compact = embedded side pane (Dreame): smaller caps so it fits beside the map */
 .ck.compact { gap: var(--sp-3); padding: var(--sp-3); }
 .ck.compact .ck-title { font-size: 12px; }
+.ck.compact .ck-pad { padding: 56px 62px; }
 .ck.compact .ck-board { --cap: 42px; gap: 6px; }
 .ck.compact .cap-key { font-size: 13px; }
 .ck.compact .cap-btn { font-size: 8px; }
