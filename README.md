@@ -43,10 +43,12 @@ Pluto is a single app you run one of two ways:
 | Folder                                   | What's inside                                                                                  |
 |------------------------------------------|------------------------------------------------------------------------------------------------|
 | [pluto/](./pluto/)                       | CPC Pluto: the server, dashboard and control plane (runs as Lab or C2)                         |
-| [pluto-python-tui/](./pluto-python-tui/) | The native client/TUI that Pluto deploys to Linux nodes                                        |
+| [pluto-python-tui/](./pluto-python-tui/) | The on-console client/TUI that Pluto deploys to Linux nodes                                    |
 | [pluto-pi-hub/](./pluto-pi-hub/)         | The Pi-side hub: native-protocol bridges for non-IP consoles, and the Pico firmware it flashes |
 
 The [./nodes](./nodes) dir defines every node in the network. Any dir with a valid `.env` is picked up at startup. Devices on the LAN are checked live; cloud services are declared. Consoles too old to speak TCP/IP join through a Raspberry Pi that talks their native protocols on their behalf.
+
+Two components live in their own repositories in this org: the **[GP2040-CE fork](https://github.com/consolesplayingconsoles/GP2040-CE)** (the Pico firmware, with our `UartInput` addon) and the standalone **[dreamehome-client](https://github.com/consolesplayingconsoles/dreamehome-client)** (the DreameHome cloud client).
 
 ### Getting Started
 
@@ -59,6 +61,36 @@ cp pluto/.env.sample pluto/.env     # first time only, then edit the config
 ```
 
 Once it's up, you can deploy from the map. Set `HOST_IP` in the target node's `.env` (`pluto/.env` for the **Pluto C2** node, `nodes/local/pi/.env` for the **Pi** node), then hit the **Deploy** button on that node in the local Pluto Lab's network diagram.
+
+---
+
+## Requirements
+
+Most of this is plain Python and a Node toolchain. A handful of features need an external account or a system package, and a couple of dev-only features pull extra libraries. The console nodes themselves stay deliberately light (pure stdlib plus `pyfiglet`), so the heavier dependencies live on the dev or capture host, never on the constrained hardware.
+
+| Part                                        | Software                                                                                                                     | Hardware                              | Firmware                                                                                                                                                      |
+|---------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|---------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Pluto** (Lab or C2)                       | Node 20+ and Yarn (dashboard), Python 3 (API)                                                                                | a host (always-on for C2)             |                                                                                                                                                               |
+| **On-console client** (TUI)                 | Python 3.6+ and `pyfiglet`, pure stdlib otherwise                                                                            | the Linux console node                |                                                                                                                                                               |
+| **Pi hub + Pico drive**                     | Python 3 (stdlib) on the Pi                                                                                                  | a Raspberry Pi and Pico(s), wired     | the [GP2040-CE fork](https://github.com/consolesplayingconsoles/GP2040-CE) on the Pico (our `UartInput` addon), built with CMake, the Pico SDK and `picotool` |
+| **Claude capture** (the "eyes", _Lab only_) | `ffmpeg`, `opencv-python`, `numpy`, `tesseract`                                                                              | Pluto Lab host + an HDMI capture card |                                                                                                                                                               |
+| **Drive a local emulator** (_Lab only_)     | Python 3 and `pynput` (`requirements-dev.txt`)                                                                               | Pluto Lab host (Accessibility)        |                                                                                                                                                               |
+| **DreameHome (vacuum) input**               | the bundled [`dreamehome` client](https://github.com/consolesplayingconsoles/dreamehome-client) (needs a DreameHome account) |                                       |                                                                                                                                                               |
+| **Cloud storage**                           | provider-agnostic (needs a storage-provider account)                                                                         |                                       |                                                                                                                                                               |
+
+> **Lab vs C2:** capture and the local-emulator drive are **Lab-only**:
+> Capture needs the dev/capture host, with the LLM client co-located for speed.
+> Local-emulator doesn't normally run on a headless server and the virtual keyboard has not been tested on Linux.
+> Everything else runs on Pluto C2 too, including the DreameHome connector and driving the real console through the Pi/Pico.
+
+The Python dev and capture libraries are externally managed (PEP 668), so install them into a venv:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+```
+
+`ffmpeg` and `tesseract` are system packages, not pip: `brew install ffmpeg tesseract` (or your platform's equivalent).
 
 ---
 
