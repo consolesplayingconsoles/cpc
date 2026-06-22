@@ -40,10 +40,16 @@ def _post(opener, url, payload):
     return json.loads(body)
 
 
-def _get(opener, url):
-    req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": _UA})
-    with opener.open(req, timeout=_TIMEOUT) as r:
-        return json.loads(r.read().decode("utf-8") or "{}")
+def _http_error_detail(e):
+    """Read the response body from an HTTPError for diagnosis."""
+    try:
+        detail = e.read().decode("utf-8", errors="replace")
+        if detail:
+            return detail[:300]
+    except Exception:
+        pass
+    return ""
+
 
 
 def _login(opener, email, password):
@@ -51,24 +57,9 @@ def _login(opener, email, password):
     response body (which may carry the user object)."""
     return _post(opener, _SUBSTACK + "/api/v1/login", {
         "email": email, "password": password,
-        "captcha_response": None, "for_pub": "", "redirect": "/",
+        "captcha_response": "", "for_pub": "", "redirect": "/",
     })
 
-
-def _user_id(opener, login_body):
-    """Best-effort author id for the draft byline. Try the login body, then the
-    subscription endpoint; return None to fall back to no explicit byline."""
-    for key in ("user", "user_data"):
-        u = login_body.get(key)
-        if isinstance(u, dict) and u.get("id"):
-            return u["id"]
-    if login_body.get("user_id"):
-        return login_body["user_id"]
-    try:
-        sub = _get(opener, _SUBSTACK + "/api/v1/subscription")
-        return sub.get("user_id") or (sub.get("user") or {}).get("id")
-    except Exception:
-        return None
 
 
 def _doc(body_text):
@@ -103,32 +94,47 @@ def post(creds, content):
     if not title:
         return False, "give me something to draft: '@substack post <title>' (then optional body lines)."
 
+    opener = _opener()
     try:
-        opener = _opener()
         login_body = _login(opener, email, password)
-        uid = _user_id(opener, login_body)
-
-        draft = {
-            "draft_title":    title,
-            "draft_subtitle": "",
-            "draft_body":     json.dumps(_doc(body)),
-            "audience":       "everyone",
-            "type":           "newsletter",
-        }
-        if uid is not None:
-            draft["draft_bylines"] = [{"id": uid, "is_guest": False}]
-
-        resp = _post(opener, pub + "/api/v1/drafts", draft)
-        draft_id = resp.get("id")
-        if not draft_id:
-            return False, ("login worked but the draft came back without an id -- check "
-                           "SUBSTACK_PUBLICATION_URL (should be https://<you>.substack.com).")
-        return True, "drafted \"%s\" -> %s/publish/post/%s (review & publish from Substack)." % (
-            title, pub, draft_id)
     except urllib.error.HTTPError as e:
+        detail = _http_error_detail(e)
         if e.code in (401, 403):
-            return False, ("login rejected (HTTP %d). This path supports PASSWORD accounts only "
-                           "-- check the creds, or that the account isn't magic-link-only." % e.code)
-        return False, "substack request failed: HTTP %d. (endpoints are RE'd -- may need a refresh.)" % e.code
+            return False, ("login rejected (HTTP %d). Password accounts only -- "
+                           "check creds or set a password in Substack Settings. %s" % (e.code, detail)).strip()
+        return False, ("login failed: HTTP %d. %s" % (e.code, detail)).strip()
     except Exception as e:
-        return False, "substack draft failed: %s" % e
+        return False, "login error: %s" % e
+
+    draft = {
+        "draft_title":    title,
+        "draft_subtitle": "",
+        "draft_body":     json.dumps(_doc(body)),
+        "draft_bylines":  [],
+        "audience":       "everyone",
+        "type":           "newsletter",
+    }
+
+    resp = None
+    try:
+        resp = _post(opener, pub + "/api/v1/drafts", draft)
+    except urllib.error.HTTPError as e:
+        # Substack returns 400 on bylines validation but still writes the draft.
+        # Parse the response body for the id before giving up.
+        raw = ""
+        try:
+            raw = e.read().decode("utf-8", errors="replace")
+            resp = json.loads(raw) if raw else {}
+        except Exception:
+            resp = {}
+        if not (resp or {}).get("id"):
+            return False, ("draft creation failed: HTTP %d. %s" % (e.code, raw[:300])).strip()
+    except Exception as e:
+        return False, "draft error: %s" % e
+
+    draft_id = (resp or {}).get("id")
+    if not draft_id:
+        return False, ("login worked but the draft came back without an id -- check "
+                       "SUBSTACK_PUBLICATION_URL (should be https://<you>.substack.com).")
+    return True, "drafted \"%s\" -> %s/publish/post/%s (review & publish from Substack)." % (
+        title, pub, draft_id)

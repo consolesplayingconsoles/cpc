@@ -190,7 +190,7 @@ def command(verb):
     if verb in _READ_VERBS:
         st = state()
         if st is None:
-            return False, "not signed into Dreamehome. Open the Dreame tab and sign in first."
+            return False, "Not signed into Dreamehome. Open the Dreame control first."
         # same friendly label the Robutek tab shows (via status_human)
         act = st.get("status_human") or st.get("activity") or "Unknown"
         bat = st.get("battery")
