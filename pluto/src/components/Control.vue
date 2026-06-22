@@ -17,13 +17,13 @@ const API = `http://${window.location.hostname}:7700`
 const isLab = import.meta.env.DEV
 
 // ── SOURCE — the event producer. Dreame Cloud is a configured pinged node (hidden
-// when unconfigured unless "Show unconfigured" is on). Keyboard + Claude are manual
-// input modes, always available: a human at a keyboard, or the Claude collaboration
-// screen. ──
+// when unconfigured unless "Show unconfigured" is on). Keyboard is a manual input mode,
+// always available. Claude (the capture-driven AI screen) is LAB-ONLY: capture and the
+// LLM client must be co-located on the dev host to be fast, so it's hidden on the C2. ──
 const sourceList = computed(() => {
   const out: { id: string; label: string }[] = []
   out.push({ id: 'keyboard', label: 'Keyboard only' })
-  out.push({ id: 'claude', label: 'Claude' })
+  if (isLab) out.push({ id: 'claude', label: 'Claude' })   // Lab only: capture is local to the dev host
   const d = props.nodes?.['dreame']
   if (d && (d.status !== 'unconfigured' || props.showOffline)) out.push({ id: 'dreame', label: 'Dreame Cloud' })
   return out
@@ -106,6 +106,12 @@ watch([source, target, mapping, pico, mappings, picoList, sourceList, () => prop
   if (!props.active) return
   if (!source.value) {
     if (sourceList.value.length) router.replace(path(sourceList.value[0].id, '', '', ''))
+    return
+  }
+  // Claude is Lab-only (capture is local to the dev host). A deep link to /control/claude
+  // on the C2 must not render it -> fall back to the first available source.
+  if (source.value === 'claude' && !isLab) {
+    router.replace(path(sourceList.value[0]?.id || 'keyboard', '', '', ''))
     return
   }
   const t = effTarget.value

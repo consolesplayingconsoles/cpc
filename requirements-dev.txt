@@ -13,3 +13,11 @@
 # start-pluto-lab.sh auto-detects .venv. For the CLI use .venv/bin/python (or
 # `source .venv/bin/activate` once, then plain `python`).
 pynput==1.8.2
+
+# The Claude-capture "eyes": pre-process each captured frame into structured state
+# (brightness, where the light is, geometry, later OCR of on-screen text) so Claude
+# reads facts not raw pixels. Capture host only, never the console nodes. ffmpeg (the
+# frame grabber) and tesseract (optional, for OCR) are system packages, not pip:
+#   brew install ffmpeg tesseract
+opencv-python-headless==4.13.0
+numpy
