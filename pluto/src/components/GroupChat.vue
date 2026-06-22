@@ -90,8 +90,16 @@ function dayDivider(gi: number): string | null {
   return formatDay(cur)
 }
 
-function formatMsg(text: string): Array<{ mention: boolean; text: string }> {
-  return text.split(/(@\w+)/g).map((part, i) => ({ mention: i % 2 === 1, text: part }))
+type MsgSeg = { mention?: boolean; url?: boolean; text: string }
+
+function formatMsg(text: string): MsgSeg[] {
+  return text.split(/(https?:\/\/[^\s<>"]+|@\w+)/g).map((part, i) => {
+    if (i % 2 === 1) {
+      if (/^https?:\/\//.test(part)) return { url: true, text: part }
+      return { mention: true, text: part }
+    }
+    return { text: part }
+  })
 }
 
 // Group consecutive messages from the same sender
@@ -387,7 +395,7 @@ function onKeydown(e: KeyboardEvent) {
               </div>
               <p v-for="m in g.messages" :key="m.id" class="msg-text">
                 <template v-for="(seg, si) in formatMsg(m.text)" :key="si">
-                  <strong v-if="seg.mention" class="msg-mention">{{ seg.text }}</strong><span v-else>{{ seg.text }}</span>
+                  <strong v-if="seg.mention" class="msg-mention">{{ seg.text }}</strong><a v-else-if="seg.url" :href="seg.text" target="_blank" rel="noopener noreferrer" class="msg-link">{{ seg.text }}</a><span v-else>{{ seg.text }}</span>
                 </template>
               </p>
             </div>
@@ -511,7 +519,7 @@ function onKeydown(e: KeyboardEvent) {
                   <span class="input-hl-text"><template
                     v-for="(seg, si) in formatMsg(draft)"
                     :key="si"
-                  ><strong v-if="seg.mention">{{ seg.text }}</strong><span v-else>{{ seg.text }}</span></template></span>
+                  ><strong v-if="seg.mention">{{ seg.text }}</strong><a v-else-if="seg.url" :href="seg.text" target="_blank" rel="noopener noreferrer" class="msg-link">{{ seg.text }}</a><span v-else>{{ seg.text }}</span></template></span>
                 </div>
                 <input
                   ref="inputEl"
@@ -727,6 +735,13 @@ function onKeydown(e: KeyboardEvent) {
 .msg-mention {
   font-weight: 700;
   letter-spacing: 0.02em;
+}
+
+.msg-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
 }
 
 .feed-empty {
