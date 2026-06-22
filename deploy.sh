@@ -88,6 +88,13 @@ else
   SSH="ssh -i ${SSH_KEY_PATH} -o StrictHostKeyChecking=no ${SSH_USER}@${HOST_IP}"
 fi
 
+# Privilege prefix, evaluated ON THE REMOTE at run time: empty when the deploy user
+# is already root, else `sudo -n`. Some nodes deploy as a passwordless-sudo user;
+# others log in as root, where sudo may not even be installed -- calling `sudo` there
+# fails and the service never starts. So escalate only when we actually need to.
+# Single-quoted here so $(id -u)/$SUDO stay literal and resolve on the node, not locally.
+PRIV='if [ "$(id -u)" -eq 0 ]; then SUDO=; else SUDO="sudo -n"; fi;'
+
 echo "deploying ${NODE_NAME} (${CUSTOM_SSH_ALIAS:-${SSH_USER}@${HOST_IP}}): payloads [${PAYLOADS}] -> ${REMOTE_ROOT}"
 
 # =================================================================
@@ -139,11 +146,12 @@ payload_server() {
   # move) takes effect; ExecStart points at ${REMOTE_ROOT}/serve.sh.
   echo "##STEP:restart"
   if $SSH "[ -d /run/systemd/system ]"; then
-    if $SSH "sudo -n cp ${REMOTE_ROOT}/deploy/pluto.service /etc/systemd/system/pluto.service && sudo -n systemctl daemon-reload && sudo -n systemctl enable pluto >/dev/null 2>&1 && sudo -n systemctl restart pluto"; then
+    if $SSH "$PRIV \$SUDO cp ${REMOTE_ROOT}/deploy/pluto.service /etc/systemd/system/pluto.service && \$SUDO systemctl daemon-reload && \$SUDO systemctl enable pluto >/dev/null 2>&1 && \$SUDO systemctl restart pluto"; then
       echo "restarted via systemd (pluto.service synced to ${REMOTE_ROOT})"
     else
-      echo "[note] could not sync/restart the unit (needs root). Re-point it once:"
+      echo "[ERROR] could not sync/restart the unit -- the service is NOT running. Re-point it once (needs root):"
       echo "  ssh ${CUSTOM_SSH_ALIAS:-${SSH_USER}@${HOST_IP}} 'sudo cp ${REMOTE_ROOT}/deploy/pluto.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now pluto'"
+      exit 1
     fi
   else
     echo "not managed by systemd -- run ${REMOTE_ROOT}/serve.sh manually"
@@ -200,11 +208,12 @@ payload_hub() {
   echo "##STEP:restart"
   HUB_UNIT="${REMOTE_ROOT}/pluto-pi-hub/deploy/cpc-hub.service"
   if $SSH "[ -d /run/systemd/system ]"; then
-    if $SSH "sudo -n cp ${HUB_UNIT} /etc/systemd/system/cpc-hub.service && sudo -n systemctl daemon-reload && sudo -n systemctl enable cpc-hub >/dev/null 2>&1 && sudo -n systemctl restart cpc-hub"; then
+    if $SSH "$PRIV \$SUDO cp ${HUB_UNIT} /etc/systemd/system/cpc-hub.service && \$SUDO systemctl daemon-reload && \$SUDO systemctl enable cpc-hub >/dev/null 2>&1 && \$SUDO systemctl restart cpc-hub"; then
       echo "restarted via systemd (cpc-hub.service synced to ${REMOTE_ROOT})"
     else
-      echo "[note] could not sync/restart the unit (needs root). Re-point it once:"
+      echo "[ERROR] could not sync/restart the unit -- the op receiver is NOT running. Re-point it once (needs root):"
       echo "  ssh ${CUSTOM_SSH_ALIAS:-${SSH_USER}@${HOST_IP}} 'sudo cp ${HUB_UNIT} /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now cpc-hub'"
+      exit 1
     fi
   else
     echo "not managed by systemd -- run ${REMOTE_ROOT}/pluto-pi-hub/run.sh serve manually"

@@ -561,35 +561,26 @@ _drive_state = {"sink": None, "thread": None, "stop": None, "last_seen": 0.0,
 DRIVE_TIMEOUT = 6.0   # stop the drive if the frontend hasn't checked in for this long
 
 
-def _control_log_path():
-    """The WAIT/GO collaboration log -- a gitignored JSONL file (logs/*.log) that the
-    chat-agreed 'Claude plays the console' flow tails: GO = play, WAIT = stop. The
-    Claude source's big button appends here; Pluto only logs, it drives nothing off it.
-    Rooted at pluto/logs/ so it sits beside the app, never committed."""
-    d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs")
-    try:
-        os.makedirs(d, exist_ok=True)
-    except OSError:
-        pass
-    return os.path.normpath(os.path.join(d, "control.log"))
-
-
 # ── HDMI capture: the WHOLE point of the Claude source ────────────────────────
 # Claude plays a console; to *see* what's happening it reads a still frame off the
 # HDMI capture card. Claude is NOT allowed to start that capture itself -- Pluto owns
 # the camera lifecycle, and that ownership IS the abstraction/safety boundary. The
-# operator's GO starts a persistent ffmpeg that overwrites one rolling JPEG
-# (dist/latest.jpg); Claude only ever READS that file.
+# operator's GO starts a persistent ffmpeg with TWO outputs from one card: a rolling
+# JPEG (dist/capture/latest.jpg, what Claude reads) AND a full-quality recording
+# (dist/capture/<ts>/recording.mp4, for the YouTube cut). GO means GO: the stream runs
+# until an explicit Stop -- there is NO staleness timeout, so a long WAIT pause can
+# never silently kill a live recording.
 #
-# Lifecycle is governed by a KILL-SWITCH FILE: dist/capture.flag (a tiny JSON
-# {"state","ts","by"}). Anyone may write it -- Pluto on GO, the open page as a
-# heartbeat, Claude bumping it on each frame read, or a manual Stop. A watchdog polls
-# it and kills ffmpeg when it reads "stop" or goes STALE (no refresh within
-# CAPTURE_STALE_SECS = everyone walked away). This is idle-on-read without trusting
-# the OS atime: the reader self-reports by touching the flag.
+# Each GO opens a SESSION: a timestamp-named dir dist/capture/<ts>/ holding that take's
+# recording + its fresh coaching log (session.log). dist/capture/ is gitignored, so a
+# throwaway test is deleted by its dir. The live singletons latest.jpg + state.flag
+# stay flat (one active session at a time). state.flag is a tiny JSON
+# {"state","ts","by","dir"} kill-switch anyone may write; a watchdog stops ffmpeg when
+# it reads "stop" or when ffmpeg dies on its own.
 _capture_lock  = threading.Lock()
-_capture_state = {"proc": None, "thread": None, "stop": None, "device": None, "started": 0.0}
-CAPTURE_STALE_SECS  = 180.0   # no flag refresh for this long => the session ended; stop
+_capture_state = {"proc": None, "thread": None, "stop": None, "device": None,
+                  "started": 0.0, "session_dir": None, "session_ts": None,
+                  "session_log": None, "rec_path": None}
 # HARD PRIVACY RULE (paramount): capture is ONLY ever a real (non-camera) capture device,
 # matched BY NAME -- the NAME is the guarantee, the index is NOT (it shifts between sessions,
 # so "never index 0" was wrong and is gone). Prefer this card; never a camera/mic.
@@ -632,9 +623,33 @@ def _capture_frame_path(): return os.path.join(_capture_dir(), "latest.jpg")
 def _capture_flag_path():  return os.path.join(_capture_dir(), "state.flag")
 
 
+def _session_log_path():
+    """The CURRENT take's coaching log (dist/capture/<ts>/session.log) once a session is
+    open, else a flat fallback before the first GO. GO/WAIT + the coaching channel all
+    append here; each GO opens a fresh one."""
+    with _capture_lock:
+        sl = _capture_state.get("session_log")
+    return sl or os.path.join(_capture_dir(), "session.log")
+
+
+def _session_open():
+    """Create dist/capture/<ts>/ for a new take; return (ts, dir, log_path, rec_path).
+    Timestamp-only name (NOT game-named -- detecting the running game is error-prone)."""
+    ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    d = os.path.join(_capture_dir(), ts)
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    return ts, d, os.path.join(d, "session.log"), os.path.join(d, "recording.mp4")
+
+
 def _flag_write(state, by):
-    """Atomically write the kill-switch flag. state is 'go' | 'stop'."""
-    rec = {"state": state, "ts": round(time.time(), 3), "by": by}
+    """Atomically write the kill-switch flag. state is 'go' | 'stop'. Carries the current
+    session dir so readers (Claude, the UI) can find the take's log."""
+    with _capture_lock:
+        sdir = _capture_state.get("session_ts")
+    rec = {"state": state, "ts": round(time.time(), 3), "by": by, "dir": sdir}
     try:
         os.makedirs(_capture_dir(), exist_ok=True)
         tmp = _capture_flag_path() + ".tmp"
@@ -716,7 +731,9 @@ def _capture_terminate(proc):
 def _capture_clear(proc):
     with _capture_lock:
         if _capture_state.get("proc") is proc:
-            _capture_state.update(proc=None, thread=None, stop=None, device=None, started=0.0)
+            _capture_state.update(proc=None, thread=None, stop=None, device=None,
+                                  started=0.0, session_dir=None, session_ts=None,
+                                  session_log=None, rec_path=None)
 
 
 def _capture_running():
@@ -726,33 +743,39 @@ def _capture_running():
 
 
 def _capture_watchdog(proc, stop):
-    """Poll the kill-switch flag every few seconds; stop ffmpeg when it dies on its
-    own, when the flag says 'stop'/is missing, or when it has gone stale."""
+    """Poll the kill-switch flag; stop ffmpeg when it dies on its own or the flag says
+    'stop'. NO staleness timeout -- GO means GO, the stream runs until an explicit Stop
+    (a long WAIT pause must never kill a live recording)."""
     while not stop.wait(3.0):
         if proc.poll() is not None:                 # ffmpeg exited by itself
             _flag_write("stop", "ffmpeg-exit")
             _capture_clear(proc)
             return
         flag = _flag_read()
-        ts = (flag or {}).get("ts", 0.0)
-        stale = (time.time() - ts) > CAPTURE_STALE_SECS if ts else True
-        if flag is None or flag.get("state") == "stop" or stale:
+        if flag is not None and flag.get("state") == "stop":
             _capture_terminate(proc)
-            _flag_write("stop", "stale" if stale else "flag-stop")
             _capture_clear(proc)
             return
 
 
-def _capture_try(name, frame):
+def _capture_try(name, frame, rec_path):
     """Start ffmpeg on ONE non-camera device (BY NAME, never index -- a name matches
     atomically inside ffmpeg and can't slide onto the camera between enumerate and launch)
-    and VERIFY it actually captures: the process must stay up AND write a FRESH frame within
-    a short grace. On success leaves the live state + watchdog running and returns
+    with TWO outputs: the rolling still Claude reads + the full-quality take recording.
+    VERIFY it actually captures (the process stays up AND writes a FRESH frame within a
+    short grace). On success leaves the live state + watchdog running and returns
     (True, ""); on failure terminates the process and returns (False, reason) so the caller
-    can try the next device. Low-res by design (console video): 1280x720@10, don't tune."""
+    can try the next device. Low-res by design (console video): 1280x720@10. Video only --
+    no audio (the mic is forbidden by the privacy rule; dub game sound in post)."""
     cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
            "-f", "avfoundation", "-video_size", "1280x720", "-framerate", "10",
-           "-pixel_format", "uyvy422", "-i", name, "-update", "1", "-y", frame]
+           "-pixel_format", "uyvy422", "-i", name,
+           # output 1: the rolling still Claude reads (overwritten in place)
+           "-map", "0:v", "-update", "1", "-y", frame,
+           # output 2: the take recording (macOS hw encoder; ffmpeg finalises the mp4 on
+           # terminate()'s grace, so an explicit Stop yields a clean, editable file)
+           "-map", "0:v", "-c:v", "h264_videotoolbox", "-b:v", "6000k",
+           "-pix_fmt", "yuv420p", "-y", rec_path]
     t0 = time.time()
     try:
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
@@ -760,7 +783,7 @@ def _capture_try(name, frame):
     except OSError as exc:
         return False, "ffmpeg failed to start: %s" % exc
     captured = False
-    deadline = t0 + 4.0   # a valid device opens + writes a frame in ~1-2s (avfoundation warm-up); a bad/busy one exits fast
+    deadline = t0 + 6.0   # a valid device opens + writes a frame in ~1-2s (avfoundation warm-up + encoder init); a bad/busy one exits fast
     while time.time() < deadline:
         if proc.poll() is not None:
             return False, "ffmpeg exited (rc=%s)" % proc.returncode
@@ -787,13 +810,15 @@ def _capture_try(name, frame):
 
 
 def _capture_start():
-    """Start the persistent HDMI capture (idempotent). Tries each NON-camera device in
-    turn (configured card first, then any other) and keeps the first that actually
-    captures -- recover, don't error on the first miss. Returns (ok, info|error_str)."""
+    """Start the persistent HDMI capture (idempotent). Opens a fresh SESSION (timestamp
+    dir + recording + coaching log), tries each NON-camera device in turn (configured card
+    first, then any other) and keeps the first that actually captures. Returns
+    (ok, info|error_str)."""
     if _capture_running():
         _flag_write("go", "go-refresh")
         with _capture_lock:
-            return True, {"running": True, "device": _capture_state["device"], "reused": True}
+            return True, {"running": True, "device": _capture_state["device"],
+                          "reused": True, "session": _capture_state.get("session_ts")}
     try:
         cands = _capture_candidates()
     except ValueError as exc:
@@ -803,12 +828,19 @@ def _capture_start():
         os.makedirs(_capture_dir(), exist_ok=True)
     except OSError:
         pass
+    ts, sdir, slog, rec_path = _session_open()
+    with _capture_lock:
+        _capture_state.update(session_ts=ts, session_dir=sdir,
+                              session_log=slog, rec_path=rec_path)
     errors = []
     for idx, name in cands:
-        ok, err = _capture_try(name, frame)
+        ok, err = _capture_try(name, frame, rec_path)
         if ok:
-            return True, {"running": True, "device": name, "frame": frame}
+            return True, {"running": True, "device": name, "frame": frame, "session": ts}
         errors.append("%s[%s]: %s" % (name, idx, err))
+    with _capture_lock:                       # nothing captured -- drop the empty session
+        _capture_state.update(session_ts=None, session_dir=None,
+                              session_log=None, rec_path=None)
     return False, "no working capture device (tried %d) -> %s" % (len(cands), " | ".join(errors))
 
 
@@ -1131,6 +1163,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/control/capture":
             self._handle_capture_status()
 
+        elif parsed.path == "/control/log":
+            self._handle_control_log_get()
+
+        elif parsed.path == "/control/frame":
+            self._handle_control_frame()
+
         else:
             self._send(404, {"error": "not found"})
 
@@ -1398,48 +1436,47 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return None
 
     def _handle_control_signal(self):
-        """POST /control/signal {state:'wait'|'go', source, target, mapping}. Appends
-        one JSONL line to the gitignored collaboration log (logs/control.log) that the
-        chat-agreed 'Claude plays the console' flow tails: GO = play, WAIT = stop.
-        GO also STARTS the HDMI capture (Claude can't -- Pluto owns that); WAIT only
-        logs, it never stops the stream (the capture.flag kill-switch does)."""
+        """POST /control/signal {state, source, target, mapping, role}. The coaching
+        channel + GO/WAIT: GO opens the session + rolls capture FIRST (so GO is the first
+        line of that take's log), then every message appends one JSONL line to the CURRENT
+        take's coaching log (dist/capture/<ts>/session.log). WAIT/free-text only log.
+        Claude (tailing the take log) interprets; only GO has a side effect."""
         body = self._read_json_body()
         if body is None:
             return
         # Free-form on purpose: the client sends whatever -- the "go"/"wait"/"look" keys
-        # from the buttons, or a free-text command from the input box ("left or right?").
-        # Pluto just logs it; Claude (tailing the log) interprets. Only "go" has a side
-        # effect (rolls capture). No per-message endpoint needed -- it's all this log.
+        # from the buttons, or free-text coaching from the input ("too far", "left?").
         state = str(body.get("state", "")).strip()
         if not state:
             self._send(400, {"error": "empty message"})
             return
+        resp = {"ok": True, "state": state}
+        if state == "go":               # GO opens the session BEFORE we log, so GO lands in it
+            ok, info = _capture_start()
+            resp["capture"] = info if ok else {"error": info}
         rec = {"ts": round(time.time(), 3),
                "iso": datetime.now().isoformat(timespec="seconds"),
                "state": state,
+               "role": str(body.get("role", "")) or ("system" if state in ("go", "wait", "look") else "operator"),
                "source": str(body.get("source", "")) or None,
                "target": str(body.get("target", "")) or None,
                "mapping": str(body.get("mapping", "")) or None,
                "by": self._identify()}
         try:
-            with open(_control_log_path(), "a", encoding="utf-8") as f:
+            with open(_session_log_path(), "a", encoding="utf-8") as f:
                 f.write(json.dumps(rec) + "\n")
         except OSError as exc:
             self._send(200, {"ok": False, "error": "log write failed: %s" % exc})
             return
         print("  [control] %s (%s)" % (state[:60], rec["by"] or "?"))
-        resp = {"ok": True, "state": state}
-        if state == "go":                          # GO begins the session -> roll capture
-            ok, info = _capture_start()
-            resp["capture"] = info if ok else {"error": info}
         self._send(200, resp)
 
     def _handle_control_signal_get(self):
         """GET /control/signal -> the latest logged WAIT/GO record (or null). A cheap
-        point-read of the collaboration log's tail."""
+        point-read of the current take log's tail."""
         last = None
         try:
-            with open(_control_log_path(), encoding="utf-8") as f:
+            with open(_session_log_path(), encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line:
@@ -1455,10 +1492,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, {"latest": rec})
 
     def _handle_capture(self, body):
-        """POST /control/capture {action}. start (idempotent) | stop | keepalive.
-        Pluto owns the capture lifecycle so Claude can't -- start is reachable only
-        through Pluto (and is what GO triggers). Keepalive bumps the kill-switch flag
-        so an open page keeps a running capture alive."""
+        """POST /control/capture {action}. start (idempotent, = what GO triggers) | stop.
+        Pluto owns the capture lifecycle so Claude can't reach start. GO means GO: the
+        only way to end capture is an explicit stop (no keepalive, no staleness)."""
         action = str(body.get("action", "")).strip()
         if action == "start":
             ok, info = _capture_start()
@@ -1471,28 +1507,62 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif action == "stop":
             _capture_stop("stop-button")
             self._send(200, {"ok": True, "running": False})
-        elif action == "keepalive":
-            running = _capture_running()
-            flag = _flag_read()
-            if running and flag and flag.get("state") == "go":
-                _flag_write("go", "keepalive")     # don't resurrect a stopped capture
-            self._send(200, {"ok": True, "running": running})
         else:
             self._send(400, {"error": "unknown capture action"})
 
     def _handle_capture_status(self):
-        """GET /control/capture -> {running, device, started, flag, frame_mtime}."""
+        """GET /control/capture -> {running, device, started, session, recording, flag,
+        frame_mtime}."""
         with _capture_lock:
             proc = _capture_state.get("proc")
             info = {"running": bool(proc and proc.poll() is None),
                     "device": _capture_state.get("device"),
-                    "started": _capture_state.get("started") or None}
+                    "started": _capture_state.get("started") or None,
+                    "session": _capture_state.get("session_ts"),
+                    "recording": bool(_capture_state.get("rec_path"))}
         info["flag"] = _flag_read()
         try:
             info["frame_mtime"] = round(os.path.getmtime(_capture_frame_path()), 3)
         except OSError:
             info["frame_mtime"] = None
         self._send(200, info)
+
+    def _handle_control_log_get(self):
+        """GET /control/log -> {lines:[...], session}. The CURRENT take's coaching log --
+        the feed the Claude screen renders (operator coaching + Claude's status). Cheap
+        full read; a take is short."""
+        lines = []
+        try:
+            with open(_session_log_path(), encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        lines.append(json.loads(line))
+                    except ValueError:
+                        pass
+        except OSError:
+            lines = []
+        flag = _flag_read()
+        self._send(200, {"lines": lines[-200:], "session": (flag or {}).get("dir")})
+
+    def _handle_control_frame(self):
+        """GET /control/frame -> the rolling JPEG bytes (what Claude sees), for the
+        on-screen capture pane. no-cache so the <img> shows live frames."""
+        try:
+            with open(_capture_frame_path(), "rb") as f:
+                data = f.read()
+        except OSError:
+            self._send(404, {"error": "no frame"})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self._cors_headers()
+        self.end_headers()
+        self.wfile.write(data)
 
     def _make_sink(self, controller, target, mapping, dev=None):
         """Open a FRESH sink for `target` (pi -> NetworkSink to the hub; keyboard ->

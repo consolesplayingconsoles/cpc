@@ -209,15 +209,16 @@ function openMappingDir() {
    header -- it holds the source/target/mapping pickers + the virtual remote. */
 .control-head { background: var(--surface); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
 
-.rail { display: flex; align-items: center; gap: 10px; padding: 9px 20px; min-height: 58px; }
+/* responsive rail: wraps on narrow screens (portrait half-screen), stacks to 3 rows */
+.rail { display: flex; align-items: center; gap: 10px; padding: 9px 16px; min-height: 58px; flex-wrap: wrap; }
 /* drive errors are owned by Control and surfaced here in the shared bar. */
-.rail-err { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #c0392b; background: rgba(192, 57, 43, 0.10); border: 1px solid rgba(192, 57, 43, 0.28); border-radius: 6px; padding: 3px 8px; }
-.rail-ctl { display: flex; align-items: center; gap: 7px; font-family: var(--font-sans); font-size: 12px; color: var(--text-muted); }
-.rail-ctl > span { font-weight: 600; letter-spacing: 0.02em; }
+.rail-err { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #c0392b; background: rgba(192, 57, 43, 0.10); border: 1px solid rgba(192, 57, 43, 0.28); border-radius: 6px; padding: 3px 8px; }
+.rail-ctl { display: flex; align-items: center; gap: 7px; font-family: var(--font-sans); font-size: 12px; color: var(--text-muted); flex-wrap: nowrap; }
+.rail-ctl > span { font-weight: 600; letter-spacing: 0.02em; min-width: fit-content; }
 .rail-ctl.off { opacity: 0.5; }
 .rail-ctl select { font-family: var(--font-sans); font-size: 12.5px; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; cursor: pointer; }
 .rail-ctl select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.rail-arrow { color: var(--text-faint); font-size: 14px; }
+.rail-arrow { color: var(--text-faint); font-size: 14px; flex-shrink: 0; }
 /* config icon sits right after Mapping — it opens that mapping's folder. */
 .rail-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; color: var(--text-muted); background: transparent; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; transition: color .15s, border-color .15s, background .15s; }
 .rail-icon:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
