@@ -11,6 +11,7 @@
 // is the human's collaboration surface on the Claude screen.
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Joystick from 'vue-joystick-component'
+import { joystickToAxis, keysToAxis, isDirButton, AXIS_CENTER } from '../lib/analog'
 
 interface LayoutKey { key: string; btn: string; label: string; col: number; row: number }
 interface Mapping { controller?: string; layout?: LayoutKey[]; colors?: Record<string, string> }
@@ -53,6 +54,27 @@ const isGC   = computed(() => ctrl.value.includes('gamecube'))
 const isDC   = computed(() => ctrl.value.includes('dreamcast'))
 const hasMain = computed(() => isGC.value || isDC.value)
 const hasC    = computed(() => isGC.value)
+
+// ── WASD -> analog (Guide Dog mode) ────────────────────────────────────────
+// When on, the directional keys/caps steer the MAIN analog stick instead of tapping
+// the d-pad -- smooth analog walking for nudging Claude. Only meaningful where the
+// console actually has an analog stick (hasMain). Persisted per the cpc.<domain>.<leaf>
+// localStorage convention.
+const WASD_ANALOG_KEY = 'cpc.control.wasdAnalog'
+const wasdAnalog = ref(localStorage.getItem(WASD_ANALOG_KEY) === '1')
+watch(wasdAnalog, (v) => localStorage.setItem(WASD_ANALOG_KEY, v ? '1' : '0'))
+const analogKeys = computed(() => wasdAnalog.value && hasMain.value)
+
+// current key-driven stick position, tracked so the controlled stick display can follow
+const keyAxis = ref({ ...AXIS_CENTER })
+const stickKnobStyle = computed(() => {
+  const s = stickSize.value
+  const knob = Math.round(s * 0.44)          // match vue-joystick-component's knob proportion
+  const r = (s - knob) / 2 * 0.72           // travel radius
+  const dx = (keyAxis.value.x - 0.5) * 2 * r
+  const dy = -(keyAxis.value.y - 0.5) * 2 * r   // flip Y: CSS down = op-space down
+  return { width: knob + 'px', height: knob + 'px', transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))` }
+})
 
 // Dynamic size: the controller scales to FIT the box it is handed (the Claude page is
 // often a narrow, short, half-screen portrait). We measure that box (`box`, from a
@@ -126,14 +148,30 @@ function press(btn: string) {
   if (pressed.value.has(btn)) return            // ignore key auto-repeat / re-entry
   const s = new Set(pressed.value); s.add(btn); pressed.value = s
   startKeepalive()
-  holdPost(btn, true)
+  if (analogKeys.value && isDirButton(btn)) sendKeyAxis()
+  else holdPost(btn, true)
 }
 function release(btn: string) {
   if (!pressed.value.has(btn)) return
   const s = new Set(pressed.value); s.delete(btn); pressed.value = s
-  holdPost(btn, false)
+  if (analogKeys.value && isDirButton(btn)) sendKeyAxis()
+  else holdPost(btn, false)
 }
 function releaseAll() { for (const b of Array.from(pressed.value)) release(b) }
+
+// WASD->analog: recompute the stick from the currently-held directional keys and send it
+// as one MAIN axis op (the pure vector math lives in lib/analog, unit-tested).
+function sendKeyAxis() {
+  const v = keysToAxis(Array.from(pressed.value).filter(isDirButton))
+  keyAxis.value = v   // keep dot in sync
+  axisPost('MAIN', v.x, v.y)
+}
+// Toggling mid-session: release everything, recentre stick and dot.
+watch(analogKeys, (on) => {
+  releaseAll()
+  axisPost('MAIN', AXIS_CENTER.x, AXIS_CENTER.y)
+  if (!on) keyAxis.value = { ...AXIS_CENTER }
+})
 
 // Analog: the joystick move event gives pixel offsets from centre; normalise to an
 // axis op (0..1, 0.5 = centre; screen-up = axis-up, so y is inverted). Sent as an
@@ -150,13 +188,11 @@ async function axisPost(name: string, x: number, y: number) {
   } catch { emit('drive-error', 'API unreachable') }
 }
 function stickMove(name: string, e: { x?: number; y?: number }) {
-  const half = stickSize.value / 2
-  const nx = Math.max(-1, Math.min(1, (e?.x ?? 0) / half))
-  const ny = Math.max(-1, Math.min(1, (e?.y ?? 0) / half))
+  const v = joystickToAxis(e)   // normalise -> op-space (pure, unit-tested in lib/analog)
   startKeepalive()
-  axisPost(name, +(0.5 + 0.5 * nx).toFixed(3), +(0.5 - 0.5 * ny).toFixed(3))
+  axisPost(name, v.x, v.y)
 }
-function stickStop(name: string) { axisPost(name, 0.5, 0.5) }   // recentre on release
+function stickStop(name: string) { axisPost(name, AXIS_CENTER.x, AXIS_CENTER.y) }   // recentre on release
 
 // keepalive: hold the live sink open the whole time the board is active so each keypress
 // is low-latency (no reconnect). The backend watchdog releases everything if these stop
@@ -260,29 +296,37 @@ function capStyle(it: LayoutKey) {
 <template>
   <div class="ck" :class="{ compact }">
     <div class="ck-head">
-      <span class="ck-title">{{ def?.controller || mapping || 'Controller' }} - <span v-if="heading" class="ck-assist">{{ heading }}</span></span>
+      <span class="ck-title">{{ def?.controller || mapping || 'Controller' }}<span v-if="heading"> - <span class="ck-assist">{{ heading }}</span></span></span>
     </div>
 
     <div ref="fitEl" class="ck-fit">
     <div v-if="layout.length" class="ck-pad" :class="{ off: !canDrive }" :style="padStyle">
-      <!-- main analog stick (grey): top-left, above the d-pad -->
+      <!-- main analog stick (grey): top-left. Toggle lives here so it's spatially linked. -->
       <div v-if="hasMain" class="ck-stick main">
-        <Joystick :size="stickSize" base-color="#cdd0d4" stick-color="#5b6068" :throttle="80"
-          :disabled="!canDrive" @move="stickMove('MAIN', $event)" @stop="stickStop('MAIN')" />
-        <span class="ck-stick-tag">Analog</span>
+        <div class="ck-stick-wrap" :style="{ width: stickSize + 'px', height: stickSize + 'px' }">
+          <Joystick :size="stickSize" base-color="#cdd0d4" stick-color="#5b6068" :throttle="80"
+            :disabled="!canDrive" @move="stickMove('MAIN', $event)" @stop="stickStop('MAIN')" />
+          <!-- dot follows key presses in analog-keys mode -->
+          <div v-if="analogKeys" class="key-dot" :style="stickKnobStyle" />
+        </div>
+        <button class="analog-pill" :class="{ on: wasdAnalog }" @click="wasdAnalog = !wasdAnalog"
+                title="Guide Dog mode: direction keys steer the analog stick">
+          <span class="analog-pill-thumb" />
+        </button>
+        <span class="ck-stick-tag" :class="{ active: analogKeys }">{{ analogKeys ? 'Analog' : 'D-Pad' }}</span>
       </div>
 
       <div class="ck-board" :style="boardStyle">
         <button
           v-for="it in layout" :key="it.btn"
-          class="cap" :class="{ down: isDown(it.btn) }" :style="capStyle(it)"
+          class="cap" :class="{ down: isDown(it.btn), 'analog-dir': analogKeys && isDirButton(it.btn) }" :style="capStyle(it)"
           @pointerdown.prevent="onCapDown($event, it.btn)"
           @pointerup="onCapUp($event, it.btn)"
           @pointercancel="onCapUp($event, it.btn)"
           @pointerleave="onCapUp($event, it.btn)"
         >
           <span class="cap-key">{{ keyGlyph(it.key) }}</span>
-          <span class="cap-btn">{{ it.label }}</span>
+          <span class="cap-btn">{{ isDirButton(it.btn) ? (analogKeys ? 'A-' : 'D-') + it.label : it.label }}</span>
         </button>
       </div>
 
@@ -314,8 +358,36 @@ function capStyle(it: LayoutKey) {
 .ck-stick { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 4px; user-select: none; }
 .ck-stick.main { top: 0; left: 0; }
 .ck-stick.cstick { bottom: 0; right: 0; }
-.ck-stick-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); }
+.ck-stick-wrap { position: relative; flex-shrink: 0; }
+.ck-stick-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); transition: color 0.18s; }
+.ck-stick-tag.active { color: var(--accent); }
 .ck-stick-tag.c { color: #a9820a; }
+
+/* pill toggle -- sits between the joystick and the "Analog/Keys" label */
+.analog-pill {
+  position: relative; width: 32px; height: 18px;
+  background: var(--line-strong); border: none; border-radius: 9px;
+  cursor: pointer; padding: 0; transition: background 0.18s; flex-shrink: 0;
+}
+.analog-pill.on { background: var(--accent); }
+.analog-pill-thumb {
+  position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3); transition: transform 0.18s;
+  pointer-events: none;
+}
+.analog-pill.on .analog-pill-thumb { transform: translateX(14px); }
+
+/* dot that follows key presses when analog-keys mode is on */
+.key-dot {
+  position: absolute; top: 50%; left: 50%;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); opacity: 0.85;
+  pointer-events: none; transition: transform 0.06s ease-out;
+}
+
+/* directional caps in analog-keys mode: accent ring so they're visually distinct */
+.cap.analog-dir { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 /* --cap is computed in JS to fit the measured box; the grid + text scale off it */
 .ck-board { display: grid; gap: 8px; }
