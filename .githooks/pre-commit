@@ -21,7 +21,16 @@ if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
 
 # Run each suite directly (NO pipe -- a pipe would mask the test's exit code and let a
 # failing test sail through). unittest prints its own pass/fail summary to stderr.
-echo "[pre-commit] drive-pipeline tests..."
+echo "[pre-commit] drive-pipeline tests (python)..."
 $PY pluto/api/drive/test_controller.py
 $PY pluto-pi-hub/test_hid.py
+
+# Frontend analog math (the joystick/WASD coordinate bug). Skipped only if deps aren't
+# installed (e.g. a python-only checkout) -- never silently skipped when it COULD run.
+if [ -x pluto/node_modules/.bin/vitest ]; then
+  echo "[pre-commit] analog math tests (vitest)..."
+  ( cd pluto && ./node_modules/.bin/vitest run )   # call the binary directly: yarn/npm agnostic
+else
+  echo "[pre-commit] (skip vitest: run 'yarn install' in pluto/ to enable frontend tests)"
+fi
 echo "[pre-commit] ok"
