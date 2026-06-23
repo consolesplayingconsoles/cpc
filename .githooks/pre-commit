@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# CPC pre-commit: run the drive-pipeline unit tests before every commit.
+#
+# These guard the controller/HID translation layer -- the pure logic between the
+# Pluto UI and the Pico. The HID tests in particular pin the 10-byte UART frame
+# and its XOR checksum (stick bytes included): if that layout ever drifts from the
+# firmware (firmware/ps3/uartinput.cpp), every analog frame is silently dropped, so
+# this is the regression we never want to ship.
+#
+# Pure stdlib unittest -- no pytest, no venv needed; runs in well under a second.
+# To skip in a pinch: git commit --no-verify
+#
+# Installed via a tracked hooks dir, so it travels with the repo:
+#     git config core.hooksPath .githooks
+set -eu
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
+
+# Run each suite directly (NO pipe -- a pipe would mask the test's exit code and let a
+# failing test sail through). unittest prints its own pass/fail summary to stderr.
+echo "[pre-commit] drive-pipeline tests..."
+$PY pluto/api/drive/test_controller.py
+$PY pluto-pi-hub/test_hid.py
+echo "[pre-commit] ok"

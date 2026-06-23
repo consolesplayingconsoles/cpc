@@ -130,12 +130,6 @@ function lineKind(l: LogLine): 'operator' | 'claude' {
 // Claude's name colour, borrowed from its node (so the feed matches the chat); accent fallback.
 const claudeColor = computed(() => props.nodes?.['claude']?.color ?? 'var(--accent)')
 
-function feedTime(l: LogLine): string {
-  const d = l.iso ? new Date(l.iso) : new Date((l.ts || 0) * 1000)
-  if (isNaN(d.getTime())) return ''
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
-}
-
 // Flat feed: each line is "Name: text" inline. System signals (go/wait/look) show as "You: go".
 interface FeedItem { key: number; name: string; color: string; text: string }
 const feedItems = computed<FeedItem[]>(() =>

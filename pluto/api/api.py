@@ -44,6 +44,9 @@ def open_path(path):
 
 PORT = 7700
 
+# Cache retro.html path at module load (resolves once, survives dev reloads)
+_RETRO_HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "retro.html")
+
 
 # ── @claude bot (Anthropic API) ──────────────────────────────────────────────
 # Claude as a guest in the chat, running on the operator's own Anthropic API key.
@@ -986,9 +989,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _serve_retro(self):
         """Serve the barebones retro-console chat page with the client config +
         the requester's identity inlined (no fetch, no build step)."""
-        script_dir = os.path.dirname(os.path.abspath(__file__))
         try:
-            with open(os.path.join(script_dir, "retro.html"), "r") as f:
+            with open(_RETRO_HTML_PATH, "r") as f:
                 html = f.read()
         except Exception:
             self._send(500, {"error": "retro.html missing"})
@@ -1009,7 +1011,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ]
         inlined = {
             "me":        self._identify(),
-            "brand":     self.__class__.config.get("NODE_NAME", "CPC"),
+            "brand":     (self.__class__.config.get("NODE_NAME", "CPC") + (" Lab" if self.__class__.is_lab else " C2")),
             "primary":   self.__class__.config.get("UI_PRIMARY_COLOR", "") or "#1a1a1a",
             "secondary": self.__class__.config.get("UI_SECONDARY_COLOR", "") or "#888884",
             "handles":   handles,
@@ -1204,7 +1206,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_dreame_login()
         elif parsed.path == "/dreame/logout":
             self._handle_dreame_logout()
-        elif parsed.path == "/robutek/drive":
+        elif parsed.path == "/control/drive":
             self._handle_drive()
         elif parsed.path == "/control/signal":
             self._handle_control_signal()
@@ -1621,7 +1623,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return sink
 
     def _handle_hold(self, body):
-        """POST /robutek/drive {action:'hold', down, btn|key, target, source, mapping}.
+        """POST /control/drive {action:'hold', down, btn|key, target, source, mapping}.
         Live press/release: down=true holds the button, down=false releases it. The
         button resolves from an explicit `btn` or a `key` via the mapping's `controls`.
         Keepalive (the page heartbeat) keeps the held sink alive between keystrokes."""
@@ -1654,7 +1656,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, {"ok": True, op: btn})
 
     def _handle_axis(self, body):
-        """POST /robutek/drive {action:'axis', name, x, y, target, source, mapping}.
+        """POST /control/drive {action:'axis', name, x, y, target, source, mapping}.
         Live analog stick: x/y in 0..1 (0.5 = center). `name` picks the stick
         (MAIN -> left, C/RIGHT -> right); the sink/Pico maps the axis, so no mapping
         entry is needed. Shares the live sink with hold, so sticks + buttons go over
@@ -1689,7 +1691,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, {"ok": True, "axis": name})
 
     def _handle_drive(self):
-        """POST /robutek/drive {action, target, session, t, speed, mapping}.
+        """POST /control/drive {action, target, session, t, speed, mapping}.
 
         Drives the selected output from the Pluto playback clock. action 'play'
         (re)starts a paced replay from offset t at speed; 'pause'/'stop' release.

@@ -6,7 +6,7 @@
 // that fires it plus the button name.
 //
 // It is a real input device: physical keydown/keyup AND click press-and-HOLD the button
-// (keydown = press, keyup = release) over /robutek/drive's `hold` action, so movement
+// (keydown = press, keyup = release) over /control/drive's `hold` action, so movement
 // sustains while held. Pressed keys light up for feedback either way. The same component
 // is the human's collaboration surface on the Claude screen.
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
@@ -114,7 +114,7 @@ const keyMap = computed(() => {
 async function holdPost(btn: string, down: boolean) {
   if (!canDrive.value) return
   try {
-    const r = await fetch(`${API}/robutek/drive`, {
+    const r = await fetch(`${API}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'hold', down, btn, target: props.target, source: props.mapSource, mapping: props.mapping, ...(props.target === 'pi' && props.targetDev ? { dev: props.targetDev } : {}) }),
     })
@@ -141,11 +141,12 @@ function releaseAll() { for (const b of Array.from(pressed.value)) release(b) }
 async function axisPost(name: string, x: number, y: number) {
   if (!canDrive.value) return
   try {
-    await fetch(`${API}/robutek/drive`, {
+    const r = await fetch(`${API}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'axis', name, x, y, target: props.target, source: props.mapSource, mapping: props.mapping, ...(props.target === 'pi' && props.targetDev ? { dev: props.targetDev } : {}) }),
     })
-    emit('drive-error', '')
+    const j = await r.json().catch(() => null)
+    emit('drive-error', j && j.ok === false ? (j.error || 'axis failed') : '')
   } catch { emit('drive-error', 'API unreachable') }
 }
 function stickMove(name: string, e: { x?: number; y?: number }) {
@@ -165,7 +166,7 @@ function startKeepalive() {
   if (ka || !canDrive.value) return
   ka = window.setInterval(() => {
     if (!canDrive.value) return
-    fetch(`${API}/robutek/drive`, {
+    fetch(`${API}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'keepalive' }),
     }).catch(() => {})
@@ -177,7 +178,7 @@ function teardown() {
   releaseAll()
   stopKeepalive()
   if (canDrive.value) {
-    fetch(`${API}/robutek/drive`, {
+    fetch(`${API}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'pause' }),
     }).catch(() => {})

@@ -195,7 +195,7 @@ async function drivePost(payload: Record<string, unknown>) {
   // forwards it onto the ops; the hub frames to bridges[dev]). No-op for non-pi payloads.
   const body = (payload.target === 'pi' && props.targetDev) ? { ...payload, dev: props.targetDev } : payload
   try {
-    const r = await fetch(`${API}/robutek/drive`, {
+    const r = await fetch(`${API}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
@@ -215,7 +215,7 @@ function startKeepalive() {
   if (keepaliveTimer) return
   keepaliveTimer = window.setInterval(() => {
     if (driveTarget.value === 'none') return
-    fetch(`${API}/robutek/drive`, {
+    fetch(`${API}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'keepalive' }),
     }).catch(() => {})
@@ -237,7 +237,7 @@ function stopDriveOutput() {
 function stopBeacon() {
   if (driveTarget.value === 'none') return
   try {
-    navigator.sendBeacon(`${API}/robutek/drive`,
+    navigator.sendBeacon(`${API}/control/drive`,
       new Blob([JSON.stringify({ action: 'pause' })], { type: 'application/json' }))
   } catch { /* tab is going away; best effort only */ }
 }
