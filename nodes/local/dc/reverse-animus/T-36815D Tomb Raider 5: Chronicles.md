@@ -29,7 +29,7 @@ the pad before trusting it.
 
 | Move | Function | PlayStation (ref) | Dreamcast |
 |------|----------|-------------------|-----------|
-| Run / back / turn | Up run, Down hop back, Left/Right **rotate** (tank steering, not strafe) | D-pad / stick | D-pad / stick (ENGINE) |
+| Run / back / turn | Up run, Down hop back, Left/Right **rotate** (tank steering, not strafe) | D-pad / stick | **Analog stick = RUN; D-pad = WALK only** (platform-confirmed 2026-06-23) |
 | Walk (hold) | Slow; cannot fall off an edge or trip a trap tile | R1 | **B** (op-ref, validate) |
 | Sidestep | Strafe without turning | R1 + Left/Right | **B + Left/Right** (op-ref) |
 | Jump | Standing (1 tile); add direction for a directional jump | Square | **X** (by elimination, validate) |
@@ -172,9 +172,12 @@ same mechanical-enemy family, so cover-and-strafe carries over.
 * Lock the real Dreamcast mapping from Options > Controls and validate over the
   guide-dog chat. Resolve Roll, Look, Duck/crawl, Inventory; confirm B=Walk,
   X=Jump, Y=Draw, R=Sprint. **TBD.**
+* **Analog stick = run confirmed.** D-pad gives walk steps only. Use analog for
+  all sustained movement. (Platform-confirmed 2026-06-23 session 1.)
+* Turn rate: 1.2s of full analog-left/right overshot 90 degrees into the wall.
+  True 90-degree turn duration is **LIVE/TBD** — measure and record.
 * Movement units (hold durations, fired open-loop): ms to walk one tile, ms to run
-  one tile, ms for a 90-degree turn, press length for a standing jump and a
-  running jump. **TBD.**
+  one tile, press length for a standing jump and a running jump. **TBD.**
 * Reload drill: read the health bar each frame; the reload path is ring > Load >
   confirm (a menu sequence). Time it once. **TBD.**
 * Confirm whether this build opens with a training/backstage stretch, and its
