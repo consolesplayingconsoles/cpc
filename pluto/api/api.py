@@ -21,6 +21,11 @@ import re
 import atexit
 import signal
 from datetime import datetime
+try:
+    from PIL import Image, ImageEnhance, ImageOps
+    _PIL_OK = True
+except ImportError:
+    _PIL_OK = False
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 
@@ -181,6 +186,30 @@ def _claude_reply(messages_snapshot):
         reply = random.choice(_BOT_AWAY)
 
     _new_message(BOT_ID, reply)
+
+
+def _dropbox_sync(text, roster):
+    """Forward @dropbox sync to the Pi hub and relay its reply as 'dropbox'."""
+    pi = (roster or {}).get("pi") or {}
+    host = pi.get("HOST_IP", "").strip()
+    port = pi.get("PI_SYNC_PORT", "7721").strip()
+    if not host:
+        _new_message("dropbox", "Pi node has no HOST_IP — sync unavailable.")
+        return
+    # parse optional @target from text (e.g. "@dropbox sync @dc")
+    target = next((t[1:] for t in text.lower().split() if t.startswith("@") and t != "@dropbox"), None)
+    try:
+        import urllib.request as _ur
+        import json as _json
+        payload = _json.dumps({"action": "sync", "target": target}).encode()
+        req = _ur.Request("http://%s:%s/sync" % (host, port),
+                          data=payload, headers={"Content-Type": "application/json"})
+        with _ur.urlopen(req, timeout=10) as r:
+            result = _json.loads(r.read().decode())
+        msg = result.get("message") or result.get("error") or "sync done."
+    except Exception as exc:
+        msg = "sync failed: %s" % exc
+    _new_message("dropbox", msg)
 
 
 def _substack_post(creds, content):
@@ -773,6 +802,31 @@ def _capture_watchdog(proc, stop):
             return
 
 
+def _frame_processor(src, dst, stop):
+    """Background thread: watches src (latest.jpg) for mtime changes and writes a
+    contrast-boosted copy to dst (latest-processed.jpg). Stops when stop is set."""
+    if not _PIL_OK:
+        return
+    last_mtime = 0.0
+    while not stop.wait(0.3):
+        try:
+            mt = os.path.getmtime(src)
+        except OSError:
+            continue
+        if mt <= last_mtime:
+            continue
+        last_mtime = mt
+        try:
+            img = Image.open(src).convert("RGB")
+            img = img.resize((img.width // 4, img.height // 4), Image.LANCZOS)
+            img = ImageOps.grayscale(img).convert("RGB")
+            img = ImageEnhance.Brightness(img).enhance(2.2)
+            img = ImageEnhance.Contrast(img).enhance(1.6)
+            img.save(dst, "JPEG", quality=80)
+        except Exception:
+            pass
+
+
 def _capture_try(name, frame, rec_path):
     """Start ffmpeg on ONE non-camera device (BY NAME, never index -- a name matches
     atomically inside ffmpeg and can't slide onto the camera between enumerate and launch)
@@ -820,6 +874,8 @@ def _capture_try(name, frame, rec_path):
     with _capture_lock:
         _capture_state["thread"] = th
     th.start()
+    processed = frame.replace("latest.jpg", "latest-processed.jpg")
+    threading.Thread(target=_frame_processor, args=(frame, processed, stop), daemon=True).start()
     print("  [capture] started %s -> %s" % (name, frame))
     return True, ""
 
@@ -1308,6 +1364,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 content = vparts[1] if len(vparts) > 1 and vparts[0].lower() == hit else ""
                 creds = self.__class__.node_roster.get("substack", {})
                 threading.Thread(target=_substack_post, args=(creds, content), daemon=True).start()
+                return
+            if node_id == "dropbox" and hit == "sync":
+                threading.Thread(target=_dropbox_sync,
+                                 args=(text, self.__class__.node_roster), daemon=True).start()
                 return
             _new_message(node_id, "'%s' is not implemented yet." % hit)
         else:

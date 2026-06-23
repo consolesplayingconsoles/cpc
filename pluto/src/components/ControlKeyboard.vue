@@ -358,7 +358,7 @@ function capStyle(it: LayoutKey) {
 .ck-stick { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 4px; user-select: none; }
 .ck-stick.main { top: 0; left: 0; }
 .ck-stick.cstick { bottom: 0; right: 0; }
-.ck-stick-wrap { position: relative; flex-shrink: 0; }
+.ck-stick-wrap { position: relative; flex-shrink: 0; z-index: 5 }
 .ck-stick-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); transition: color 0.18s; }
 .ck-stick-tag.active { color: var(--accent); }
 .ck-stick-tag.c { color: #a9820a; }

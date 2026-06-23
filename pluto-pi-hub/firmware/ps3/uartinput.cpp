@@ -46,6 +46,20 @@ void UartInput::setup() {
     uart_puts(UART_ID, "CPC-UARTINPUT-READY\n");
 }
 
+void UartInput::postprocess(bool sent) {
+    // Rumble output: read haptic strength from gamepad state, relay to Pi on change.
+    // Frame: 0xAA 0x55 0xFE <left> <right> <xor>  (0xFE = rumble marker)
+    Gamepad *gamepad = Storage::getInstance().GetGamepad();
+    uint8_t L = (uint8_t)(gamepad->auxState.haptics.leftActuator.intensity  >> 8);
+    uint8_t R = (uint8_t)(gamepad->auxState.haptics.rightActuator.intensity >> 8);
+    if (L != lastRumbleL || R != lastRumbleR) {
+        lastRumbleL = L;
+        lastRumbleR = R;
+        uint8_t frame[6] = {0xAA, 0x55, 0xFE, L, R, (uint8_t)(0xFE ^ L ^ R)};
+        uart_write_blocking(UART_ID, frame, sizeof(frame));
+    }
+}
+
 void UartInput::preprocess() {
     static uint32_t lastRxMs = 0;
 
