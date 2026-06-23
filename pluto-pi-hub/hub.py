@@ -184,10 +184,11 @@ def serve(cfg):
             _pump(conn, bridges, stop)
             print("  client gone -- released")
     finally:
-        try:
-            bridge.stop()                   # release + close the UART for the next instance
-        except Exception:
-            pass
+        for b in bridges:
+            try:
+                b.stop()
+            except Exception:
+                pass
         srv.close()
     return 0
 
