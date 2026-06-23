@@ -81,6 +81,51 @@ problem into a latency-proof form:
 4. **Discrete, not continuous.** One frame, one short move sequence, re-read. No
    long blind runs; discrete is recoverable.
 
+## Between-session work
+Every session produces data. Every gap between sessions is the window to process
+it, update the knowledge base, and set up the next run. Good play is built between
+sessions, not during them.
+
+* **After a session**: update calibration values, promote LIVE/TBD entries to
+  Platform-confirmed where data was gathered, record what was learned, note what
+  failed and why.
+* **Before a session**: review the playbook, prepare the route plan, confirm all
+  bindings are locked so the session can start playing immediately.
+* **Frame processing**: always use the h4+gray+boost pipeline (quarter resolution,
+  grayscale, contrast boost). Measured 5.7kb vs 40kb original on DC-resolution
+  frames: 7x smaller, same navigational readability. Wire it as `latest-processed.jpg`
+  in the capture pipeline; read that, never the raw frame.
+
+## Calibration protocol
+Every new game on every new console gets a calibration session before real play.
+Slow, methodical, scientific. Run it from a safe open space (no enemies, flat
+ground, room to move). Results go into the game file under `## Calibration / LIVE`.
+
+**Turn rate** (do this first, it governs everything):
+1. Face a landmark or wall that gives a clear angular reference.
+2. Hold full analog-left for a fixed duration (start with 500ms increments).
+3. Capture a frame before and after each hold.
+4. Count degrees turned per frame pair. Repeat at 500ms, 1000ms, 1500ms, 2000ms.
+5. Fit a ms-per-degree value. Record it. Test 90 degrees and 180 degrees explicitly.
+6. Repeat for analog-right (may differ).
+
+**Walk tile duration**:
+1. Align Lara to a tile edge (use the grid).
+2. Hold d-pad forward, capture before and after.
+3. Time the hold that crosses exactly one tile. Record ms-per-tile (walk).
+
+**Run tile duration**:
+1. Same setup, full analog forward.
+2. Time one tile. Record ms-per-tile (run).
+
+**Jump distances** (standing and running):
+1. Standing jump: measure tiles cleared with and without Action held (grab).
+2. Running jump: same. Record tile counts; these are fixed for the engine.
+
+All values are LIVE/TBD until measured. Once measured, mark Platform-confirmed
+and use them for all open-loop moves. Recalibrate if a different display, adapter,
+or capture card is introduced (latency may shift).
+
 ## Inputs are held: calibrate distance as time
 You never move "two tiles"; you hold a direction for a duration. Each game needs
 its movement units measured and recorded: how long to hold to cross one tile or

@@ -15,7 +15,7 @@ public:
     virtual void setup();
     virtual void process() {}
     virtual void preprocess();
-    virtual void postprocess(bool sent) {}
+    virtual void postprocess(bool sent);
     virtual void reinit() {}
     virtual std::string name() { return UartInputName; }
 private:
@@ -25,6 +25,9 @@ private:
     // latest held inputs
     uint8_t  heldDpad = 0;
     uint16_t heldButtons = 0;
+    // last sent rumble so we only TX on change
+    uint8_t lastRumbleL = 0;
+    uint8_t lastRumbleR = 0;
 };
 
 #endif  // _UartInput_H

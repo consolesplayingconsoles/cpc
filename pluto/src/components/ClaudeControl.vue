@@ -98,16 +98,27 @@ const frameAge = computed(() => {
 interface LogLine { ts: number; iso?: string; state: string; role?: string; by?: string | null }
 const lines = ref<LogLine[]>([])
 const feedEl = ref<HTMLElement | null>(null)
+const rumbleFlash = ref(false)
+let _rumbleTimer: ReturnType<typeof setTimeout> | null = null
+function _onRumble() {
+  if (_rumbleTimer) return  // debounce: one flash per burst
+  rumbleFlash.value = true
+  _rumbleTimer = setTimeout(() => { rumbleFlash.value = false; _rumbleTimer = null }, 400)
+}
 async function refreshLog() {
   try {
     const j = await (await fetch(`${API}/control/log`)).json()
-    lines.value = Array.isArray(j.lines) ? j.lines : []
+    const next: LogLine[] = Array.isArray(j.lines) ? j.lines : []
+    const prevCount = lines.value.filter(l => l.state === 'rumble').length
+    const nextCount = next.filter(l => l.state === 'rumble').length
+    if (nextCount > prevCount) _onRumble()
+    lines.value = next
     await nextTick()
     if (feedEl.value) feedEl.value.scrollTop = feedEl.value.scrollHeight
   } catch { /* leave last known */ }
 }
 const cmd = ref('')
-async function postLog(value: string, role = 'operator') {
+async function postLog(value: string, role) {
   const v = value.trim()
   if (!v) return
   try {
@@ -133,29 +144,12 @@ async function sendDrive(body: object) {
   } catch { /* best-effort */ }
 }
 
-async function cmdRun() {
-  // ~3 seconds of full analog forward, then centre
-  for (let i = 0; i < 12; i++) {
-    await sendDrive({ action: 'axis', name: 'MAIN', x: 0.5, y: 1.0 })
-    await new Promise(r => setTimeout(r, 250))
-  }
-  await sendDrive({ action: 'axis', name: 'MAIN', x: 0.5, y: 0.5 })
-}
-
-async function cmdAttack() {
-  // Draw weapon (Y), then hold fire (A) for ~1.5s, then release
-  await sendDrive({ action: 'hold', down: true,  btn: 'Y' })
-  await new Promise(r => setTimeout(r, 200))
-  await sendDrive({ action: 'hold', down: false, btn: 'Y' })
-  await new Promise(r => setTimeout(r, 100))
-  await sendDrive({ action: 'hold', down: true,  btn: 'A' })
-  await new Promise(r => setTimeout(r, 1500))
-  await sendDrive({ action: 'hold', down: false, btn: 'A' })
-}
+function cmdRun()    { postLog('run',    'operator') }
+function cmdAttack() { postLog('attack', 'operator') }
 
 // who sent a line: Claude, or the operator (including system signals like go/wait/look).
-function lineKind(l: LogLine): 'operator' | 'claude' {
-  return l.role === 'claude' ? 'claude' : 'operator'
+function lineKind(l: LogLine): string {
+  return l.role
 }
 
 // Claude's name colour, borrowed from its node (so the feed matches the chat); accent fallback.
@@ -168,7 +162,7 @@ const feedItems = computed<FeedItem[]>(() =>
     const k = lineKind(l)
     return {
       key: i,
-      name: k === 'claude' ? 'Claude' : 'You',
+      name: k === 'operator' ? 'You' : k,
       color: k === 'claude' ? claudeColor.value : 'var(--text-muted)',
       text: l.state,
     }
@@ -199,6 +193,7 @@ watch(() => props.active, (on) => { if (on) activate(); else stopLoops() })
 </script>
 
 <template>
+  <div v-if="rumbleFlash" class="cc-rumble-overlay" />
   <div class="cc">
     <div class="cc-body">
 
@@ -240,8 +235,10 @@ watch(() => props.active, (on) => { if (on) activate(); else stopLoops() })
           </button>
         </div>
 
-        <!-- Input bar: text coaching -->
+        <!-- Input bar: text coaching + quick replies -->
         <div class="cc-input-wrap">
+          <button class="cc-thumb cc-thumb--up" @click="postLog('yes')" title="Yes">👍</button>
+          <button class="cc-thumb cc-thumb--down" @click="postLog('no')" title="No">👎</button>
           <input class="cc-input" v-model="cmd" placeholder="Guide Dog…" @keydown.enter="sendCommand" />
           <button class="cc-send-btn" :disabled="!cmd.trim()" @click="sendCommand">Send</button>
         </div>
@@ -388,19 +385,21 @@ watch(() => props.active, (on) => { if (on) activate(); else stopLoops() })
 .cc-cmd:disabled { opacity: 0.35; cursor: default; }
 .cc-cmd:active:not(:disabled) { transform: scale(0.94); }
 
-.cc-cmd--go     { background: var(--ok);      color: #fff; }
-.cc-cmd--go:hover:not(:disabled)     { filter: brightness(1.1); }
-.cc-cmd--wait   { background: var(--warn);    color: #fff; }
-.cc-cmd--wait:hover:not(:disabled)   { filter: brightness(1.1); }
-.cc-cmd--stop   { background: var(--bad);     color: #fff; }
-.cc-cmd--stop:hover:not(:disabled)   { filter: brightness(1.1); }
+/* Session controls: tonal, not traffic-light */
+.cc-cmd--go     { background: var(--surface-3); color: var(--ok); border: 1px solid var(--ok); }
+.cc-cmd--go:hover:not(:disabled)   { background: var(--ok); color: #fff; }
+.cc-cmd--wait   { background: var(--surface-3); color: var(--text-muted); border: 1px solid var(--line-strong); }
+.cc-cmd--wait:hover:not(:disabled) { background: var(--line-strong); }
+.cc-cmd--stop   { background: var(--surface-3); color: var(--bad); border: 1px solid var(--bad); }
+.cc-cmd--stop:hover:not(:disabled) { background: var(--bad); color: #fff; }
 .cc-cmd-divider { width: 1px; height: 28px; background: var(--line-strong); flex-shrink: 0; margin: 0 var(--sp-1); }
-.cc-cmd--look   { background: var(--accent); color: var(--accent-ink); }
-.cc-cmd--look:hover { filter: brightness(1.1); }
-.cc-cmd--run    { background: var(--accent); color: #fff; }
-.cc-cmd--run:hover:not(:disabled) { filter: brightness(1.1); }
-.cc-cmd--attack { background: var(--accent); color: #fff; }
-.cc-cmd--attack:hover:not(:disabled) { filter: brightness(1.1); }
+/* Action commands: accent-tinted outline, fill on hover */
+.cc-cmd--look   { background: var(--surface-3); color: var(--text-muted); border: 1px solid var(--line-strong); }
+.cc-cmd--look:hover:not(:disabled) { background: var(--line-strong); }
+.cc-cmd--run    { background: var(--surface-3); color: var(--text-muted); border: 1px solid var(--line-strong); }
+.cc-cmd--run:hover:not(:disabled)  { background: var(--line-strong); }
+.cc-cmd--attack { background: var(--surface-3); color: var(--text-muted); border: 1px solid var(--line-strong); }
+.cc-cmd--attack:hover:not(:disabled) { background: var(--line-strong); }
 
 /* Input bar */
 .cc-input-wrap {
@@ -450,6 +449,18 @@ watch(() => props.active, (on) => { if (on) activate(); else stopLoops() })
 }
 .cc-send-btn:hover:not(:disabled) { background: var(--accent-hover); }
 .cc-send-btn:disabled { opacity: 0.5; cursor: default; }
+.cc-thumb {
+  flex: 0 0 auto;
+  font-size: 18px;
+  line-height: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.cc-thumb:hover { background: var(--line-strong); }
 
 /* ── Right column: video + manual assistance ── */
 .cc-right {
@@ -472,6 +483,18 @@ watch(() => props.active, (on) => { if (on) activate(); else stopLoops() })
 .cc-screen {
   width: 100%;
   min-width: 0;
+}
+.cc-rumble-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(220, 40, 40, 0.45);
+  pointer-events: none;
+  z-index: 10;
+  animation: cc-rumble-flash 0.4s ease-out forwards;
+}
+@keyframes cc-rumble-flash {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
 }
 .cc-screen-inner {
   position: relative;

@@ -65,6 +65,8 @@ def build_bridges(cfg):
     dev=...,baud=...), not a node-global. baud defaults to 115200; dev is required."""
     bridges = []
     from bridges.hid import HidBridge
+    pluto_ip = (cfg.get("PLUTO_IP") or "").strip()
+    pluto_url = ("http://%s:7700" % pluto_ip) if pluto_ip else ""
     for k in sorted(cfg):
         if not k.startswith("PICO_"):
             continue
@@ -75,7 +77,7 @@ def build_bridges(cfg):
         if not dev:
             print("  [skip] %s: conn=uart but no dev= on its line" % k)
             continue
-        bridges.append(HidBridge(dev, spec.get("baud") or "115200"))
+        bridges.append(HidBridge(dev, spec.get("baud") or "115200", pluto_url=pluto_url))
     return bridges
 
 

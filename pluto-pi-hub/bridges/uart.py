@@ -65,6 +65,17 @@ class UartLink(object):
             self.close()                    # device went away; re-open on the next send
             return False
 
+    def read1(self):
+        """Block until one byte arrives from the Pico (Pico->Pi direction).
+        Returns an int 0-255, or None on error."""
+        if self.fd is None:
+            return None
+        try:
+            b = os.read(self.fd, 1)
+            return b[0] if b else None
+        except OSError:
+            return None
+
     def close(self):
         if self.fd is not None:
             try:

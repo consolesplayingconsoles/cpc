@@ -23,6 +23,13 @@ Button STATE is held here (like controller.py's Sink) so the same op stream driv
 either target. Pure stdlib, 3.6-safe, ASCII -- runs on the Pi unchanged.
 """
 import time
+import threading
+import json as _json
+try:
+    from urllib.request import urlopen, Request as _Request
+    from urllib.error import URLError as _URLError
+except ImportError:
+    from urllib2 import urlopen, Request as _Request, URLError as _URLError
 
 try:
     from .uart import UartLink
@@ -47,30 +54,78 @@ def _to8(v):
 class HidBridge(object):
     name = "hid"
 
-    def __init__(self, device="/dev/ttyAMA0", baud=115200, repeat=2):
+    def __init__(self, device="/dev/ttyAMA0", baud=115200, repeat=2, pluto_url=""):
         # device + baud are per-board (a UART is one TX/RX pin set = one Pico), passed
         # in from that Pico's .env line -- not a node-global.
         self.device = device
         self.baud = int(baud)
         self.link = UartLink(device, self.baud)
         self.repeat = repeat               # frames per change; link's solid, >1 = belt+braces
+        self.pluto_url = pluto_url         # where to POST rumble events; empty = disabled
         self.dpad = 0
         self.buttons = 0
         self.lx = self.ly = self.rx = self.ry = _STICK_MID
         self._open = False
+        self._rumble_stop = None
+        self._rumble_thread = None
 
     # -- lifecycle (the hub supervises this) ----------------------------------
     def start(self):
         self.link.open()
         self._open = True
         self._send()                       # neutral: a known starting state
+        self._rumble_stop = threading.Event()
+        self._rumble_thread = threading.Thread(
+            target=self._rumble_reader, args=(self._rumble_stop,), daemon=True)
+        self._rumble_thread.start()
         return self
 
     def stop(self):
         if self._open:
             self.release_all()
+            if self._rumble_stop:
+                self._rumble_stop.set()
             self.link.close()
             self._open = False
+
+    def _rumble_reader(self, stop):
+        """Reads 0xFE rumble frames from Pico and POSTs them to Pluto as signal events."""
+        state = 0
+        r_left = 0
+        r_right = 0
+        while not stop.is_set():
+            b = self.link.read1()
+            if b is None:
+                time.sleep(0.05)
+                continue
+            if state == 0:
+                state = 1 if b == 0xAA else 0
+            elif state == 1:
+                state = 2 if b == 0x55 else (1 if b == 0xAA else 0)
+            elif state == 2:
+                state = 3 if b == 0xFE else 0
+            elif state == 3:
+                r_left = b; state = 4
+            elif state == 4:
+                r_right = b; state = 5
+            elif state == 5:
+                if b == (0xFE ^ r_left ^ r_right) & 0xFF:
+                    self._post_rumble(r_left, r_right)
+                state = 0
+
+    def _post_rumble(self, left, right):
+        if not self.pluto_url:
+            return
+        payload = _json.dumps({
+            "state": "rumble", "role": "pi",
+            "left": left, "right": right
+        }).encode("utf-8")
+        try:
+            req = _Request(self.pluto_url + "/control/signal",
+                           data=payload, headers={"Content-Type": "application/json"})
+            urlopen(req, timeout=1)
+        except _URLError:
+            pass
 
     def status(self):
         return {"name": self.name, "active": self._open,
