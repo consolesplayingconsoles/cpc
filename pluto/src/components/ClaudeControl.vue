@@ -122,6 +122,37 @@ async function postLog(value: string, role = 'operator') {
 function sendCommand() { if (cmd.value.trim()) { postLog(cmd.value); cmd.value = '' } }
 function takeLook() { postLog('look', 'system') }
 
+// ── Quick commands: RUN and ATTACK ────────────────────────────────────
+async function sendDrive(body: object) {
+  try {
+    await fetch(`${API}/control/drive`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target: props.target, source: props.mapSource,
+                             mapping: props.mapping, dev: props.targetDev, ...body }),
+    })
+  } catch { /* best-effort */ }
+}
+
+async function cmdRun() {
+  // ~3 seconds of full analog forward, then centre
+  for (let i = 0; i < 12; i++) {
+    await sendDrive({ action: 'axis', name: 'MAIN', x: 0.5, y: 1.0 })
+    await new Promise(r => setTimeout(r, 250))
+  }
+  await sendDrive({ action: 'axis', name: 'MAIN', x: 0.5, y: 0.5 })
+}
+
+async function cmdAttack() {
+  // Draw weapon (Y), then hold fire (A) for ~1.5s, then release
+  await sendDrive({ action: 'hold', down: true,  btn: 'Y' })
+  await new Promise(r => setTimeout(r, 200))
+  await sendDrive({ action: 'hold', down: false, btn: 'Y' })
+  await new Promise(r => setTimeout(r, 100))
+  await sendDrive({ action: 'hold', down: true,  btn: 'A' })
+  await new Promise(r => setTimeout(r, 1500))
+  await sendDrive({ action: 'hold', down: false, btn: 'A' })
+}
+
 // who sent a line: Claude, or the operator (including system signals like go/wait/look).
 function lineKind(l: LogLine): 'operator' | 'claude' {
   return l.role === 'claude' ? 'claude' : 'operator'
@@ -186,28 +217,31 @@ watch(() => props.active, (on) => { if (on) activate(); else stopLoops() })
           </div>
         </div>
 
-        <!-- Action bar: session pills + text input + send -->
+        <!-- Command bar: one row, two groups -->
+        <div class="cc-cmd-bar">
+          <button class="cc-cmd cc-cmd--go" :disabled="sending" @click="sendSignal('go')" title="Go — let Claude play (starts capture)">
+            <span class="cc-cmd-emoji">▶️</span>
+          </button>
+          <button class="cc-cmd cc-cmd--wait" :disabled="sending" @click="sendSignal('wait')" title="Wait — pause Claude (recording keeps running)">
+            <span class="cc-cmd-emoji">⏸️</span>
+          </button>
+          <button class="cc-cmd cc-cmd--stop" :disabled="!capture.running" @click="endCapture" title="Stop — end capture and save the take">
+            <span class="cc-cmd-emoji">⏹️</span>
+          </button>
+          <div class="cc-cmd-divider" />
+          <button class="cc-cmd cc-cmd--look" @click="takeLook" title="Look — have Claude read the current frame">
+            <span class="cc-cmd-emoji">👁️</span>
+          </button>
+          <button class="cc-cmd cc-cmd--run" @click="cmdRun" title="Run — analog forward ~3s">
+            <span class="cc-cmd-emoji">🏃</span>
+          </button>
+          <button class="cc-cmd cc-cmd--attack" @click="cmdAttack" title="Attack — draw pistols and fire">
+            <span class="cc-cmd-emoji">🔫</span>
+          </button>
+        </div>
+
+        <!-- Input bar: text coaching -->
         <div class="cc-input-wrap">
-          <button class="cc-pill" :class="'cc-pill--' + nextState" :disabled="sending"
-            @click="sendSignal(nextState)"
-            :title="nextState === 'go' ? 'Let Claude play — starts capture' : 'Pause Claude — recording keeps running'">
-            <svg v-if="nextState === 'go'" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5l13 7.5-13 7.5z" /></svg>
-            <svg v-else viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6.5" y="5" width="3.5" height="14" rx="1" /><rect x="14" y="5" width="3.5" height="14" rx="1" /></svg>
-            {{ nextState.toUpperCase() }}
-          </button>
-          <button class="cc-pill cc-pill--look" @click="takeLook" title="Have Claude read the current frame">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M4 7h3l1.5-2h7L17 7h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z" />
-              <circle cx="12" cy="13" r="3.5" />
-            </svg>
-            Look
-          </button>
-          <button class="cc-pill cc-pill--end" :disabled="!capture.running" @click="endCapture"
-            title="End capture and save the take — WAIT only pauses Claude">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-            End
-          </button>
-          <div class="cc-input-divider" />
           <input class="cc-input" v-model="cmd" placeholder="Guide Dog…" @keydown.enter="sendCommand" />
           <button class="cc-send-btn" :disabled="!cmd.trim()" @click="sendCommand">Send</button>
         </div>
@@ -328,7 +362,47 @@ watch(() => props.active, (on) => { if (on) activate(); else stopLoops() })
   font-size: 13px;
 }
 
-/* Action bar: session pills + divider + text input + send */
+/* Command bar — one row, evenly spread icon buttons */
+.cc-cmd-bar {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: var(--sp-2) var(--sp-3);
+  gap: var(--sp-1);
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.cc-cmd {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background 0.1s, opacity 0.1s;
+}
+.cc-cmd svg { width: 20px; height: 20px; flex-shrink: 0; }
+.cc-cmd-emoji { font-size: 20px; line-height: 1; }
+.cc-cmd:disabled { opacity: 0.35; cursor: default; }
+.cc-cmd:active:not(:disabled) { transform: scale(0.94); }
+
+.cc-cmd--go     { background: var(--ok);      color: #fff; }
+.cc-cmd--go:hover:not(:disabled)     { filter: brightness(1.1); }
+.cc-cmd--wait   { background: var(--warn);    color: #fff; }
+.cc-cmd--wait:hover:not(:disabled)   { filter: brightness(1.1); }
+.cc-cmd--stop   { background: var(--bad);     color: #fff; }
+.cc-cmd--stop:hover:not(:disabled)   { filter: brightness(1.1); }
+.cc-cmd-divider { width: 1px; height: 28px; background: var(--line-strong); flex-shrink: 0; margin: 0 var(--sp-1); }
+.cc-cmd--look   { background: var(--accent); color: var(--accent-ink); }
+.cc-cmd--look:hover { filter: brightness(1.1); }
+.cc-cmd--run    { background: var(--accent); color: #fff; }
+.cc-cmd--run:hover:not(:disabled) { filter: brightness(1.1); }
+.cc-cmd--attack { background: var(--accent); color: #fff; }
+.cc-cmd--attack:hover:not(:disabled) { filter: brightness(1.1); }
+
+/* Input bar */
 .cc-input-wrap {
   display: flex;
   align-items: center;
@@ -478,7 +552,11 @@ watch(() => props.active, (on) => { if (on) activate(); else stopLoops() })
 .cc-pill--wait:hover:not(:disabled) { background: #b45309; }
 .cc-pill--look { background: var(--surface); color: var(--text-muted); border-color: var(--line-strong); }
 .cc-pill--look:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
-.cc-pill--end  { background: var(--surface); color: var(--bad); border-color: var(--line-strong); }
+.cc-pill--end    { background: var(--surface); color: var(--bad); border-color: var(--line-strong); }
+.cc-pill--run    { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.cc-pill--run:hover { background: var(--accent-hover); }
+.cc-pill--attack { background: var(--bad); color: #fff; border-color: transparent; }
+.cc-pill--attack:hover { filter: brightness(1.1); }
 .cc-pill--end:hover:not(:disabled) { border-color: var(--bad); background: rgba(220,38,38,0.06); }
 
 .cc-deck-meta {

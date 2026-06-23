@@ -584,6 +584,7 @@ _capture_lock  = threading.Lock()
 _capture_state = {"proc": None, "thread": None, "stop": None, "device": None,
                   "started": 0.0, "session_dir": None, "session_ts": None,
                   "session_log": None, "rec_path": None}
+_last_session_log = None   # persists across _capture_clear so GET /control/log stays valid after stop
 # HARD PRIVACY RULE (paramount): capture is ONLY ever a real (non-camera) capture device,
 # matched BY NAME -- the NAME is the guarantee, the index is NOT (it shifts between sessions,
 # so "never index 0" was wrong and is gone). Prefer this card; never a camera/mic.
@@ -628,11 +629,11 @@ def _capture_flag_path():  return os.path.join(_capture_dir(), "state.flag")
 
 def _session_log_path():
     """The CURRENT take's coaching log (dist/capture/<ts>/session.log) once a session is
-    open, else a flat fallback before the first GO. GO/WAIT + the coaching channel all
-    append here; each GO opens a fresh one."""
+    open, else the last session's log so the UI stays consistent after stop. Falls back to
+    a flat file only before the very first GO."""
     with _capture_lock:
         sl = _capture_state.get("session_log")
-    return sl or os.path.join(_capture_dir(), "session.log")
+    return sl or _last_session_log or os.path.join(_capture_dir(), "session.log")
 
 
 def _session_open():
@@ -644,7 +645,18 @@ def _session_open():
         os.makedirs(d, exist_ok=True)
     except OSError:
         pass
-    return ts, d, os.path.join(d, "session.log"), os.path.join(d, "recording.mp4")
+    # Keep dist/capture/latest-session -> <ts>/ so Claude always has a static tail target.
+    link = os.path.join(_capture_dir(), "latest-session")
+    try:
+        if os.path.islink(link) or os.path.exists(link):
+            os.remove(link)
+        os.symlink(d, link)
+    except OSError:
+        pass
+    slog = os.path.join(d, "session.log")
+    global _last_session_log
+    _last_session_log = slog
+    return ts, d, slog, os.path.join(d, "recording.mp4")
 
 
 def _flag_write(state, by):
