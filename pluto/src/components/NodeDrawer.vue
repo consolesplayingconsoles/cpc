@@ -7,7 +7,7 @@ import NodeCommand from './NodeCommand.vue'
 import CopyButton from './CopyButton.vue'
 import chatConfig from '../../config/chat.json'
 
-interface Cmd { verb: string; desc?: string; target?: string; multiline?: boolean }
+interface Cmd  { verb: string; desc?: string; target?: string; multiline?: boolean; url?: string; script?: string; credit?: string }
 const NODE_ACTIONS = (chatConfig.nodeActions ?? {}) as Record<string, Cmd[]>
 const HANDLES      = (chatConfig.mentions.handles ?? {}) as Record<string, string>
 
@@ -123,6 +123,8 @@ const targets  = computed(() => [
     .map(([id, n]) => ({ label: n.name, value: '@' + (HANDLES[id] ?? id) })),
 ])
 function postCommand(text: string) {
+  const cmd = commands.value.find(c => c.verb === 'open-link' && text.includes('open-link'))
+  if (cmd?.url) window.open(cmd.url, '_blank', 'noopener')
   fetch(`${API_BASE}/messages`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
@@ -274,6 +276,7 @@ function postCommand(text: string) {
           @run="postCommand"
         />
       </section>
+
     </template>
   </aside>
 </template>

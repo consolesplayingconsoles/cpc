@@ -108,5 +108,10 @@
     "from": "cloud",
     "to": "substack",
     "label": "Publish"
+  },
+  {
+    "from": "cloud",
+    "to": "google",
+    "label": "Vision / Translate"
   }
 ]

@@ -34,6 +34,7 @@ from urllib.error import HTTPError
 from modules.dreame import session as dreame_session
 from modules.dreame import commands as vacuum
 from modules.substack import sender as substack
+from modules.google import scanner as google_scanner
 
 
 def open_path(path):
@@ -1262,6 +1263,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/control/frame":
             self._handle_control_frame()
 
+        elif parsed.path == "/control/lens":
+            self._handle_control_lens_get()
+        elif parsed.path == "/control/lens/config":
+            self._handle_control_lens_config()
+        elif parsed.path == "/control/lens/latest":
+            self._handle_control_lens_latest()
+
         else:
             self._send(404, {"error": "not found"})
 
@@ -1307,6 +1315,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._handle_capture(body)
         elif len(parts) == 2 and parts[0] == "workspace":
             self._handle_open(action=parts[0], target_node=parts[1])
+        elif parsed.path == "/control/lens":
+            self._handle_control_lens_post()
+        elif parsed.path == "/control/lens/translate":
+            self._handle_control_lens_translate()
+        elif parsed.path == "/control/lens/translate-last":
+            self._handle_control_lens_translate_last()
+        elif parsed.path == "/control/capture/grab":
+            self._handle_control_capture_grab()
         elif parsed.path == "/config/open":
             self._handle_open_config()
         elif len(parts) == 3 and parts[0] == "native":
@@ -1391,6 +1407,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if node_id == "dropbox" and hit in ("sync", "console-list", "cloud-list"):
                 threading.Thread(target=_dropbox_dispatch,
                                  args=(hit, text, self.__class__.node_roster), daemon=True).start()
+                return
+            if hit == "run-script":
+                action = next((a for a in actions if a.get("verb") == "run-script"), None)
+                script_name = action.get("script") if action else None
+                if script_name:
+                    repo_root   = os.path.dirname(self.__class__.base_dir)
+                    script_path = os.path.join(repo_root, "nodes", "local", node_id, "scripts", script_name + ".sh")
+                    def _run(nid=node_id, path=script_path, name=script_name):
+                        if not os.path.exists(path):
+                            _new_message(nid, "script not found: %s" % path)
+                            return
+                        try:
+                            result = subprocess.run(["bash", path], capture_output=True, text=True, timeout=60)
+                            out = (result.stdout + result.stderr).strip()
+                            _new_message(nid, out if out else "%s: done." % name)
+                        except subprocess.TimeoutExpired:
+                            _new_message(nid, "%s timed out." % name)
+                        except Exception as e:
+                            _new_message(nid, "%s failed: %s" % (name, e))
+                    threading.Thread(target=_run, daemon=True).start()
+                    return
+            if hit == "open-link":
+                action = next((a for a in actions if a.get("verb") == "open-link"), None)
+                url   = action.get("url")   if action else None
+                label = action.get("desc")  if action else None
+                credit = action.get("credit") if action else None
+                parts = []
+                if label: parts.append(label)
+                if url:   parts.append(url)
+                if credit: parts.append("(%s)" % credit)
+                _new_message(node_id, " — ".join(parts) if parts else "no URL configured.")
                 return
             _new_message(node_id, "'%s' is not implemented yet." % hit)
         else:
@@ -1660,6 +1707,108 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._cors_headers()
         self.end_headers()
         self.wfile.write(data)
+
+    def _google_api_key(self):
+        return (Handler.node_roster.get("google") or {}).get("GOOGLE_API_KEY", "").strip()
+
+    def _google_lang(self):
+        return (Handler.node_roster.get("google") or {}).get("LENS_LANG", "en").strip() or "en"
+
+    def _handle_control_lens_get(self):
+        """GET /control/lens -> run Google Vision text-detection on the latest capture frame."""
+        api_key = self._google_api_key()
+        if not api_key:
+            self._send(503, {"error": "google node not configured — set GOOGLE_API_KEY in nodes/cloud/google/.env"})
+            return
+        result = google_scanner.scan(_capture_frame_path(), api_key)
+        self._send(200, result)
+
+    def _handle_control_lens_post(self):
+        """POST /control/lens {image: <base64>} -> scan a caller-supplied image."""
+        import base64 as _b64
+        api_key = self._google_api_key()
+        if not api_key:
+            self._send(503, {"error": "google node not configured — set GOOGLE_API_KEY in nodes/cloud/google/.env"})
+            return
+        body = self._read_json_body()
+        if not body or not body.get("image"):
+            self._send(400, {"error": "missing image field (base64)"})
+            return
+        try:
+            image_bytes = _b64.b64decode(body["image"])
+        except Exception as exc:
+            self._send(400, {"error": "invalid base64: %s" % exc})
+            return
+        result = google_scanner.scan_bytes(image_bytes, api_key)
+        self._send(200, result)
+
+    def _handle_control_lens_translate(self):
+        """POST /control/lens/translate {text: str, target?: str} -> Cloud Translation API."""
+        api_key = self._google_api_key()
+        if not api_key:
+            self._send(503, {"error": "google node not configured — set GOOGLE_API_KEY in nodes/cloud/google/.env"})
+            return
+        body = self._read_json_body()
+        if not body or not body.get("text"):
+            self._send(400, {"error": "missing text field"})
+            return
+        result = google_scanner.translate(body["text"], api_key, body.get("target", self._google_lang()))
+        self._send(200, result)
+
+    def _handle_control_lens_translate_last(self):
+        """POST /control/lens/translate-last {target?: str} -> translate cached scan text.
+        Used by the Pi hardware trigger (L+R on DC controller)."""
+        api_key = self._google_api_key()
+        if not api_key:
+            self._send(503, {"error": "google node not configured — set GOOGLE_API_KEY in nodes/cloud/google/.env"})
+            return
+        body = self._read_json_body() or {}
+        target = body.get("target") or self._google_lang()
+        result = google_scanner.translate_last(api_key, target)
+        self._send(200 if "translated" in result else 422, result)
+
+    def _handle_control_lens_config(self):
+        """GET /control/lens/config -> {lang: LENS_LANG} — default translation language."""
+        self._send(200, {"lang": self._google_lang()})
+
+    def _handle_control_lens_latest(self):
+        """GET /control/lens/latest -> last scan + translation state for frontend polling."""
+        self._send(200, google_scanner.latest())
+
+    def _handle_control_capture_grab(self):
+        """POST /control/capture/grab -> take a single fresh frame from the capture card.
+        If the persistent capture is already running, latest.jpg is already live -- noop.
+        Otherwise fires a one-shot ffmpeg -frames:v 1 and waits for it to finish (~1 s).
+        Used by the Pi hardware trigger (L+R) to ensure the scanned frame is current."""
+        if _capture_running():
+            self._send(200, {"ok": True, "fresh": False,
+                             "reason": "capture running, latest.jpg is live"})
+            return
+        try:
+            cands = _capture_candidates()
+        except ValueError as exc:
+            self._send(503, {"error": str(exc)})
+            return
+        name  = cands[0][1]
+        frame = _capture_frame_path()
+        os.makedirs(_capture_dir(), exist_ok=True)
+        cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+               "-f", "avfoundation", "-video_size", "1280x720", "-framerate", "10",
+               "-pixel_format", "uyvy422", "-i", name,
+               "-frames:v", "1", "-y", frame]
+        try:
+            r = subprocess.run(cmd, timeout=10,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            self._send(504, {"error": "ffmpeg grab timed out"})
+            return
+        except OSError as exc:
+            self._send(503, {"error": "ffmpeg: %s" % exc})
+            return
+        if r.returncode != 0:
+            self._send(500, {"error": "ffmpeg grab failed (exit %d)" % r.returncode})
+            return
+        self._send(200, {"ok": True, "fresh": True, "device": name})
 
     def _make_sink(self, controller, target, mapping, dev=None):
         """Open a FRESH sink for `target` (pi -> NetworkSink to the hub; keyboard ->

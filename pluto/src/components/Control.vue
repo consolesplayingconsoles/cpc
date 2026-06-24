@@ -9,6 +9,7 @@ import type { NodeMap } from '../composables/useNodes'
 import Robutek from './Robutek.vue'
 import ControlKeyboard from './ControlKeyboard.vue'
 import ClaudeControl from './ClaudeControl.vue'
+import GoogleLensControl from './GoogleLensControl.vue'
 
 const props = defineProps<{ active: boolean; nodes?: NodeMap; name?: string; showOffline?: boolean }>()
 const route  = useRoute()
@@ -23,7 +24,8 @@ const isLab = import.meta.env.DEV
 const sourceList = computed(() => {
   const out: { id: string; label: string }[] = []
   out.push({ id: 'keyboard', label: 'Keyboard only' })
-  if (isLab) out.push({ id: 'claude', label: 'Claude' })   // Lab only: capture is local to the dev host
+  if (isLab) out.push({ id: 'claude',       label: 'Claude' })        // Lab only: capture is local to the dev host
+  if (isLab) out.push({ id: 'google', label: 'Google' })             // Lab only: requires local capture device
   const d = props.nodes?.['dreame']
   if (d && (d.status !== 'unconfigured' || props.showOffline)) out.push({ id: 'dreame', label: 'Dreame Cloud' })
   return out
@@ -110,7 +112,7 @@ watch([source, target, mapping, pico, mappings, picoList, sourceList, () => prop
   }
   // Claude is Lab-only (capture is local to the dev host). A deep link to /control/claude
   // on the C2 must not render it -> fall back to the first available source.
-  if (source.value === 'claude' && !isLab) {
+  if ((source.value === 'claude' || source.value === 'google') && !isLab) {
     router.replace(path(sourceList.value[0]?.id || 'keyboard', '', '', ''))
     return
   }
@@ -196,6 +198,10 @@ function openMappingDir() {
           @drive-error="setError" />
         <ClaudeControl v-else-if="source === 'claude'"
           :active="active" :nodes="nodes" :map-source="source" :target="effTarget" :mapping="effMapping"
+          :target-dev="effTarget === 'pi' ? picoDev : ''"
+          @drive-error="setError" />
+        <GoogleLensControl v-else-if="source === 'google'"
+          :active="active" :map-source="source" :target="effTarget" :mapping="effMapping"
           :target-dev="effTarget === 'pi' ? picoDev : ''"
           @drive-error="setError" />
       </div>

@@ -396,6 +396,16 @@ def serve(cfg):
 
     threading.Thread(target=_sync_server, args=(cfg, stop), daemon=True).start()
 
+    # Lens trigger: watch DC controller evdev devices, forward all buttons via HidBridge,
+    # fire grab -> scan -> translate-last on L+R. Needs PLUTO_IP to be set in the .env.
+    pluto_ip = (cfg.get("PLUTO_IP") or "").strip()
+    lens = None
+    if pluto_ip:
+        from bridges.lens import LensTrigger
+        lens = LensTrigger("http://%s:7700" % pluto_ip, bridges).start()
+    else:
+        print("  lens trigger disabled (no PLUTO_IP in .env)")
+
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)   # quick restart, no TIME_WAIT stall
     srv.bind(("0.0.0.0", port))
@@ -413,6 +423,8 @@ def serve(cfg):
             _pump(conn, bridges, stop)
             print("  client gone -- released")
     finally:
+        if lens:
+            lens.stop()
         for b in bridges:
             try:
                 b.stop()
