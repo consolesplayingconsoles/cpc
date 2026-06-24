@@ -188,27 +188,33 @@ def _claude_reply(messages_snapshot):
     _new_message(BOT_ID, reply)
 
 
-def _dropbox_sync(text, roster):
-    """Forward @dropbox sync to the Pi hub and relay its reply as 'dropbox'."""
+def _dropbox_dispatch(verb, text, roster):
+    """Route @dropbox verbs: sync / console-list / cloud-list."""
     pi = (roster or {}).get("pi") or {}
     host = pi.get("HOST_IP", "").strip()
     port = pi.get("PI_SYNC_PORT", "7721").strip()
-    if not host:
-        _new_message("dropbox", "Pi node has no HOST_IP — sync unavailable.")
-        return
-    # parse optional @target from text (e.g. "@dropbox sync @dc")
+    # parse optional @target (e.g. "@dropbox sync @dc")
     target = next((t[1:] for t in text.lower().split() if t.startswith("@") and t != "@dropbox"), None)
+
+    if verb == "cloud-list":
+        _new_message("dropbox", "cloud-list: not implemented yet.")
+        return
+
+    # sync and console-list both go to the Pi hub
+    if not host:
+        _new_message("dropbox", "Pi node has no HOST_IP -- unavailable.")
+        return
     try:
         import urllib.request as _ur
         import json as _json
-        payload = _json.dumps({"action": "sync", "target": target}).encode()
+        payload = _json.dumps({"action": verb, "target": target}).encode()
         req = _ur.Request("http://%s:%s/sync" % (host, port),
                           data=payload, headers={"Content-Type": "application/json"})
         with _ur.urlopen(req, timeout=10) as r:
             result = _json.loads(r.read().decode())
-        msg = result.get("message") or result.get("error") or "sync done."
+        msg = result.get("message") or result.get("error") or "%s done." % verb
     except Exception as exc:
-        msg = "sync failed: %s" % exc
+        msg = "%s failed: %s" % (verb, exc)
     _new_message("dropbox", msg)
 
 
@@ -460,11 +466,28 @@ def probe(ip):
     intact, so it's a free, zero-config OS hint — no agent, no SSH, no MAC trick
     (a MAC only identifies the NIC vendor, never the OS).
 
+    If HOST_IP is host:port, does a TCP connect + GET /health instead of ICMP.
+    The health endpoint returns 200 when the device is present, 503 when absent.
+    No OS sniffing for port-based checks (returns None).
+
     Returns (up: bool, os: str|None) where os is 'linux' | 'windows' | None.
     Note TTL 64 can't tell Linux from macOS/BSD apart — it means "unix-like";
     on this network the remote unix nodes are the Linux consoles, and the macOS
     host is detected locally instead. The `.env` OS= var overrides when wrong.
     """
+    if ":" in ip:
+        import http.client as _http
+        host, _, port_s = ip.rpartition(":")
+        try:
+            conn = _http.HTTPConnection(host, int(port_s), timeout=2)
+            conn.request("GET", "/health")
+            resp = conn.getresponse()
+            return resp.status == 200, None
+        except Exception:
+            return False, None
+        finally:
+            try: conn.close()
+            except Exception: pass
     try:
         result = subprocess.run(
             ["ping", "-c", "1", "-W", "1", ip],
@@ -1005,7 +1028,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     lab_ip      = ""     # the Lab's address, when the C2 is told about it (LAB_IP)
 
     def log_message(self, format, *args):
-        if "/deploy" in self.path or "/messages" in self.path:
+        if "/deploy" in self.path:
             print("  [%s] %s" % (self.command, self.path))
 
     def _cors_headers(self):
@@ -1365,9 +1388,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 creds = self.__class__.node_roster.get("substack", {})
                 threading.Thread(target=_substack_post, args=(creds, content), daemon=True).start()
                 return
-            if node_id == "dropbox" and hit == "sync":
-                threading.Thread(target=_dropbox_sync,
-                                 args=(text, self.__class__.node_roster), daemon=True).start()
+            if node_id == "dropbox" and hit in ("sync", "console-list", "cloud-list"):
+                threading.Thread(target=_dropbox_dispatch,
+                                 args=(hit, text, self.__class__.node_roster), daemon=True).start()
                 return
             _new_message(node_id, "'%s' is not implemented yet." % hit)
         else:

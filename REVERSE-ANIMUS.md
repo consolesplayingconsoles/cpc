@@ -22,6 +22,51 @@ structure, walkthrough, enemies). Keep those clean. Anything true across games o
 consoles belongs here, and each game file backlinks here instead of repeating it.
 This doc is also why the next game starts faster: the doctrine is already learned.
 
+## Session bootstrap
+Run `./scripts/ra/start-ra.sh` at the start of every session. It checks the API,
+confirms the session log exists, bumps the kill-switch, signals ready on Guide Dog,
+and launches watch mode. All subsequent actions use the scripts below.
+
+**Scripts (all in `scripts/ra/`)**
+```
+start-ra.sh [target] [mapping]   - bootstrap (run once per session)
+watch.sh                          - block until look or stop from Pluto; exit 0=look, 1=stop
+frame.sh                          - bump state.flag (keep capture alive)
+signal.sh "<text>" [t] [m]        - post observation to Guide Dog
+log.sh [n]                        - print last n lines of session log
+drive.sh <btn> [ms] [t] [m]       - tap a button (default 120ms)
+hold.sh <axis> <x> <y> <ms> [t] [m] - hold analog stick for duration (sends frames every 100ms)
+axis.sh <axis> <x> <y> [t] [m]   - one-shot stick position (use hold.sh for sustained movement)
+```
+Default target=pi, mapping=dreamcast for all scripts.
+
+**Frame source by context**
+- In-game play: `dist/capture/latest-processed.jpg` (quarter-res, greyscale, contrast-boosted)
+- BIOS/menu navigation: `dist/capture/latest.jpg` (full colour, needed for icon identification)
+Bump `dist/capture/state.flag` on every frame read via `./scripts/ra/frame.sh`.
+
+**Watch loop (the default posture)**
+Run `./scripts/ra/watch.sh` in background (`run_in_background: true`). It exits
+when the operator sends `look` (exit 0) or `stop` (exit 1) via Pluto's Guide Dog.
+On notification: read the frame, post observation via `signal.sh`, act, then
+relaunch `watch.sh` in background. Never return to the CC window between looks.
+
+Signals to honor:
+  `go`   - session live, play
+  `wait` - pause inputs until next `go`
+  `look` - read current frame, report, act
+  `stop` - end session immediately
+
+**Analog movement**
+`axis.sh` sends one frame; the firmware holds that position until the next frame,
+but the API watchdog resets on timeout. For any run longer than ~500ms use
+`hold.sh` which pumps frames every 100ms for the full duration then releases.
+`drive.sh` is for button taps only.
+
+**Pre-approve tools**
+All `scripts/ra/*.sh` patterns are in `.claude/settings.local.json` allow list.
+No mid-session approval prompts if the scripts are used as written.
+
 ## Core principles
 * **Guide dog over capture.** The operator guides Claude live through the Guide
   Dog channel, over the capture loop.

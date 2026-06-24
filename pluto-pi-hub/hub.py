@@ -23,6 +23,7 @@ The Pi only LISTENS here -- Pluto dials in. Pure stdlib, 3.6-safe, ASCII output 
 import os
 import sys
 import time
+import threading
 
 
 def load_env(path):
@@ -143,6 +144,230 @@ def _pump(conn, bridges, stop):
             pass
 
 
+def _sync_server(cfg, stop):
+    """Minimal HTTP server on PI_SYNC_PORT: accepts POST /sync from Pluto and
+    delegates to the appropriate sync handler. Runs in a daemon thread alongside
+    the op receiver. Pure stdlib, 3.6-safe."""
+    import http.server
+    import json as _json
+
+    sync_port = int((cfg.get("PI_SYNC_PORT") or "7721").strip())
+
+    class SyncHandler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_): pass   # silence access log
+
+        def do_GET(self):
+            if self.path != "/health":
+                self.send_response(404); self.end_headers(); return
+            up = bool(_discover_vmu())
+            self.send_response(200 if up else 503)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write((_json.dumps({"vmu": up})).encode())
+
+        def do_POST(self):
+            try:
+                if self.path != "/sync":
+                    self.send_response(404); self.end_headers(); return
+                length = int(self.headers.get("Content-Length", 0))
+                body = _json.loads(self.rfile.read(length).decode()) if length else {}
+                action = (body.get("action") or "sync").strip()
+                target = (body.get("target") or "").strip()
+                dropbox_path = (body.get("dropbox_path") or "").strip()
+                reply = _handle_sync(action, target, cfg, dropbox_path=dropbox_path)
+            except Exception as exc:
+                reply = {"error": "sync handler crashed: %s" % exc}
+            data = _json.dumps(reply).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    srv = http.server.HTTPServer(("0.0.0.0", sync_port), SyncHandler)
+    srv.timeout = 1.0
+    print("CPC Pi-Hub sync server up -- :%d" % sync_port)
+    while not stop["flag"]:
+        srv.handle_request()
+    srv.server_close()
+
+
+def _handle_sync(action, target, cfg, dropbox_path=""):
+    """Dispatch a sync/list request. Returns {"message": ...} or {"error": ...}."""
+    if not target:
+        return {"error": "no target specified -- try @dropbox %s @vmu" % action}
+    if target == "vmu":
+        if action == "console-list":
+            return _console_list_vmu()
+        return _sync_vmu(cfg, dropbox_path=dropbox_path)
+    return {"error": "target '%s' is not implemented yet." % target}
+
+
+def _parse_vmu_image(data, _struct):
+    """Parse the VMU filesystem from a raw 128KB VMU image (VMU0.BIN).
+    Returns a list of human-readable save entries, same info potato-tool view shows.
+
+    VMU block layout (each block = 512 bytes):
+      255: root/superblock -- filesystem geometry
+      254: FAT (1 block)
+      241-253: directory (13 blocks, read high-to-low)
+      0-240: user data
+    Directory entry (32 bytes each, 200 entries):
+      0:    file type (0x33=data, 0xCC=game)
+      1:    copy protect
+      2-3:  first block
+      4-15: filename (ASCII)
+      16-23: creation timestamp (BCD)
+      24-25: size in blocks
+      26-27: header offset
+    """
+    BLOCK = 512
+    FILE_TYPES = {0x33: "data", 0xCC: "game"}
+
+    def block(n):
+        return data[n * BLOCK:(n + 1) * BLOCK]
+
+    root = block(255)
+    fat_loc  = _struct.unpack_from("<H", root, 0x18)[0]
+    dir_loc  = _struct.unpack_from("<H", root, 0x1C)[0]
+    dir_sz   = _struct.unpack_from("<H", root, 0x1E)[0]
+
+    # fall back to standard VMU layout if root is uninitialised (all 0x00 or 0x55)
+    if dir_loc == 0 or dir_loc >= 256 or dir_sz == 0:
+        fat_loc, dir_loc, dir_sz = 254, 253, 13
+
+    dir_data = b""
+    for i in range(dir_sz):
+        dir_data += block(dir_loc - i)
+
+    entries = []
+    for i in range(200):
+        e = dir_data[i * 32:(i + 1) * 32]
+        if len(e) < 32:
+            break
+        ftype = e[0]
+        if ftype not in FILE_TYPES:
+            continue
+        fname = e[4:16].decode("ascii", errors="replace").rstrip()
+        size  = _struct.unpack_from("<H", e, 24)[0]
+        tname = FILE_TYPES[ftype]
+        entries.append("%s (%s, %d blocks)" % (fname, tname, size))
+    return entries
+
+
+def _transfer_vmu():
+    """Copy VMU0.BIN from the DreamPicoPort reader (/dev/sda) to the active VMU
+    pendrive (/dev/sdb). Both are FAT volumes. Mounts each in turn, copies the
+    file, then unmounts. Requires sudoers entry for mount/umount of /dev/sd*."""
+    import subprocess as _sp, os as _os, glob as _glob, shutil as _sh
+    if not _discover_vmu():
+        return {"error": "DreamPicoPort not found -- is the reader plugged in?"}
+    devs = sorted(_glob.glob("/dev/sd?"))
+    if len(devs) < 2:
+        return {"error": "need 2 block devices (reader + active VMU pendrive), found: %s" % devs}
+    src_dev, dst_dev = devs[0], devs[1]
+    src_mnt, dst_mnt = "/tmp/cpc-vmu-src", "/tmp/cpc-vmu-dst"
+    for d in (src_mnt, dst_mnt):
+        _os.makedirs(d, exist_ok=True)
+    try:
+        r = _sp.run(["sudo", "mount", "-t", "vfat", "-o", "ro", src_dev, src_mnt],
+                    capture_output=True, text=True, timeout=10)
+        if r.returncode != 0:
+            return {"error": "mount source failed: %s" % r.stderr.strip()}
+        r = _sp.run(["sudo", "mount", "-t", "vfat", dst_dev, dst_mnt],
+                    capture_output=True, text=True, timeout=10)
+        if r.returncode != 0:
+            _sp.run(["sudo", "umount", src_dev], timeout=5, capture_output=True)
+            return {"error": "mount target failed: %s" % r.stderr.strip()}
+        src_file = _os.path.join(src_mnt, "VMU0.BIN")
+        dst_file = _os.path.join(dst_mnt, "VMU0.BIN")
+        if not _os.path.exists(src_file):
+            return {"error": "VMU0.BIN not found on reader."}
+        size = _os.path.getsize(src_file)
+        _sh.copy2(src_file, dst_file)
+        return {"message": "transfer done: copied VMU0.BIN (%d bytes) from %s to %s." % (size, src_dev, dst_dev)}
+    except Exception as exc:
+        return {"error": "transfer failed: %s" % exc}
+    finally:
+        _sp.run(["sudo", "umount", src_dev], timeout=5, capture_output=True)
+        _sp.run(["sudo", "umount", dst_dev], timeout=5, capture_output=True)
+
+
+def _console_list_vmu():
+    """List save files on the VMU exposed by DreamPicoPort.
+    The device only serves metadata sectors (boot/FAT/dir) over raw USB --
+    data sectors return EIO. Mount via udisksctl (no sudo) to read VMU0.BIN,
+    then parse the VMU filesystem image."""
+    import struct as _struct, glob as _glob, subprocess as _sp, os as _os
+    if not _discover_vmu():
+        return {"error": "VMU not found -- is the DreamPicoPort plugged in?"}
+    candidates = sorted(_glob.glob("/dev/sd?"))
+    if not candidates:
+        return {"error": "DreamPicoPort on bus but no block device found."}
+    dev = candidates[0]
+    mnt = None
+    try:
+        mnt = "/tmp/cpc-vmu"
+        _os.makedirs(mnt, exist_ok=True)
+        r = _sp.run(["sudo", "mount", "-t", "vfat", "-o", "ro", dev, mnt],
+                    capture_output=True, text=True, timeout=10)
+        if r.returncode != 0:
+            return {"error": "mount failed: %s" % r.stderr.strip()}
+
+        vmu_path = _os.path.join(mnt, "VMU0.BIN")
+        if not _os.path.exists(vmu_path):
+            return {"error": "VMU0.BIN not found at %s" % vmu_path}
+        with open(vmu_path, "rb") as vf:
+            vmu_bin = vf.read()
+
+        saves = _parse_vmu_image(vmu_bin, _struct)
+        if not saves:
+            return {"message": "VMU is empty (no save files)."}
+        lines = ["VMU saves (%d):" % len(saves)] + ["  " + s for s in saves]
+        return {"message": "\n".join(lines)}
+    except Exception as exc:
+        import traceback as _tb
+        return {"error": "VMU read failed: %s | %s" % (exc, _tb.format_exc().splitlines()[-3])}
+    finally:
+        if mnt:
+            _sp.run(["sudo", "umount", dev], timeout=5, capture_output=True)
+
+
+def _discover_vmu():
+    """Return True if the VMU USB reader (DreamPicoPort) is present on the Pi's bus."""
+    import subprocess
+    try:
+        out = subprocess.check_output(["lsusb"], timeout=3).decode()
+        return "DreamPicoPort" in out
+    except Exception:
+        return False
+
+
+def _sync_vmu(cfg, dropbox_path=""):
+    """Sync VMU data to Dropbox. dropbox_path is passed in from the Pluto request."""
+    if not dropbox_path:
+        return {"error": "no dropbox_path in request -- Pluto must provide it."}
+
+    results = []
+
+    # -- VMU via USB reader ---------------------------------------------------
+    vmu_dev = _discover_vmu()
+    if vmu_dev:
+        try:
+            out_dir = os.path.join(dropbox_path, "dc", "vmu")
+            os.makedirs(out_dir, exist_ok=True)
+            results.append("VMU: not implemented yet (device: %s)." % vmu_dev)
+        except Exception as exc:
+            results.append("VMU: error -- %s" % exc)
+    else:
+        results.append("VMU: no USB block device found, skipped.")
+
+    # -- DreamShell / DreamPi -------------------------------------------------
+    results.append("DreamShell: not implemented yet.")
+
+    return {"message": " | ".join(results)}
+
+
 def serve(cfg):
     """Always-up op receiver: bind PI_BRIDGE_PORT, accept ONE Pluto client at a time,
     and stream its ops into the controller bridge. SIGTERM-clean so a redeploy's
@@ -168,6 +393,8 @@ def serve(cfg):
         stop["flag"] = True
     signal.signal(signal.SIGTERM, _term)
     signal.signal(signal.SIGINT, _term)
+
+    threading.Thread(target=_sync_server, args=(cfg, stop), daemon=True).start()
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)   # quick restart, no TIME_WAIT stall

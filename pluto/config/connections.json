@@ -34,6 +34,11 @@
     "to": "vmu",
     "label": "Maple"
   },
+    {
+    "from": "gateway",
+    "to": "pi",
+    "label": "DreamPicoPort"
+  },
   {
     "from": "gba",
     "to": "wii",
@@ -65,9 +70,9 @@
     "label": "WiFi"
   },
   {
-    "from": "pi",
-    "to": "dc",
-    "label": "DreamPi"
+    "from": "vmu",
+    "to": "pi",
+    "label": "DreamPicoPort"
   },
   {
     "from": "saturn",

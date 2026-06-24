@@ -77,6 +77,7 @@ Most of this is plain Python and a Node toolchain. A handful of features need an
 | **Drive a local emulator** (_Lab only_)     | Python 3 and `pynput` (`requirements-dev.txt`)                                                                               | Pluto Lab host (Accessibility)        |                                                                                                                                                               |
 | **DreameHome (vacuum) input**               | the bundled [`dreamehome` client](https://github.com/consolesplayingconsoles/dreamehome-client) (needs a DreameHome account) |                                       |                                                                                                                                                               |
 | **Cloud storage**                           | provider-agnostic (needs a storage-provider account)                                                                         |                                       |                                                                                                                                                               |
+| **VMU node**                                |                                                                                                                              | USB VMU reader                        | [DreamPicoPort](https://github.com/OrangeFox86/DreamPicoPort) on a Raspberry Pi Pico                                                                         |
 
 > **Lab vs C2:** capture and the local-emulator drive are **Lab-only**:
 > Capture needs the dev/capture host, with the LLM client co-located for speed.
@@ -102,6 +103,8 @@ This is built on a lot of other people's work. A few that earned a specific ment
 - **[Wii-Linux](https://github.com/Wii-Linux)**: a full Linux kept alive on the Wii's PowerPC (the active [`wii-linux-ngx`](https://github.com/Wii-Linux/wii-linux-ngx) revival), the long unglamorous work that turns a dead console into a real network node.
 - **[Nintendont](https://github.com/FIX94/Nintendont)** and the wider **Wii homebrew & hardware scene** ([WiiBrew](https://wiibrew.org), the Homebrew Channel, and everyone who cracked this hardware open long before me).
 - **[libretro/retroarch-assets](https://github.com/libretro/retroarch-assets)**: the console icons on the network map (CC BY 4.0; see `pluto/src/assets/avatars/NOTICES`).
+- **[DreamPicoPort](https://github.com/OrangeFox86/DreamPicoPort)**: the Raspberry Pi Pico firmware that exposes a Dreamcast controller port (and VMU) over USB, presenting the VMU as a standard FAT16 mass storage device. The VMU node is built on top of it.
+- **[FUSE-VMU](https://github.com/RossMeikleham/FUSE-VMU)**: FUSE filesystem implementation for the Dreamcast VMU — the reference for the VMU block format and filesystem layout.
 
 Built on these, not instead of them.
 

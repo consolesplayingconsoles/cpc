@@ -33,4 +33,11 @@ if [ -x pluto/node_modules/.bin/vitest ]; then
 else
   echo "[pre-commit] (skip vitest: run 'yarn install' in pluto/ to enable frontend tests)"
 fi
+# TypeScript type-check (catches TS errors in Vue components before they reach deploy).
+if [ -x pluto/node_modules/.bin/vue-tsc ]; then
+  echo "[pre-commit] TypeScript check (vue-tsc)..."
+  ( cd pluto && ./node_modules/.bin/vue-tsc --noEmit )
+else
+  echo "[pre-commit] (skip vue-tsc: run 'yarn install' in pluto/ to enable TS checks)"
+fi
 echo "[pre-commit] ok"

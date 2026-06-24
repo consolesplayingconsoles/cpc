@@ -8,7 +8,6 @@ import { BUBBLE_R } from '../composables/bubbleConstants'
 import NodeBubble from './NodeBubble.vue'
 import NodeDrawer from './NodeDrawer.vue'
 import DeployTerminal from './DeployTerminal.vue'
-import AchievementToast from './AchievementToast.vue'
 import RecentActivity from './RecentActivity.vue'
 
 import { useMessages } from '../composables/useMessages'
@@ -46,8 +45,7 @@ const LAYOUT = buildLayout()
 
 const {
   deploying, deployOutput, lastDurations, lastDeployedAt,
-  showToast, toastConsoleName, toastDuration,
-  deploy, clearOutput, dismissToast,
+  deploy, clearOutput,
 } = useDeploy(() => props.nodes)
 
 const activeMenu  = ref<string | null>(null)
@@ -356,13 +354,6 @@ watch(hoveredNode, () => nextTick(updatePeekPos))
       :last-ms="floatingDeploy.lastMs"
       :card-style="floatTermStyle"
       @close="closeDeployTerm"
-    />
-
-    <AchievementToast
-      :show="showToast"
-      :console-name="toastConsoleName"
-      :duration="toastDuration"
-      @dismiss="dismissToast"
     />
 
     <!-- recent activity tail (bottom-left): a peek at the chat feed so a command

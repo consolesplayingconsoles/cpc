@@ -72,13 +72,19 @@ void UartInput::preprocess() {
             case 2: f_dpad = b; rxState = 3; break;
             case 3: f_btnL = b; rxState = 4; break;
             case 4: f_btnH = b; rxState = 5; break;
-            case 5: {
-                if (b == (uint8_t)(f_dpad ^ f_btnL ^ f_btnH)) {
+            case 5: f_lx   = b; rxState = 6; break;
+            case 6: f_ly   = b; rxState = 7; break;
+            case 7: f_rx   = b; rxState = 8; break;
+            case 8: f_ry   = b; rxState = 9; break;
+            case 9: {
+                if (b == (uint8_t)(f_dpad ^ f_btnL ^ f_btnH ^ f_lx ^ f_ly ^ f_rx ^ f_ry)) {
                     if (f_dpad == 0xFF) {
                         if (f_btnL == 0x01) reset_usb_boot(0, 0);  // -> BOOTSEL
                     } else {
                         heldDpad    = f_dpad & 0x0F;
                         heldButtons = (uint16_t)f_btnL | ((uint16_t)f_btnH << 8);
+                        heldLx = f_lx; heldLy = f_ly;
+                        heldRx = f_rx; heldRy = f_ry;
                     }
                 }
                 rxState = 0;
@@ -103,4 +109,8 @@ void UartInput::preprocess() {
     if (heldDpad & 0x04) gamepad->state.dpadOriginal |= GAMEPAD_MASK_LEFT;
     if (heldDpad & 0x08) gamepad->state.dpadOriginal |= GAMEPAD_MASK_RIGHT;
     gamepad->state.buttons |= heldButtons;
+    gamepad->state.lx = (uint16_t)heldLx << 8;
+    gamepad->state.ly = (uint16_t)heldLy << 8;
+    gamepad->state.rx = (uint16_t)heldRx << 8;
+    gamepad->state.ry = (uint16_t)heldRy << 8;
 }

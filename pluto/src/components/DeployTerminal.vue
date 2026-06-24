@@ -161,6 +161,7 @@ const STEP_LABELS: Record<string, string> = {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.04em;
   white-space: nowrap;
+  text-transform: none;
 }
 .term__last { color: #3a7a52; }
 .term__tools { display: flex; gap: 6px; }
