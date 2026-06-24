@@ -5,6 +5,10 @@
     "handles": { "dreame": "l40" }
   },
   "nodeActions": {
+    "gba": [
+      { "verb": "open-link", "url": "https://flubbaofward.github.io/NGPGBA/Builder.html", "desc": "NGPGBA ROM Builder", "credit": "FluBBaOfWard" },
+      { "verb": "run-script", "script": "eject-gba", "desc": "Eject GBA SD card" }
+    ],
     "dreame": [
       { "verb": "status", "desc": "report state (read-only)" },
       { "verb": "locate", "desc": "beep so you can find it" },

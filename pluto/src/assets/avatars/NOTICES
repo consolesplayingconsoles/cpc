@@ -22,6 +22,9 @@ substack.svg — original work, part of this project. A generic feed/blog glyph 
 the style of the open RSS feed mark, for the content-sink connector. Deliberately
 NOT any provider's logo. (The DreameHome cloud node reuses dreame.png.)
 
+google.svg — original work, part of this project. A generic scan/vision glyph
+(targeting ring, iris, pupil), not derived from any provider's trademark or logo.
+
 ../tux.png — "Tux" the Linux mascot by Larry Ewing (lewing@isc.tamu.edu) and The GIMP.
 Used as the Linux-runtime badge on Pluto node bubbles. Acknowledgement per the
 image's permission terms.

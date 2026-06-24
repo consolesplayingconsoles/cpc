@@ -6,7 +6,7 @@ import { ref, computed } from 'vue'
 // the parent posts it to /messages (logged in the chat feed AND messages.log).
 // Every verb is always sendable — an unbuilt one gets a gracious "not implemented
 // yet" from the server. The backend is the contract; the UI never pre-judges.
-interface Cmd { verb: string; desc?: string; target?: string; multiline?: boolean }
+interface Cmd { verb: string; desc?: string; target?: string; multiline?: boolean; url?: string; script?: string; credit?: string }
 
 const props = defineProps<{
   handle:   string                              // e.g. "@dropbox"

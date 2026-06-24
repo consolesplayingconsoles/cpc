@@ -111,7 +111,7 @@ function listItems(text: string): { name: string; meta: string }[] {
 }
 
 function formatMsg(text: string): MsgSeg[] {
-  return text.split(/(https?:\/\/[^\s<>"]+|@\w+)/g).map((part, i) => {
+  return text.split(/(https?:\/\/[^\s<>"]+|@[\w-]+)/g).map((part, i) => {
     if (i % 2 === 1) {
       if (/^https?:\/\//.test(part)) return { url: true, text: part }
       return { mention: true, text: part }

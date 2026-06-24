@@ -89,16 +89,11 @@ Pluto itself is never loaded on a console browser. However, consumer-facing bypr
 * **Graceful Degradation ("Strip Rather Than Break")**: If a console browser breaks on modern CSS layout rules or advanced properties, the system strips those layers entirely, gracefully dropping back to a functional, unstyled text-and-grid layout.
 * **Real-Time Fallback Workflow**: Because console rendering behaviors must be verified interactively in real-time, the architecture permits writing explicit, lightweight fallback templates or alternative stylesheets. If real-time physical device testing reveals visual or structural breakage, the engine will explicitly serve the simplified fallback view to that legacy target.
 
-### 9. Local Development & Interface Testing
+### 9. Device Access Discipline
+SSH connections and read operations (logs, status, file reads) are free — no confirmation needed. Confirm before any action with a physical or shared side-effect: moving hardware, restarting a service that affects a running session, sending network commands to a device, or anything that can't be undone without touching hardware. The line is reads vs. writes-to-the-world.
+
+### 10. Local Development & Interface Testing
 To keep production application logic perfectly clean and free of testing conditionals, the platform utilizes separate execution scripts for live deployments versus local development environments.
 
 * **Production Entrypoint (`pluto-python-tui/main.py`)**: Runs the strict live logic. It parses the namespace-targeted `.env` file, evaluates real host infrastructure, executes live pings, and dynamically hides/strips UI menus based on physical hardware availability.
 * **Development Entrypoint (`pluto-python-tui/dev.py`)**: A dedicated wrapper script used solely for local interface testing (the python equivalent to running `yarn dev`). It completely bypasses the live infrastructure pipeline and force-feeds a complete layout matrix directly into the UI engine. This ensures all menus and text inputs remain visible and editable locally without requiring a production host context or physical devices attached.
-
-### 10. Device Access Discipline
-Connecting to a physical console or device (e.g. `ssh wii ...`) is an explicit, per-command action — **never** a standing grant. See [`SECURITY.md`](./SECURITY.md) for the full policy.
-
-* **Per-command authorization**: Before each connection to a device — including read-only ones — state the exact command and its purpose and obtain approval. Approval of a task does not roll forward into later connections.
-* **Capability is not consent**: Passwordless key auth makes a connection possible, not permitted. The operator draws that line, per request.
-* **Least privilege & transparency**: Default to read-only; call out and confirm anything that writes to a device; never access a device silently or in the background.
-* **Credentials**: One dedicated SSH key per host (never a shared key file). Private keys and real `*.env` files are never committed — only `*.env.sample`.
