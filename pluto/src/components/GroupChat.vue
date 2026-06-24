@@ -92,6 +92,24 @@ function dayDivider(gi: number): string | null {
 
 type MsgSeg = { mention?: boolean; url?: boolean; text: string }
 
+function isListMsg(text: string): boolean {
+  const lines = text.split('\n')
+  return lines.length > 1 && lines[0].endsWith(':') && lines[1].startsWith('  ')
+}
+
+function listHeader(text: string): string {
+  return text.split('\n')[0]
+}
+
+function listItems(text: string): { name: string; meta: string }[] {
+  return text.split('\n').slice(1).filter(l => l.trim()).map(l => {
+    const s = l.trim()
+    const i = s.indexOf('(')
+    if (i < 0) return { name: s, meta: '' }
+    return { name: s.slice(0, i).trimEnd(), meta: s.slice(i) }
+  })
+}
+
 function formatMsg(text: string): MsgSeg[] {
   return text.split(/(https?:\/\/[^\s<>"]+|@\w+)/g).map((part, i) => {
     if (i % 2 === 1) {
@@ -393,11 +411,19 @@ function onKeydown(e: KeyboardEvent) {
                 </span>
                 <span class="msg-time" :title="formatFull(g.messages[0].ts)">{{ formatTime(g.messages[0].ts) }}</span>
               </div>
-              <p v-for="m in g.messages" :key="m.id" class="msg-text">
-                <template v-for="(seg, si) in formatMsg(m.text)" :key="si">
-                  <strong v-if="seg.mention" class="msg-mention">{{ seg.text }}</strong><a v-else-if="seg.url" :href="seg.text" target="_blank" rel="noopener noreferrer" class="msg-link">{{ seg.text }}</a><span v-else>{{ seg.text }}</span>
-                </template>
-              </p>
+              <template v-for="m in g.messages" :key="m.id">
+                <div v-if="isListMsg(m.text)" class="msg-list">
+                  <span class="msg-list-header">{{ listHeader(m.text) }}</span>
+                  <span v-for="(item, i) in listItems(m.text)" :key="i" class="msg-list-item">
+                    <span class="msg-list-name">{{ item.name }}</span><span class="msg-list-meta">{{ item.meta }}</span>
+                  </span>
+                </div>
+                <p v-else class="msg-text">
+                  <template v-for="(seg, si) in formatMsg(m.text)" :key="si">
+                    <strong v-if="seg.mention" class="msg-mention">{{ seg.text }}</strong><a v-else-if="seg.url" :href="seg.text" target="_blank" rel="noopener noreferrer" class="msg-link">{{ seg.text }}</a><span v-else>{{ seg.text }}</span>
+                  </template>
+                </p>
+              </template>
             </div>
             </div>
           </template>
@@ -735,6 +761,39 @@ function onKeydown(e: KeyboardEvent) {
 .msg-mention {
   font-weight: 700;
   letter-spacing: 0.02em;
+}
+
+.msg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+}
+
+.msg-list-header {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 5px;
+}
+
+.msg-list-item {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.msg-list-name {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.msg-list-meta {
+  font-family: var(--font-sans);
+  color: var(--text-muted);
+  margin-left: 4px;
 }
 
 .msg-link {

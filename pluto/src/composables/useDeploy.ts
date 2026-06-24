@@ -34,14 +34,17 @@ const SUCCESS_BANNER = `
   DEPLOY SUCCESSFUL
 ──────────────────────────────────────────────────`
 
-export function useDeploy(getNodes: () => NodeMap) {
+// Toast state is module-level so all useDeploy() call sites share the same signal —
+// the deploy happens in NetworkDiagram, the toast renders in App.vue.
+const showToast        = ref(false)
+const toastConsoleName = ref('')
+const toastDuration    = ref('')
+
+export function useDeploy(getNodes: () => NodeMap = () => ({})) {
   const deploying        = ref<string | null>(null)
   const deployOutput     = ref<Record<string, DeployResult | null>>({})
   const lastDurations    = ref<Record<string, number>>(loadDurations())
   const lastDeployedAt   = ref<Record<string, number>>(loadLastAt())
-  const showToast        = ref(false)
-  const toastConsoleName = ref('')
-  const toastDuration    = ref('')
 
   function rememberDuration(id: string, ms: number) {
     lastDurations.value = { ...lastDurations.value, [id]: ms }

@@ -59,8 +59,6 @@ async function sendSignal(state: 'wait' | 'go') {
     emit('drive-error', 'capture: ' + failMsg + ' — staying on WAIT')
   }
 }
-// The button shows the ACTION you can take (the opposite of the current state).
-const nextState = computed<'wait' | 'go'>(() => (signal.value === 'go' ? 'wait' : 'go'))
 
 // ── capture status + lifecycle ─────────────────────────────────────
 interface Capture {
@@ -118,7 +116,7 @@ async function refreshLog() {
   } catch { /* leave last known */ }
 }
 const cmd = ref('')
-async function postLog(value: string, role) {
+async function postLog(value: string, role: string = 'operator') {
   const v = value.trim()
   if (!v) return
   try {
@@ -134,22 +132,13 @@ function sendCommand() { if (cmd.value.trim()) { postLog(cmd.value); cmd.value =
 function takeLook() { postLog('look', 'system') }
 
 // ── Quick commands: RUN and ATTACK ────────────────────────────────────
-async function sendDrive(body: object) {
-  try {
-    await fetch(`${API}/control/drive`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target: props.target, source: props.mapSource,
-                             mapping: props.mapping, dev: props.targetDev, ...body }),
-    })
-  } catch { /* best-effort */ }
-}
 
 function cmdRun()    { postLog('run',    'operator') }
 function cmdAttack() { postLog('attack', 'operator') }
 
 // who sent a line: Claude, or the operator (including system signals like go/wait/look).
 function lineKind(l: LogLine): string {
-  return l.role
+  return l.role ?? ''
 }
 
 // Claude's name colour, borrowed from its node (so the feed matches the chat); accent fallback.

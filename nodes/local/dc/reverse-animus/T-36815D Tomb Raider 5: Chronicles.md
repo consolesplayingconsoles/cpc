@@ -174,6 +174,21 @@ same mechanical-enemy family, so cover-and-strafe carries over.
   X=Jump, Y=Draw, R=Sprint. **TBD.**
 * **Analog stick = run confirmed.** D-pad gives walk steps only. Use analog for
   all sustained movement. (Platform-confirmed 2026-06-23 session 1.)
+* **Axis command is one-shot**: the firmware holds the last received stick position,
+  but the API drive watchdog resets state on timeout. For sustained running use
+  `hold.sh MAIN <x> <y> <ms>` which sends continuous frames. Do not use a single
+  `axis.sh` call for movement longer than ~500ms. (Session 2 lesson: "run run run
+  but nothing" — one-shot axis frame sent, watchdog cleared it before Lara moved.)
+* **VMU state**: VMU A-1 is blank (DOS-formatted, 200 blocks free, 0 saves). No
+  save file exists. On GAME OVER, "Load Game" has nothing to load — navigate to
+  "Exit to Title" then "New Game" instead. Save as soon as the inventory ring is
+  available.
+* **Frame source by context**: use `latest-processed.jpg` for in-game play (greyscale
+  quarter-res is readable for navigation). Use `latest.jpg` for BIOS/menu navigation
+  where colour is needed to identify icons. (Platform-confirmed session 2.)
+* **DC BIOS cursor is invisible in the frame** — track it mentally. Layout:
+  Play=top-left, File=top-right, Music=bottom-left, Settings=bottom-right.
+  D_LEFT from File → Play; default cursor on power-on is Play.
 * Turn rate: 1.2s of full analog-left/right overshot 90 degrees into the wall.
   True 90-degree turn duration is **LIVE/TBD** — measure and record.
 * Movement units (hold durations, fired open-loop): ms to walk one tile, ms to run
@@ -181,7 +196,8 @@ same mechanical-enemy family, so cover-and-strafe carries over.
 * Reload drill: read the health bar each frame; the reload path is ring > Load >
   confirm (a menu sequence). Time it once. **TBD.**
 * Confirm whether this build opens with a training/backstage stretch, and its
-  exits. **TBD.**
+  exits. (Session 2: cutscene on boat/train, then cobblestone alley. Unclear if
+  training precedes the alley. **TBD.**)
 * Measure the two-face timer and the sprint route that beats it. **TBD.**
 * Record which enemies can be skipped vs. forced, per room, as you clear them. **TBD.**
 

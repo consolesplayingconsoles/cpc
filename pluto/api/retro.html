@@ -29,7 +29,7 @@
 <div id="menu"></div>
 <div id="feed"></div>
 <form id="f" onsubmit="return doSend()">
-<input id="txt" autocomplete="off" placeholder="message..." onkeyup="upd()">
+<input id="txt" autocomplete="off" placeholder="message..." onkeyup="upd()" oninput="upd()">
 <input id="snd" type="submit" value="send">
 </form>
 <script>
@@ -79,10 +79,11 @@ function buildMenu(){
   menu.style.color = CPC.secondary;
 }
 
-/* grey the send button while the input is empty (and block the submit) */
+/* grey the send button visually when empty, but never disable it --
+   the Wii virtual keyboard doesn't fire keyup/input reliably so the
+   button would stay permanently disabled. doSend() guards empty sends. */
 function upd(){
   var empty = trim(txt.value) === '';
-  snd.disabled = empty;
   snd.style.borderColor = empty ? '#c8c8c4' : CPC.primary;
   snd.style.color       = empty ? '#bbbbb8' : CPC.primary;
 }
