@@ -40,11 +40,12 @@ Pluto is a single app you run one of two ways:
 
 ## Start here
 
-| Folder                                   | What's inside                                                                                  |
-|------------------------------------------|------------------------------------------------------------------------------------------------|
-| [pluto/](./pluto/)                       | CPC Pluto: the server, dashboard and control plane (runs as Lab or C2)                         |
-| [pluto-python-tui/](./pluto-python-tui/) | The on-console client/TUI that Pluto deploys to Linux nodes                                    |
-| [pluto-pi-hub/](./pluto-pi-hub/)         | The Pi-side hub: native-protocol bridges for non-IP consoles, and the Pico firmware it flashes |
+| Folder                                                             | What's inside                                                                                  |
+|--------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
+| [pluto/](./pluto/)                                                 | CPC Pluto: the server, dashboard and control plane (runs as Lab or C2)                         |
+| [pluto/api/modules/translation/](./pluto/api/modules/translation/) | Game text extraction and translation infrastructure (console-specific extractors and guides)   |
+| [pluto-python-tui/](./pluto-python-tui/)                           | The on-console client/TUI that Pluto deploys to Linux nodes                                    |
+| [pluto-pi-hub/](./pluto-pi-hub/)                                   | The Pi-side hub: native-protocol bridges for non-IP consoles, and the Pico firmware it flashes |
 
 The [./nodes](./nodes) dir defines every node in the network. Any dir with a valid `.env` is picked up at startup. Devices on the LAN are checked live; cloud services are declared. Consoles too old to speak TCP/IP join through a Raspberry Pi that talks their native protocols on their behalf.
 
@@ -116,6 +117,10 @@ PRs welcome across all components.
 
 Built something on top of this? Share it on Instagram [@consolesplayingconsoles](https://instagram.com/consolesplayingconsoles). Found a bug? Open an issue.
 
-Do what you want with this. Credit the project and share what you find.
+Do what you want with this, and pass it on the same way. Credit the project and share what you find.
+
+## License
+
+© 2026 consolesplayingconsoles. Free software under the **GNU General Public License v3.0 or later** ([GPL-3.0-or-later](LICENSE)): use it, study it, share it, modify it. Derivative works stay under the same licence, so what gets built on this stays open too. The project is copyleft partly because it leans on GPL-3.0 tooling such as [GDIBuilder](https://github.com/Sappharad/GDIbuilder).
 
 #peopleplayingconsolesplayingconsoles

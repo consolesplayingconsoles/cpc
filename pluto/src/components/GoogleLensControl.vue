@@ -88,7 +88,7 @@ watch(translateLang, (v) => { try { localStorage.setItem(LANG_KEY, v) } catch {}
 async function _fetchDefaultLang() {
   if (localStorage.getItem(LANG_KEY)) return   // user has an explicit preference
   try {
-    const r = await fetch(`${API}/control/lens/config`)
+    const r = await fetch(`${API}/control/google/config`)
     if (r.ok) { const j = await r.json(); if (j.lang) translateLang.value = j.lang }
   } catch {}
 }
@@ -132,11 +132,11 @@ function _pushError(msg: string) {
 async function scan() {
   if (scanning.value || overLimit.value) return
   const req = imageB64.value
-    ? fetch(`${API}/control/lens`, {
+    ? fetch(`${API}/control/google/lens`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: imageB64.value }),
       })
-    : fetch(`${API}/control/lens`)
+    : fetch(`${API}/control/google/lens`)
   scanning.value = true
   try {
     const r = await req
@@ -171,7 +171,7 @@ async function translate() {
   translating.value = true
   results.value[idx].translating = true
   try {
-    const r = await fetch(`${API}/control/lens/translate`, {
+    const r = await fetch(`${API}/control/google/translate`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, target: translateLang.value }),
     })
@@ -232,13 +232,13 @@ let poll = 0
 function startPoll() { if (!poll) poll = window.setInterval(() => { if (captureRunning.value) scan() }, 3000) }
 function stopPoll()  { if (poll) { clearInterval(poll); poll = 0 } }
 
-// ── hardware-triggered results (Pi L+R → /control/lens/translate-last) ───
+// ── hardware-triggered results (Pi L+R → /control/google/translate-last) ───
 let _hwLastTs = 0
 let hwPoll = 0
 
 async function _pollHardware() {
   try {
-    const r = await fetch(`${API}/control/lens/latest`)
+    const r = await fetch(`${API}/control/google/latest`)
     if (!r.ok) return
     const j = await r.json()
     const tr = j?.translation

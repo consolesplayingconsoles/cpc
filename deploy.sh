@@ -14,9 +14,10 @@
 #  Nodes not named in the map fall back to the "default" profile.
 #
 #  Payloads:
-#    server  -- the Pluto dashboard (api + dist + config), run by serve.sh under systemd.
-#    client  -- the python TUI client (pluto-python-tui + vendored deps).
-#    hub     -- the Pi's bridge backend; its always-up op receiver runs under systemd.
+#    server    -- the Pluto dashboard (api + dist + config), run by serve.sh under systemd.
+#    client    -- the python TUI client (pluto-python-tui + vendored deps).
+#    hub       -- the Pi's bridge backend; its always-up op receiver runs under systemd.
+#    translate -- the Dreamcast translation API on Batocera, under batocera-services.
 #
 #  Usage: ./deploy.sh <path-to-env-file>
 #    ./deploy.sh pluto/.env            # the Pluto host  -> server payload
@@ -140,6 +141,13 @@ payload_server() {
     grep -E '^(NODE_NAME|HOST_IP|PI_BRIDGE_PORT|UI_PRIMARY_COLOR|UI_SECONDARY_COLOR|SMB_PATH|OS)=' "$envf" \
         | $SSH "mkdir -p /opt/nodes/local/${name} && cat > /opt/nodes/local/${name}/.env"
   done
+
+  # OpenAPI specs for /docs (the API serves them same-origin). Ship the non-Pluto
+  # ones into a flat specs/ dir the API resolves; Pluto's own rides inside api/.
+  $SSH "mkdir -p ${REMOTE_ROOT}/specs"
+  $SSH "cat > ${REMOTE_ROOT}/specs/pluto.yaml"     < pluto/api/openapi.yaml
+  $SSH "cat > ${REMOTE_ROOT}/specs/translate.yaml" < pluto-translate/openapi.yaml
+  $SSH "cat > ${REMOTE_ROOT}/specs/pi-hub.yaml"    < pluto-pi-hub/openapi.yaml
   echo "sync ok"
 
   # Restart. Re-sync the unit so a first install (or the /opt/pluto -> /opt/cpc path
@@ -217,6 +225,32 @@ payload_hub() {
     fi
   else
     echo "not managed by systemd -- run ${REMOTE_ROOT}/pluto-pi-hub/run.sh serve manually"
+  fi
+}
+
+# translate -- the Dreamcast translation API (pluto-translate). Unlike server/hub
+# its node is Batocera, which has NO systemd (uses batocera-services) and an
+# EPHEMERAL overlay / (only /userdata persists). So it lands in /userdata and
+# installs a batocera-service; falls back to a plain run.sh launch otherwise.
+payload_translate() {
+  TR_DIR=/userdata/cpc-scripts          # persistent on Batocera (/ is an overlay)
+  echo "##STEP:sync"
+  $SSH "rm -rf ${TR_DIR}; mkdir -p ${TR_DIR}"
+  tar --no-xattrs --no-fflags --no-mac-metadata -C pluto-translate \
+      --exclude='__pycache__' --exclude='deploy' -cf - . \
+      | $SSH "tar -xf - -C ${TR_DIR}"
+  $SSH "chmod +x ${TR_DIR}/run.sh ${TR_DIR}/*.sh"
+  echo "sync ok"
+
+  echo "##STEP:restart"
+  if $SSH "command -v batocera-services >/dev/null 2>&1"; then
+    $SSH "mkdir -p /userdata/system/services && cat > /userdata/system/services/cpc-translate && chmod +x /userdata/system/services/cpc-translate" < pluto-translate/deploy/cpc-translate
+    # stop kills by port (an old orphan too), then enable (boot) + start.
+    $SSH "batocera-services stop cpc-translate >/dev/null 2>&1; batocera-services enable cpc-translate >/dev/null 2>&1; batocera-services start cpc-translate"
+    echo "restarted via batocera-services (cpc-translate)"
+  else
+    $SSH "F=\$(fuser 7711/tcp 2>/dev/null); [ -n \"\$F\" ] && kill \$F 2>/dev/null; sleep 1; setsid sh ${TR_DIR}/run.sh serve > ${TR_DIR}/service.log 2>&1 < /dev/null &"
+    echo "started via run.sh (no batocera-services)"
   fi
 }
 

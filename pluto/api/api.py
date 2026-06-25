@@ -676,6 +676,15 @@ def _capture_dir():
     return os.path.join(_dist_dir(), "capture")
 
 
+def _translate_state_path(game):
+    """dist/translations/<game>/state.json -- translation pipeline state for a game."""
+    return os.path.join(_dist_dir(), "translations", game, "state.json")
+
+def _translate_upload_dir(game):
+    """dist/translations/uploads/<game>/ -- raw ROM files for a game."""
+    return os.path.join(_dist_dir(), "translations", "uploads", game)
+
+
 def _capture_frame_path(): return os.path.join(_capture_dir(), "latest.jpg")
 def _capture_flag_path():  return os.path.join(_capture_dir(), "state.flag")
 
@@ -1020,6 +1029,44 @@ def _drive_play(controller, events, mapping, sink, t0, speed):
 
 # ── Request handler ──────────────────────────────────────────────────────────
 
+# --- OpenAPI docs (/docs) ---------------------------------------------------
+# The non-Pluto APIs are documented by hand-written specs that ship with them.
+# Pluto serves a Swagger UI over them, same-origin (so the urls dropdown needs no
+# CORS). Each entry: (id, dropdown label, repo-relative path). The pre-commit drift
+# guard (scripts/check_openapi_drift.py) keeps each spec matching its code. Pluto's
+# own spec lands here in Phase B2.
+OPENAPI_SPECS = [
+    ("pluto",     "Pluto API",     "pluto/api/openapi.yaml"),
+    ("translate", "Translate API", "pluto-translate/openapi.yaml"),
+    ("pi-hub",    "Pi-Hub API",    "pluto-pi-hub/openapi.yaml"),
+]
+
+_DOCS_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>CPC APIs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"/>
+  <style>body { margin: 0 }</style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      urls: [%s],
+      dom_id: "#swagger-ui",
+      deepLinking: true,
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+      plugins: [SwaggerUIBundle.plugins.DownloadUrl],
+      layout: "StandaloneLayout"
+    });
+  </script>
+</body>
+</html>"""
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     config      = {}
     base_dir    = ""
@@ -1217,6 +1264,64 @@ class Handler(http.server.BaseHTTPRequestHandler):
         dreame_session.logout()
         self._send(200, {"authenticated": False})
 
+    def _serve_docs(self):
+        """Swagger UI over the non-Pluto specs; the urls dropdown switches APIs."""
+        urls = ", ".join('{name: "%s", url: "/docs/%s.yaml"}' % (label, sid)
+                         for sid, label, _ in OPENAPI_SPECS)
+        body = (_DOCS_HTML % urls).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self._cors_headers()
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_openapi(self, spec_id):
+        """Serve one spec file same-origin: the repo layout (dev), else the flat
+        specs/ dir payload_server ships (prod)."""
+        match = next((s for s in OPENAPI_SPECS if s[0] == spec_id), None)
+        base  = self.__class__.base_dir
+        cands = ([os.path.join(os.path.dirname(base), match[2]),
+                  os.path.join(base, "specs", spec_id + ".yaml")] if match else [])
+        for cand in cands:
+            if os.path.isfile(cand):
+                with open(cand, "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/yaml")
+                self.send_header("Content-Length", str(len(body)))
+                self._cors_headers()
+                self.end_headers()
+                self.wfile.write(body)
+                return
+        self._send(404, {"error": "no such spec"})
+
+    # Route manifest = the documented API surface, kept matching openapi.yaml by the
+    # pre-commit drift guard (scripts/check_openapi_drift.py). Pluto's dispatch has
+    # bespoke per-route arg handling, so -- unlike the node APIs -- this is a manifest
+    # BESIDE the dispatch, not table-driven: add/rename/remove a route in do_GET/
+    # do_POST/do_PUT below -> update this set AND openapi.yaml or the commit fails.
+    API_ROUTES = {
+        ("GET", "/retro"), ("GET", "/dreame"), ("GET", "/nodes"),
+        ("GET", "/connections"), ("GET", "/whoami"), ("GET", "/messages"),
+        ("GET", "/deploy/{node}/stream"),
+        ("GET", "/mappings"), ("GET", "/mappings/{source}"), ("GET", "/mappings/{source}/{target}"),
+        ("GET", "/control/signal"), ("GET", "/control/capture"), ("GET", "/control/log"),
+        ("GET", "/control/frame"), ("GET", "/control/google/lens"), ("GET", "/control/google/config"),
+        ("GET", "/control/google/latest"),
+        ("GET", "/translate/projects"), ("GET", "/translate/systems"), ("GET", "/translate/games"),
+        ("GET", "/translate/extract"), ("GET", "/translate/sources"), ("GET", "/translate/{game}"),
+        ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
+        ("POST", "/messages"), ("POST", "/dreame/login"), ("POST", "/dreame/logout"),
+        ("POST", "/control/drive"), ("POST", "/control/signal"), ("POST", "/control/capture"),
+        ("POST", "/control/capture/grab"), ("POST", "/control/google/lens"),
+        ("POST", "/control/google/translate"), ("POST", "/control/google/translate-last"),
+        ("POST", "/workspace/{node}"), ("POST", "/config/open"), ("POST", "/native/{node}/{action}"),
+        ("POST", "/translate/run"), ("POST", "/translate/open"), ("POST", "/translate/delete"),
+        ("POST", "/translate/upload"), ("POST", "/translate/{game}"),
+        ("PUT", "/translate/{game}"),
+    }
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         parts  = parsed.path.strip("/").split("/")
@@ -1263,12 +1368,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/control/frame":
             self._handle_control_frame()
 
-        elif parsed.path == "/control/lens":
+        elif parsed.path == "/control/google/lens":
             self._handle_control_lens_get()
-        elif parsed.path == "/control/lens/config":
+        elif parsed.path == "/control/google/config":
             self._handle_control_lens_config()
-        elif parsed.path == "/control/lens/latest":
+        elif parsed.path == "/control/google/latest":
             self._handle_control_lens_latest()
+
+        elif parsed.path == "/translate/projects":
+            self._handle_translate_projects()
+        elif parsed.path == "/translate/systems":
+            self._handle_translate_systems()
+        elif parts[:2] == ["translate", "games"]:
+            qs = urllib.parse.parse_qs(parsed.query)
+            self._handle_translate_games((qs.get("system") or [""])[0])
+        elif parts[:2] == ["translate", "extract"]:
+            qs = urllib.parse.parse_qs(parsed.query)
+            self._handle_translate_extract((qs.get("path") or [""])[0])
+        elif parts[:2] == ["translate", "sources"]:
+            qs = urllib.parse.parse_qs(parsed.query)
+            self._handle_translate_sources((qs.get("path") or [""])[0])
+        elif len(parts) == 2 and parts[0] == "translate":
+            self._handle_translate_get(parts[1])
+
+        elif parsed.path == "/docs":
+            self._serve_docs()
+        elif parts[:1] == ["docs"] and len(parts) == 2 and parts[1].endswith(".yaml"):
+            self._serve_openapi(parts[1][:-5])
 
         else:
             self._send(404, {"error": "not found"})
@@ -1315,11 +1441,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._handle_capture(body)
         elif len(parts) == 2 and parts[0] == "workspace":
             self._handle_open(action=parts[0], target_node=parts[1])
-        elif parsed.path == "/control/lens":
+        elif parsed.path == "/control/google/lens":
             self._handle_control_lens_post()
-        elif parsed.path == "/control/lens/translate":
+        elif parsed.path == "/control/google/translate":
             self._handle_control_lens_translate()
-        elif parsed.path == "/control/lens/translate-last":
+        elif parsed.path == "/control/google/translate-last":
             self._handle_control_lens_translate_last()
         elif parsed.path == "/control/capture/grab":
             self._handle_control_capture_grab()
@@ -1327,6 +1453,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_open_config()
         elif len(parts) == 3 and parts[0] == "native":
             self._handle_native(parts[1], parts[2])
+        elif parsed.path == "/translate/run":
+            self._handle_translate_run()
+        elif parsed.path == "/translate/open":
+            self._handle_translate_open()
+        elif parsed.path == "/translate/delete":
+            self._handle_translate_delete()
+        elif parsed.path == "/translate/upload":
+            self._handle_translate_upload()
+        elif len(parts) == 2 and parts[0] == "translate":
+            self._handle_translate_put(parts[1])
+        else:
+            self._send(404, {"error": "not found"})
+
+    def do_PUT(self):
+        parsed = urllib.parse.urlparse(self.path)
+        parts  = parsed.path.strip("/").split("/")
+        if len(parts) == 2 and parts[0] == "translate":
+            self._handle_translate_put(parts[1])
         else:
             self._send(404, {"error": "not found"})
 
@@ -1715,7 +1859,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return (Handler.node_roster.get("google") or {}).get("LENS_LANG", "en").strip() or "en"
 
     def _handle_control_lens_get(self):
-        """GET /control/lens -> run Google Vision text-detection on the latest capture frame."""
+        """GET /control/google/lens -> run Google Vision text-detection on the latest capture frame."""
         api_key = self._google_api_key()
         if not api_key:
             self._send(503, {"error": "google node not configured — set GOOGLE_API_KEY in nodes/cloud/google/.env"})
@@ -1724,7 +1868,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, result)
 
     def _handle_control_lens_post(self):
-        """POST /control/lens {image: <base64>} -> scan a caller-supplied image."""
+        """POST /control/google/lens {image: <base64>} -> scan a caller-supplied image."""
         import base64 as _b64
         api_key = self._google_api_key()
         if not api_key:
@@ -1743,7 +1887,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, result)
 
     def _handle_control_lens_translate(self):
-        """POST /control/lens/translate {text: str, target?: str} -> Cloud Translation API."""
+        """POST /control/google/translate {text: str, target?: str} -> Cloud Translation API."""
         api_key = self._google_api_key()
         if not api_key:
             self._send(503, {"error": "google node not configured — set GOOGLE_API_KEY in nodes/cloud/google/.env"})
@@ -1756,7 +1900,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, result)
 
     def _handle_control_lens_translate_last(self):
-        """POST /control/lens/translate-last {target?: str} -> translate cached scan text.
+        """POST /control/google/translate-last {target?: str} -> translate cached scan text.
         Used by the Pi hardware trigger (L+R on DC controller)."""
         api_key = self._google_api_key()
         if not api_key:
@@ -1768,12 +1912,224 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(200 if "translated" in result else 422, result)
 
     def _handle_control_lens_config(self):
-        """GET /control/lens/config -> {lang: LENS_LANG} — default translation language."""
+        """GET /control/google/config -> {lang: LENS_LANG} — default translation language."""
         self._send(200, {"lang": self._google_lang()})
 
     def _handle_control_lens_latest(self):
-        """GET /control/lens/latest -> last scan + translation state for frontend polling."""
+        """GET /control/google/latest -> last scan + translation state for frontend polling."""
         self._send(200, google_scanner.latest())
+
+    def _parse_multipart(self):
+        """Parse multipart/form-data body without cgi (removed in Python 3.13).
+        Returns list of {name, filename, content} dicts."""
+        ct = self.headers.get("Content-Type", "")
+        if "boundary=" not in ct:
+            return []
+        boundary = ct.split("boundary=")[1].strip().encode()
+        length   = int(self.headers.get("Content-Length", 0))
+        body     = self.rfile.read(length)
+        parts    = []
+        for segment in body.split(b"--" + boundary)[1:]:
+            if segment.startswith(b"--"):
+                break
+            segment = segment.lstrip(b"\r\n")
+            if b"\r\n\r\n" not in segment:
+                continue
+            hdr_block, _, content = segment.partition(b"\r\n\r\n")
+            content = content.rstrip(b"\r\n")
+            hdrs = {}
+            for line in hdr_block.decode("utf-8", errors="replace").split("\r\n"):
+                if ":" in line:
+                    k, _, v = line.partition(":")
+                    hdrs[k.strip().lower()] = v.strip()
+            params = {}
+            for token in hdrs.get("content-disposition", "").split(";"):
+                token = token.strip()
+                if "=" in token:
+                    k, _, v = token.partition("=")
+                    params[k.strip()] = v.strip().strip('"')
+            parts.append({
+                "name":     params.get("name", ""),
+                "filename": params.get("filename", ""),
+                "content":  content,
+            })
+        return parts
+
+    def _decompress_archive(self, archive_path, extract_dir, state_path, game_id):
+        """Decompress a ROM archive into extract_dir. Returns path to the first ROM found."""
+        import zipfile, tarfile, subprocess as _sp
+
+        ext = os.path.splitext(archive_path)[1].lower()
+        os.makedirs(extract_dir, exist_ok=True)
+
+        if ext == ".zip":
+            with zipfile.ZipFile(archive_path) as zf:
+                zf.extractall(extract_dir)
+        elif ext in (".tar", ".gz", ".bz2", ".xz"):
+            with tarfile.open(archive_path) as tf:
+                tf.extractall(extract_dir)
+        elif ext == ".7z":
+            r = _sp.run(["7z", "x", "-o" + extract_dir, "-y", archive_path],
+                        stdout=_sp.DEVNULL, stderr=_sp.PIPE)
+            if r.returncode != 0:
+                raise IOError("7z failed: " + r.stderr.decode(errors="replace").strip())
+        elif ext == ".rar":
+            r = _sp.run(["unrar", "x", "-y", archive_path, extract_dir],
+                        stdout=_sp.DEVNULL, stderr=_sp.PIPE)
+            if r.returncode != 0:
+                raise IOError("unrar failed: " + r.stderr.decode(errors="replace").strip())
+        else:
+            raise IOError("no decompressor for %s" % ext)
+
+        ROM_EXTS = {".gdi", ".cdi", ".chd", ".iso"}
+        for root, _dirs, files in os.walk(extract_dir):
+            for f in sorted(files):
+                if os.path.splitext(f)[1].lower() in ROM_EXTS:
+                    return os.path.join(root, f)
+        raise IOError("no ROM file found inside archive")
+
+    def _handle_translate_upload(self):
+        """POST /translate/upload -- multipart upload of a ROM file.
+
+        Saves the file to dist/translations/uploads/<game_id>/, detects the
+        console from the extension, and returns the extraction prompt for the
+        user to paste into Claude Code.
+
+        Form fields:
+          files[]  -- the ROM file (.gdi, .zip, .7z, ...)
+          game_id  -- optional slug; derived from the filename if absent
+          lang     -- target language code (e.g. 'ca')
+        """
+        try:
+            parts = self._parse_multipart()
+        except Exception as exc:
+            self._send(400, {"error": "bad multipart: %s" % exc})
+            return
+
+        fields   = {p["name"]: p["content"].decode("utf-8", errors="replace")
+                    for p in parts if not p["filename"]}
+        uploads  = [p for p in parts if p["filename"]]
+        lang     = fields.get("lang", "")
+
+        if not uploads:
+            self._send(400, {"error": "no file found in upload"})
+            return
+
+        rom_part = uploads[0]
+        filename = rom_part["filename"]
+        base     = os.path.splitext(filename)[0]
+        raw     = fields.get("game_id") or base.lower()
+        slug    = "".join(c if c.isalnum() else "-" for c in raw)
+        # collapse consecutive dashes and strip leading/trailing
+        import re as _re
+        game_id = _re.sub(r"-{2,}", "-", slug).strip("-")
+
+        upload_dir = _translate_upload_dir(game_id)
+        os.makedirs(upload_dir, exist_ok=True)
+        rom_path = os.path.join(upload_dir, os.path.basename(filename))
+        with open(rom_path, "wb") as f:
+            f.write(rom_part["content"])
+
+        ext        = os.path.splitext(filename)[1].lower()
+        state_path = _translate_state_path(game_id)
+        import json as _json
+        os.makedirs(os.path.dirname(os.path.abspath(state_path)), exist_ok=True)
+        with open(state_path, "w") as _sf:
+            _json.dump({"game": game_id, "status": "pending", "statusText": "Uploading..."}, _sf)
+        repo_root  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+        COMPRESSED = {".zip", ".7z", ".rar", ".gz"}
+
+        if ext in COMPRESSED:
+            os.makedirs(os.path.dirname(os.path.abspath(state_path)), exist_ok=True)
+            with open(state_path, "w") as _sf:
+                import json as _json
+                _json.dump({"game": game_id, "status": "decompressing",
+                            "statusText": "Decompressing archive..."}, _sf)
+            try:
+                rom_path = self._decompress_archive(
+                    rom_path,
+                    os.path.join(upload_dir, "extracted"),
+                    state_path, game_id,
+                )
+                ext = os.path.splitext(rom_path)[1].lower()
+            except IOError as exc:
+                self._send(422, {"error": str(exc)})
+                return
+
+        if ext == ".gdi":
+            extractor  = os.path.join(repo_root, "api", "modules", "translation", "dc", "extract.py")
+            rel_ext    = os.path.relpath(extractor, repo_root)
+            rel_rom    = os.path.relpath(rom_path, repo_root)
+            rel_state  = os.path.relpath(state_path, repo_root)
+            prompt = (
+                "We are extracting Japanese dialogue from a Dreamcast game for translation.\n"
+                "The disc image is ready at: {rom}\n\n"
+                "Run the extractor:\n"
+                '  python3 "{ext}" "{rom}" "{state}" {game}\n\n'
+                "The extractor writes progress to {state} as it runs — Pluto polls it live.\n"
+                "When it finishes, the translation table loads automatically.\n\n"
+                "If the extractor fails (wrong file layout, missing path, encoding error),\n"
+                "read {ext} for the output schema and adapt as needed."
+            ).format(ext=rel_ext, rom=rel_rom, state=rel_state, game=game_id)
+            console = "dc"
+        else:
+            prompt = (
+                "No automatic extractor exists for {ext} files yet.\n"
+                "Write an extractor that reads the ROM at {rom} and outputs state JSON to {state}.\n"
+                "See api/modules/translation/dc/extract.py for the expected output schema."
+            ).format(ext=ext, rom=os.path.relpath(rom_path, repo_root),
+                     state=os.path.relpath(state_path, repo_root))
+            console = "unknown"
+
+        if not prompt:
+            self._send(500, {"error": "could not generate extraction prompt for %s" % ext})
+            return
+
+        self._send(200, {
+            "ok":      True,
+            "game_id": game_id,
+            "console": console,
+            "lang":    lang,
+            "prompt":  prompt,
+        })
+
+    def _handle_translate_get(self, game):
+        """GET /translate/<game> -> translation pipeline state from dist/translations/<game>/state.json."""
+        game = urllib.parse.unquote(game)   # ns may carry spaces/brackets
+        path = _translate_state_path(game)
+        if not os.path.exists(path):
+            self._send(200, {"game": game, "status": "pending"})
+            return
+        try:
+            with open(path, encoding="utf-8") as f:
+                self._send(200, json.load(f))
+        except (ValueError, IOError) as exc:
+            self._send(500, {"error": str(exc)})
+
+    def _handle_translate_put(self, game):
+        """POST/PUT /translate/<game> -> write translator edits back to state.json.
+        Merges the posted JSON over the existing state so partial updates are safe."""
+        body = self._read_json_body()
+        if body is None:
+            return
+        game = urllib.parse.unquote(game)   # ns may carry spaces/brackets
+        path = _translate_state_path(game)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        existing = {}
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    existing = json.load(f)
+            except (ValueError, IOError):
+                pass
+        existing.update(body)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, ensure_ascii=False, indent=2)
+            self._send(200, {"ok": True, "game": game})
+        except IOError as exc:
+            self._send(500, {"error": str(exc)})
 
     def _handle_control_capture_grab(self):
         """POST /control/capture/grab -> take a single fresh frame from the capture card.
@@ -2112,6 +2468,208 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 emit("done", "failed:%d" % proc.returncode)
         except Exception as e:
             emit("done", "failed:%s" % e)
+
+    # ── Translation flow (Batocera fast flow) ──────────────────────────────────
+
+    def _node_ssh(self, node_id, argv, timeout=300):
+        """Run argv on a node over SSH, using its .env -- the same local/remote
+        rule as deploy.sh: CUSTOM_SSH_ALIAS wins, else SSH_USER@HOST_IP + key.
+        Args are shell-quoted for the remote side (roms paths have spaces).
+        Returns (returncode, combined_output)."""
+        import shlex
+        cfg   = self.__class__.node_roster.get(node_id) or {}
+        alias = (cfg.get("CUSTOM_SSH_ALIAS") or "").strip()
+        host  = (cfg.get("HOST_IP") or "").strip()
+        if alias:
+            prefix = ["ssh", alias]
+        elif host and host not in ("localhost", "127.0.0.1"):
+            user = (cfg.get("SSH_USER") or "").strip()
+            key  = os.path.expanduser((cfg.get("SSH_KEY_PATH") or "~/.ssh/id_rsa").strip())
+            prefix = ["ssh", "-i", key, "-o", "StrictHostKeyChecking=no", "%s@%s" % (user, host)]
+        else:
+            return (1, "node '%s' has no ssh config" % node_id)
+        remote = " ".join(shlex.quote(a) for a in argv)
+        try:
+            r = subprocess.run(prefix + [remote], stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True, timeout=timeout)
+            return (r.returncode, r.stdout or "")
+        except Exception as exc:
+            return (1, str(exc))
+
+    def _handle_translate_systems(self):
+        """GET /translate/systems -> local console nodes that map to a
+        /userdata/roms/<x> folder on batocera. Resolution: a node's dir name or
+        its NODE_NAME lowercased, matched against the live roms listing (no
+        static config -- we check what's actually there)."""
+        rc, out = self._node_ssh("batocera", ["ls", "/userdata/roms"])
+        if rc != 0:
+            self._send(502, {"error": "batocera unreachable", "detail": out.strip()})
+            return
+        folders = {l.strip() for l in out.splitlines() if l.strip()}
+        systems = []
+        for node_id, cfg in self.__class__.node_roster.items():
+            if cfg.get("_kind") != "local" or node_id == "batocera":
+                continue
+            name = cfg.get("NODE_NAME", node_id)
+            for cand in (node_id, name.lower()):
+                if cand in folders:
+                    # 'supported' = has a working build pipeline. Only DC so far
+                    # (translate.sh + dc_story_patch are DC-specific); others show
+                    # but are disabled in the picker until their pipeline lands.
+                    systems.append({"node": node_id, "name": name, "system": cand,
+                                    "supported": node_id == "dc"})
+                    break
+        self._send(200, {"systems": systems})
+
+    def _handle_translate_games(self, system):
+        """GET /translate/games?system=<x> -> translatable GDI games on batocera."""
+        system = (system or "").strip()
+        if not system:
+            self._send(400, {"error": "system required"})
+            return
+        rc, out = self._node_ssh("batocera",
+                                 ["sh", "/userdata/cpc-scripts/list-games.sh", system])
+        if rc != 0:
+            self._send(502, {"error": "list failed", "detail": out.strip()})
+            return
+        games = []
+        for line in out.splitlines():
+            path = line.strip()
+            if not path:
+                continue
+            base   = os.path.basename(path)
+            parent = os.path.basename(os.path.dirname(path))
+            name   = parent if base.lower() == "disc.gdi" else os.path.splitext(base)[0]
+            games.append({"name": name, "path": path})
+        self._send(200, {"games": games})
+
+    def _handle_translate_projects(self):
+        """GET /translate/projects -> saved translation projects. No DB: the dirs
+        under dist/translations/ that hold a state.json ARE the project list."""
+        root = os.path.join(_dist_dir(), "translations")
+        projects = []
+        if os.path.isdir(root):
+            for name in sorted(os.listdir(root)):
+                sp = os.path.join(root, name, "state.json")
+                if name == "uploads" or not os.path.isfile(sp):
+                    continue
+                try:
+                    with open(sp, encoding="utf-8") as f:
+                        st = json.load(f)
+                except Exception:
+                    st = {}
+                projects.append({
+                    "ns":       name,
+                    "gameName": st.get("gameName", name),
+                    "lang":     st.get("lang", ""),
+                    "total":    st.get("total", len(st.get("blocks", []))),
+                })
+        self._send(200, {"projects": projects})
+
+    def _handle_translate_open(self):
+        """POST /translate/open {ns} -> open the project's dist dir in the OS file
+        manager (the classic open-dir icon)."""
+        body = self._read_json_body()
+        ns = ((body or {}).get("ns") or "").strip()
+        d  = os.path.join(_dist_dir(), "translations", ns)
+        if not ns or not os.path.isdir(d):
+            self._send(404, {"error": "no such project"})
+            return
+        try:
+            if sys.platform == "darwin":   subprocess.Popen(["open", d])
+            elif sys.platform.startswith("linux"): subprocess.Popen(["xdg-open", d])
+            else:                          subprocess.Popen(["explorer", d])
+            self._send(200, {"ok": True})
+        except Exception as exc:
+            self._send(500, {"error": str(exc)})
+
+    def _handle_translate_delete(self):
+        """POST /translate/delete {ns} -> remove a saved project (its dist dir).
+        Path-guarded: ns must resolve to a direct child of dist/translations/."""
+        body = self._read_json_body()
+        ns   = ((body or {}).get("ns") or "").strip()
+        base = os.path.realpath(os.path.join(_dist_dir(), "translations"))
+        real = os.path.realpath(os.path.join(base, ns))
+        if not ns or os.path.dirname(real) != base or not os.path.isdir(real):
+            self._send(404, {"error": "no such project"})
+            return
+        try:
+            import shutil
+            shutil.rmtree(real)
+            self._send(200, {"ok": True})
+        except Exception as exc:
+            self._send(500, {"error": str(exc)})
+
+    def _handle_translate_extract(self, path):
+        """GET /translate/extract?path=<gdi> -> the dialogue table as JSON.
+        Blocks carry RAW Shift-JIS bytes (hex); the browser decodes them (the box
+        has no shift_jis codec). Pure read -- nothing is written back."""
+        path = (path or "").strip()
+        if not path:
+            self._send(400, {"error": "path required"})
+            return
+        rc, out = self._node_ssh("batocera",
+                                 ["sh", "/userdata/cpc-scripts/extract.sh", path],
+                                 timeout=120)
+        # The script prints JSON on stdout: a {"blocks":...} table on success, or a
+        # {"error":...} on a handled failure (e.g. "no STORY.PAC in this disc").
+        # Surface the script's own message rather than burying it in a wrapper.
+        line = next((l for l in reversed(out.splitlines()) if l.strip()), "")
+        try:
+            data = json.loads(line)
+        except Exception:
+            self._send(502 if rc != 0 else 500,
+                       {"error": "extract failed", "detail": out.strip()[:500]})
+            return
+        if "error" in data:
+            self._send(502, data)
+            return
+        self._send(200, data)
+
+    def _handle_translate_sources(self, path):
+        """GET /translate/sources?path=<gdi> -> the list of translatable text
+        files on the disc (the workbench "tabs"), ranked by Shift-JIS density.
+        Extracts + caches once on the box; later per-tab extracts read the cache.
+        An empty list means no text was found (the only real failure)."""
+        path = (path or "").strip()
+        if not path:
+            self._send(400, {"error": "path required"})
+            return
+        rc, out = self._node_ssh("batocera",
+                                 ["sh", "/userdata/cpc-scripts/dc_sources.sh", path],
+                                 timeout=180)
+        line = next((l for l in reversed(out.splitlines()) if l.strip()), "")
+        try:
+            data = json.loads(line)
+        except Exception:
+            self._send(502 if rc != 0 else 500,
+                       {"error": "sources scan failed", "detail": out.strip()[:500]})
+            return
+        if "error" in data:
+            self._send(502, data)
+            return
+        self._send(200, {"sources": data.get("sources", [])})
+
+    def _handle_translate_run(self):
+        """POST /translate/run {path} -> run translate.sh on batocera. Blocking
+        (~11s); the UI shows a loading state. Returns the written-back folder
+        path (the DONE: line) plus the full script log."""
+        body = self._read_json_body()
+        path = ((body or {}).get("path") or "").strip()
+        if not path:
+            self._send(400, {"error": "path required"})
+            return
+        rc, out = self._node_ssh("batocera",
+                                 ["sh", "/userdata/cpc-scripts/translate.sh", path],
+                                 timeout=600)
+        dest = ""
+        for line in out.splitlines():
+            if line.startswith("DONE:"):
+                dest = line[5:].strip()
+        if rc != 0:
+            self._send(500, {"ok": False, "error": "translate failed", "log": out})
+            return
+        self._send(200, {"ok": True, "dest": dest, "log": out})
 
     # ── Node / connection builders ────────────────────────────────────────────
 

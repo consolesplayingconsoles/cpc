@@ -147,7 +147,7 @@ def translate(text, api_key, target="en"):
 
 def translate_last(api_key, target="en"):
     """Translate the cached scan text from the last scan_bytes() / scan() call.
-    Stores result in _state["last_translation"] so /control/lens/latest can
+    Stores result in _state["last_translation"] so /control/google/latest can
     deliver it to the frontend poll. Returns same shape as translate()."""
     last = _state.get("last_result")
     if not last:

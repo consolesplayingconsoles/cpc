@@ -1,0 +1,167 @@
+openapi: 3.0.3
+info:
+  title: Pluto API
+  version: 0.1.0
+  description: >
+    The Pluto dashboard's HTTP API (stdlib http.server) -- the control plane for
+    the CPC network: node roster + topology, chat, the Control/Guide-Dog drive
+    pipeline, the Vision (Lens) feed, the Dreamcast translation workbench, and the
+    per-node deploy engine. Terse on purpose: this documents the route SURFACE
+    (kept honest by scripts/check_openapi_drift.py vs API_ROUTES in api.py);
+    request/response schemas are intentionally light.
+servers:
+  # Relative: "Try it out" targets the same origin you loaded /docs from (the Lab
+  # in dev, the C2 in prod) -- no host variable to type, right host automatically.
+  - url: /
+    description: This Pluto (same origin as the docs page)
+tags:
+  - { name: chat }
+  - { name: nodes }
+  - { name: deploy }
+  - { name: mappings }
+  - { name: control }
+  - { name: google }
+  - { name: translate }
+  - { name: docs }
+paths:
+  /retro:
+    get: { tags: [chat], summary: Barebones retro-console chat page (HTML), responses: { '200': { description: HTML } } }
+  /dreame:
+    get: { tags: [nodes], summary: Dreame vacuum drill-in page (HTML), responses: { '200': { description: HTML } } }
+  /nodes:
+    get: { tags: [nodes], summary: Node roster with live ping status, responses: { '200': { description: Nodes } } }
+  /connections:
+    get: { tags: [nodes], summary: Topology connection vectors, responses: { '200': { description: Connections } } }
+  /whoami:
+    get: { tags: [chat], summary: Caller's resolved node identity (by source IP), responses: { '200': { description: Identity } } }
+  /messages:
+    get:
+      tags: [chat]
+      summary: Chat messages since a cursor
+      parameters: [{ name: since, in: query, schema: { type: integer } }]
+      responses: { '200': { description: Messages } }
+    post:
+      tags: [chat]
+      summary: Post a chat message
+      responses: { '200': { description: Stored }, '400': { description: invalid json } }
+  /deploy/{node}/stream:
+    get:
+      tags: [deploy]
+      summary: SSE stream of a node's deploy progress (##STEP events)
+      parameters: [{ name: node, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: text/event-stream } }
+  /mappings:
+    get: { tags: [mappings], summary: All event-source -> targets mappings, responses: { '200': { description: Overview } } }
+  /mappings/{source}:
+    get:
+      tags: [mappings]
+      summary: Targets configured for a source
+      parameters: [{ name: source, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: Targets } }
+  /mappings/{source}/{target}:
+    get:
+      tags: [mappings]
+      summary: One source -> target mapping
+      parameters:
+        - { name: source, in: path, required: true, schema: { type: string } }
+        - { name: target, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: Mapping }, '404': { description: no mapping } }
+  /control/signal:
+    get: { tags: [control], summary: Current control signal state, responses: { '200': { description: State } } }
+    post: { tags: [control], summary: Set the control signal, responses: { '200': { description: OK } } }
+  /control/capture:
+    get: { tags: [control], summary: Capture session status, responses: { '200': { description: Status } } }
+    post: { tags: [control], summary: Start / stop the HDMI capture session, responses: { '200': { description: OK } } }
+  /control/capture/grab:
+    post: { tags: [control], summary: Grab a single capture frame, responses: { '200': { description: OK } } }
+  /control/drive:
+    post: { tags: [control], summary: Send a controller op down the drive pipeline, responses: { '200': { description: OK } } }
+  /control/log:
+    get: { tags: [control], summary: Guide-Dog control log tail, responses: { '200': { description: Log } } }
+  /control/frame:
+    get: { tags: [control], summary: Latest capture frame (image), responses: { '200': { description: Frame } } }
+  /control/google/lens:
+    get: { tags: [google], summary: Vision (Lens) OCR state, responses: { '200': { description: State } } }
+    post: { tags: [google], summary: Trigger a Lens scan, responses: { '200': { description: OK } } }
+  /control/google/config:
+    get: { tags: [google], summary: Lens config, responses: { '200': { description: Config } } }
+  /control/google/latest:
+    get: { tags: [google], summary: Latest Lens scan result, responses: { '200': { description: Scan } } }
+  /control/google/translate:
+    post: { tags: [google], summary: Translate the current Lens scan, responses: { '200': { description: OK } } }
+  /control/google/translate-last:
+    post: { tags: [google], summary: Translate the last Lens scan, responses: { '200': { description: OK } } }
+  /config/open:
+    post: { tags: [nodes], summary: Open a config folder on the host (Lab only), responses: { '200': { description: OK } } }
+  /workspace/{node}:
+    post:
+      tags: [nodes]
+      summary: Open a node's workspace
+      parameters: [{ name: node, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+  /native/{node}/{action}:
+    post:
+      tags: [nodes]
+      summary: Run a native client action on a node (flash / games)
+      parameters:
+        - { name: node, in: path, required: true, schema: { type: string } }
+        - { name: action, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: OK } }
+  /dreame/login:
+    post: { tags: [nodes], summary: Dreame cloud login, responses: { '200': { description: OK } } }
+  /dreame/logout:
+    post: { tags: [nodes], summary: Dreame cloud logout, responses: { '200': { description: OK } } }
+  /translate/projects:
+    get: { tags: [translate], summary: Saved translation projects, responses: { '200': { description: Projects } } }
+  /translate/systems:
+    get: { tags: [translate], summary: Translatable console systems, responses: { '200': { description: Systems } } }
+  /translate/games:
+    get:
+      tags: [translate]
+      summary: Translatable games for a system
+      parameters: [{ name: system, in: query, schema: { type: string } }]
+      responses: { '200': { description: Games } }
+  /translate/extract:
+    get:
+      tags: [translate]
+      summary: Extract a game's dialogue table (STORY.PAC)
+      parameters: [{ name: path, in: query, required: true, schema: { type: string } }]
+      responses: { '200': { description: Blocks }, '502': { description: extract failed } }
+  /translate/sources:
+    get:
+      tags: [translate]
+      summary: Discover translatable text files on a disc
+      parameters: [{ name: path, in: query, required: true, schema: { type: string } }]
+      responses: { '200': { description: Sources } }
+  /translate/run:
+    post: { tags: [translate], summary: Run the translate -> rebuild build on the box, responses: { '200': { description: OK } } }
+  /translate/open:
+    post: { tags: [translate], summary: Open a project's dist dir, responses: { '200': { description: OK } } }
+  /translate/delete:
+    post: { tags: [translate], summary: Delete a saved project, responses: { '200': { description: OK } } }
+  /translate/upload:
+    post: { tags: [translate], summary: Upload a ROM for a project, responses: { '200': { description: OK } } }
+  /translate/{game}:
+    get:
+      tags: [translate]
+      summary: A project's saved state (state.json)
+      parameters: [{ name: game, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: State } }
+    post:
+      tags: [translate]
+      summary: Persist a project's state
+      parameters: [{ name: game, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: Saved } }
+    put:
+      tags: [translate]
+      summary: Persist a project's state (PUT alias)
+      parameters: [{ name: game, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: Saved } }
+  /docs:
+    get: { tags: [docs], summary: Swagger UI over the CPC API specs, responses: { '200': { description: HTML } } }
+  /docs/{spec}.yaml:
+    get:
+      tags: [docs]
+      summary: One OpenAPI spec (served same-origin)
+      parameters: [{ name: spec, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: YAML }, '404': { description: no such spec } }

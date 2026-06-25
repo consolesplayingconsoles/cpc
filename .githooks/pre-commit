@@ -25,6 +25,11 @@ echo "[pre-commit] drive-pipeline tests (python)..."
 $PY pluto/api/drive/test_controller.py
 $PY pluto-pi-hub/test_hid.py
 
+# Keep the hand-written OpenAPI specs honest: fail if a non-Pluto API's spec drifts
+# from the routes its code exposes (no framework to auto-generate, so this is the guard).
+echo "[pre-commit] OpenAPI spec drift..."
+$PY scripts/check_openapi_drift.py
+
 # Frontend analog math (the joystick/WASD coordinate bug). Skipped only if deps aren't
 # installed (e.g. a python-only checkout) -- never silently skipped when it COULD run.
 if [ -x pluto/node_modules/.bin/vitest ]; then

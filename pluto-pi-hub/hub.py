@@ -144,6 +144,12 @@ def _pump(conn, bridges, stop):
             pass
 
 
+# HTTP routes of the sync server -- the source of truth the dispatch checks AND
+# scripts/check_openapi_drift.py reads (vs openapi.yaml). (METHOD, path). The raw
+# controller-op TCP stream on PI_BRIDGE_PORT is a separate, non-HTTP protocol.
+SYNC_ROUTES = {("GET", "/health"), ("POST", "/sync")}
+
+
 def _sync_server(cfg, stop):
     """Minimal HTTP server on PI_SYNC_PORT: accepts POST /sync from Pluto and
     delegates to the appropriate sync handler. Runs in a daemon thread alongside
@@ -157,7 +163,7 @@ def _sync_server(cfg, stop):
         def log_message(self, *_): pass   # silence access log
 
         def do_GET(self):
-            if self.path != "/health":
+            if ("GET", self.path) not in SYNC_ROUTES:
                 self.send_response(404); self.end_headers(); return
             up = bool(_discover_vmu())
             self.send_response(200 if up else 503)
@@ -167,7 +173,7 @@ def _sync_server(cfg, stop):
 
         def do_POST(self):
             try:
-                if self.path != "/sync":
+                if ("POST", self.path) not in SYNC_ROUTES:
                     self.send_response(404); self.end_headers(); return
                 length = int(self.headers.get("Content-Length", 0))
                 body = _json.loads(self.rfile.read(length).decode()) if length else {}

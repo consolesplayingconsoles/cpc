@@ -150,7 +150,7 @@ class KeyboardSink(Sink):
     Analog is quantized to 4/8-way key holds -- there's no true analog over the
     keyboard, but for 'just move' that reads as walking in the heading direction.
 
-    pynput is imported lazily (Mac-dev only), so this module still imports on the
+    pynput is imported lazily (Mac-lab-only), so this module still imports on the
     constrained consoles -- the same lazy-import pattern used for optional deps. Needs
     `pip install pynput`, macOS Accessibility permission for the sending process,
     and the emulator window focused.
@@ -159,7 +159,7 @@ class KeyboardSink(Sink):
     def __init__(self, keyset="arrows", button_keys=None, deadzone=0.18,
                  move_duty=1.0, duty_period=0.5):
         super(KeyboardSink, self).__init__()
-        from pynput.keyboard import Controller, Key  # lazy: Mac-dev only
+        from pynput.keyboard import Controller, Key  # lazy: Mac-lab-only
         self._kb = Controller()
         # key NAMES a mapping file can use as strings ("left", "enter", ...)
         self._special = {
