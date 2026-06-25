@@ -30,6 +30,46 @@ paths:
                   ok: { type: boolean, example: true }
                   service: { type: string, example: cpc-translate }
                   port: { type: integer, example: 7711 }
+  /meta:
+    get:
+      summary: Disc metadata from IP.BIN (title, region, product #, version, date)
+      description: >
+        Reads the GD-ROM bootstrap (IP.BIN, at the high-density data track LBA
+        45000) -- a few-KB read, no extract, so it's instant. `titleHex` is the raw
+        title (shift_jis for JP games); `title` is the ASCII decode.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Absolute GDI path on the box.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Disc metadata
+        '400':
+          description: path query parameter missing
+        '502':
+          description: no bootstrap found / read error
+  /games:
+    get:
+      summary: Translatable games for a system (runs list-games.sh)
+      description: >
+        Lists translatable discs under /userdata/roms/<system> on the box -- GDI
+        only, the pipeline is GDI-native. Each game is {name, path}; the path then
+        feeds /meta and /sources. Pluto proxies this to populate the game picker.
+      parameters:
+        - name: system
+          in: query
+          required: true
+          description: Console system / roms folder name (e.g. dreamcast).
+          schema: { type: string }
+      responses:
+        '200':
+          description: Games for the system
+        '400':
+          description: system query parameter missing
+        '502':
+          description: list failed (script error on the box)
   /sources:
     get:
       summary: Discover translatable text files on a disc (the workbench "tabs")
@@ -60,6 +100,32 @@ paths:
           description: path query parameter missing
         '502':
           description: discovery failed (extract/scan error on the box)
+  /extract:
+    get:
+      summary: Extract one discovered source's text blocks (from the cache)
+      description: >
+        Reads a source cached by a prior /sources call and runs the parser its
+        `kind` names in sources.config.json (nullsplit / lines). Blocks carry raw
+        Shift-JIS hex; the browser decodes them. No disc re-extraction.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Absolute GDI path on the box (same one passed to /sources).
+          schema: { type: string }
+        - name: file
+          in: query
+          required: true
+          description: The source's `safe` name from the /sources manifest.
+          schema: { type: string }
+          example: DOUGU_ITEMTBL.PAC
+      responses:
+        '200':
+          description: Text blocks (offset, jpBytes, hex, speaker) + the kind/parser used
+        '400':
+          description: path or file missing
+        '502':
+          description: extraction failed / source not cached
 components:
   schemas:
     Source:
@@ -73,6 +139,10 @@ components:
           type: string
           description: Sanitized cache filename (backslashes/slashes flattened).
           example: DOUGU_ITEMTBL.PAC
+        kind:
+          type: string
+          description: Typology guess (dialogue/menu/items/ui/chat/secret/readme/text) -- a starting point the operator refines.
+          example: items
         kanaPct:
           type: integer
           description: Percent of Shift-JIS byte-pairs that are kana (text-ness signal).
@@ -81,3 +151,11 @@ components:
           type: integer
           description: File size in bytes.
           example: 325632
+        view:
+          type: integer
+          description: Server-driven tab position (0 = first), by typology/meaning. The array is already in this order.
+          example: 2
+        loadOrder:
+          type: integer
+          description: Server-driven fetch sequence (0 = load first). By size; separate from the array's VIEW order (by meaning).
+          example: 1

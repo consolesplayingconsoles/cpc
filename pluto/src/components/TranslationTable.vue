@@ -1,14 +1,23 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { API_BASE } from '../composables/useNodes'
+import { useAchievement } from '../composables/useAchievement'
 import UiSelect from './ui/UiSelect.vue'
 import UiButton from './ui/UiButton.vue'
+import MetadataCard from './MetadataCard.vue'
+import type { GameMeta } from './MetadataCard.vue'
+import SpeakerLegend from './SpeakerLegend.vue'
 
 const route  = useRoute()
 const router = useRouter()
 
-type SpeakerStatus = 'confirmed' | 'inferred' | 'unconfirmed' | 'rejected'
+// Experimental disclaimer: dismissible for the session (sessionStorage).
+const disclaimerDismissed = ref(sessionStorage.getItem('cpc.translate.disclaimer') === '1')
+function dismissDisclaimer() {
+  disclaimerDismissed.value = true
+  sessionStorage.setItem('cpc.translate.disclaimer', '1')
+}
 
 interface Block {
   offset: string
@@ -17,28 +26,6 @@ interface Block {
   jpBytes: number
   ca: string
   note?: string
-}
-
-// Speaker map: what we know about each speaker ID
-const speakers = ref<Record<number, { name: string; status: SpeakerStatus; suggestion: string }>>({
-  1:  { name: 'Speaker 01', status: 'inferred', suggestion: 'Doraemon' },
-  9:  { name: 'Speaker 09', status: 'inferred', suggestion: 'Dorami' },
-  2:  { name: 'Speaker 02', status: 'unconfirmed', suggestion: '' },
-  7:  { name: 'Speaker 07', status: 'unconfirmed', suggestion: '' },
-})
-
-function thumbsUp(id: number) {
-  if (speakers.value[id]) {
-    speakers.value[id].name = speakers.value[id].suggestion || speakers.value[id].name
-    speakers.value[id].status = 'confirmed'
-    saveState()
-  }
-}
-function thumbsDown(id: number) {
-  if (speakers.value[id]) {
-    speakers.value[id].status = 'rejected'
-    saveState()
-  }
 }
 
 const blocks = ref<Block[]>([
@@ -71,15 +58,18 @@ const SPEAKER_COLORS: Record<number, string> = {
 }
 
 function speakerColor(id: number) {
-  return SPEAKER_COLORS[id] ?? '#8a8a8a'
+  if (SPEAKER_COLORS[id]) return SPEAKER_COLORS[id]
+  if (id === 0) return '#8a8a8a'                          // untagged / narration
+  return `hsl(${(id * 67) % 360}, 42%, 58%)`              // stable, distinct-ish for the rest
 }
 
 function caBytes(text: string) {
   return new TextEncoder().encode(text).length
 }
 
-function byteStatus(block: Block): 'ok' | 'warn' | 'over' {
+function byteStatus(block: Block): 'pending' | 'ok' | 'warn' | 'over' {
   const used = caBytes(block.ca)
+  if (used === 0) return 'pending'        // untranslated -> pending, not "ok"
   const budget = block.jpBytes
   if (used <= budget) return 'ok'
   if (used <= budget * 1.3) return 'warn'
@@ -92,22 +82,21 @@ function isFirstInRun(idx: number): boolean {
   return blocks.value[idx].speakerId !== blocks.value[idx - 1].speakerId
 }
 
-// How many consecutive rows share this speaker ID
-function runLength(idx: number): number {
-  const id = blocks.value[idx].speakerId
-  let len = 1
-  while (idx + len < blocks.value.length && blocks.value[idx + len].speakerId === id) len++
-  return len
-}
-
+// Aggregate across ALL loaded sources (every tab), not just the active one, so the
+// header badges read project-wide progress. Grows as lazy tabs stream in.
 const stats = computed(() => {
-  const total = blocks.value.length
-  const ok = blocks.value.filter(b => byteStatus(b) === 'ok').length
-  const warn = blocks.value.filter(b => byteStatus(b) === 'warn').length
-  const over = blocks.value.filter(b => byteStatus(b) === 'over').length
-  const confirmedIds = Object.values(speakers.value).filter(s => s.status === 'confirmed').length
-  const totalIds = Object.keys(speakers.value).length
-  return { total, ok, warn, over, confirmedIds, totalIds }
+  let total = 0, pending = 0, ok = 0, warn = 0, over = 0
+  for (const arr of Object.values(tabBlocks.value)) {
+    for (const b of arr) {
+      total++
+      const s = byteStatus(b)
+      if (s === 'pending') pending++
+      else if (s === 'ok') ok++
+      else if (s === 'warn') warn++
+      else over++
+    }
+  }
+  return { total, pending, ok, warn, over }
 })
 
 // ── Drop + language step ──────────────────────────────────────────────────────
@@ -122,157 +111,17 @@ const LANGUAGES = [
   { code: 'it', label: 'Italiano' },
 ]
 
-const ACCEPTED_EXTENSIONS = ['.gdi', '.zip', '.7z', '.rar', '.gz', '.cdi', '.chd']
-
-const dropActive    = ref(false)
-const romFile       = ref<File | null>(null)
-const romError      = ref('')
-const targetLang    = ref('')
-const uploadError   = ref('')
-const extractPrompt = ref('')
-
-function setRom(f: File) {
-  const ext = f.name.slice(f.name.lastIndexOf('.')).toLowerCase()
-  if (!ACCEPTED_EXTENSIONS.includes(ext)) {
-    romError.value = `${ext} is not a recognised ROM format.`
-    romFile.value  = null
-  } else {
-    romError.value = ''
-    romFile.value  = f
-  }
-}
-
-function onDragOver(e: DragEvent) { e.preventDefault(); dropActive.value = true }
-function onDragLeave()            { dropActive.value = false }
-function onDrop(e: DragEvent) {
-  e.preventDefault()
-  dropActive.value = false
-  const f = e.dataTransfer?.files[0]
-  if (f) setRom(f)
-}
-function onFileInput(e: Event) {
-  const f = (e.target as HTMLInputElement).files?.[0]
-  if (f) setRom(f)
-}
-
-function canSubmit() { return romFile.value !== null && targetLang.value !== '' }
-
-async function submitRom() {
-  if (!canSubmit()) return
-  uploadError.value  = ''
-  const ext = romFile.value!.name.slice(romFile.value!.name.lastIndexOf('.')).toLowerCase()
-  extractStatus.value = COMPRESSED_EXTS.includes(ext) ? 'decompressing' : 'parsing'
-  step.value = 'discovering'
-  await nextTick()
-  const form = new FormData()
-  form.append('files[]', romFile.value!)
-  form.append('lang', targetLang.value)
-  try {
-    const res  = await fetch(`${API_BASE}/translate/upload`, { method: 'POST', body: form })
-    let data: Record<string, unknown> = {}
-    try { data = await res.json() } catch { /* non-JSON body */ }
-    if (!res.ok) {
-      uploadError.value = (data.error as string) || `Upload failed (${res.status})`
-      step.value = 'setup'
-      return
-    }
-    if (data.game_id) gameId.value = data.game_id as string
-    if (data.prompt) {
-      extractPrompt.value  = data.prompt as string
-      awaitingUser.value   = true
-    }
-  } catch { /* network error */ }
-}
-
-// ── Polling ───────────────────────────────────────────────────────────────────
-
-type Step = 'pick' | 'setup' | 'discovering' | 'ready' | 'table'
-const step   = ref<Step>('pick')
-
-const discoveryLinks = ref<string[]>([])
-const linkInput      = ref('')
-
-function addLink() {
-  const url = linkInput.value.trim()
-  if (url && !discoveryLinks.value.includes(url)) discoveryLinks.value.push(url)
-  linkInput.value = ''
-}
-
-async function copyPrompt() {
-  try {
-    await navigator.clipboard.writeText(extractPrompt.value)
-  } catch (err) {
-    console.error('Copy failed:', err)
-  }
-}
-
-const gameId = ref('boku-doraemon-dc')
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
-function applyState(state: Record<string, unknown>) {
-  if (Array.isArray(state.blocks)) blocks.value = state.blocks as Block[]
-  if (state.speakers && typeof state.speakers === 'object') {
-    speakers.value = state.speakers as typeof speakers.value
-  }
-  if (typeof state.game === 'string') gameId.value = state.game
-}
-
-const COMPRESSED_EXTS = ['.zip', '.7z', '.rar', '.gz']
-
-const BASE_STEPS = [
-  { id: 'scanning', pending: 'Scan for text blocks',    active: 'Scanning for text blocks...',  done: 'Text blocks found' },
-  { id: 'done',     pending: 'Build translation table', active: 'Building translation table...', done: 'Ready' },
-]
-
-const DECOMPRESS_STEP = { id: 'decompressing', pending: 'Decompress archive', active: 'Decompressing archive...', done: 'Archive decompressed' }
-
-const extractSteps = computed(() =>
-  extractStatus.value === 'decompressing' || STATUS_ORDER.indexOf(extractStatus.value) > STATUS_ORDER.indexOf('decompressing')
-    ? [DECOMPRESS_STEP, ...BASE_STEPS]
-    : BASE_STEPS
-)
-
-type ExtractStatus = 'pending' | 'decompressing' | 'parsing' | 'locating' | 'scanning' | 'done'
-const STATUS_ORDER: ExtractStatus[] = ['pending', 'decompressing', 'parsing', 'locating', 'scanning', 'done']
-
-const extractStatus = ref<ExtractStatus>('pending')
-const awaitingUser  = ref(false)
-
-function stepState(id: string): 'done' | 'awaiting' | 'active' | 'pending' {
-  const current = STATUS_ORDER.indexOf(extractStatus.value)
-  const mine    = STATUS_ORDER.indexOf(id as ExtractStatus)
-  if (mine < current) return 'done'
-  if (mine === current) return awaitingUser.value ? 'awaiting' : 'active'
-  return 'pending'
-}
-
-async function poll() {
-  // Stop polling once we're viewing the table
-  if (step.value === 'table') return
-
-  try {
-    const res  = await fetch(`${API_BASE}/translate/${gameId.value}`)
-    if (!res.ok) return
-    const data = await res.json()
-    if (data.status) {
-      const incoming = STATUS_ORDER.indexOf(data.status as ExtractStatus)
-      if (incoming > STATUS_ORDER.indexOf(extractStatus.value)) {
-        extractStatus.value = data.status as ExtractStatus
-        awaitingUser.value  = false
-      }
-    }
-    if (data.status && data.status !== 'done') return
-    applyState(data)
-    step.value = 'ready'
-  } catch { /* API not running locally — hardcoded mock stays */ }
-}
+type Step = 'pick' | 'table'
+const step = ref<Step>('pick')
 
 async function saveState() {
+  if (!curNs.value || !activeTab.value) return
   try {
-    await fetch(`${API_BASE}/translate/${gameId.value}`, {
+    // Per-source: the API deep-merges, so saving the active tab keeps the others.
+    await fetch(`${API_BASE}/translate/${encodeURIComponent(curNs.value)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ blocks: blocks.value, speakers: speakers.value }),
+      body: JSON.stringify({ sources: { [activeTab.value]: blocks.value } }),
     })
   } catch { /* offline — edits stay local */ }
 }
@@ -283,6 +132,7 @@ interface PickGame   { name: string; path: string }
 
 const systems       = ref<PickSystem[]>([])
 const games         = ref<PickGame[]>([])
+const selSource     = ref('ja')   // locked: only Japanese source text is detected for now
 const selLang       = ref('')
 const selSystem     = ref('')
 const selGame       = ref('')
@@ -303,16 +153,64 @@ function decodeBlock(hex: string): string {
 }
 
 // ── Projects (no DB — the dirs under dist/translations/ ARE the project list) ──
-interface Project { ns: string; gameName: string; lang: string; total: number }
+interface Project { ns: string; gameName: string; lang: string; total: number; system?: string; path?: string; meta?: GameMeta | null }
 const projects = ref<Project[]>([])
 const curNs    = ref('')
-
 async function loadProjects() {
   try {
     const res  = await fetch(`${API_BASE}/translate/projects`)
     const data = await res.json()
     projects.value = (data.projects as Project[]) || []
+    // Projects saved before metadata existed have a path but no meta — backfill it
+    // (instant IP.BIN read) so the whole list gets rich cards, and persist it once.
+    for (const p of projects.value) if (!p.meta && p.path) backfillProjectMeta(p.ns, p.path)
   } catch { /* leave list as-is */ }
+}
+
+async function backfillProjectMeta(ns: string, path: string) {
+  try {
+    const res  = await fetch(`${API_BASE}/translate/meta?path=${encodeURIComponent(path)}`)
+    const data = await res.json()
+    if (!data.meta) return
+    projects.value = projects.value.map(p => (p.ns === ns ? { ...p, meta: data.meta } : p))
+    fetch(`${API_BASE}/translate/${encodeURIComponent(ns)}`, {     // persist so it's a one-time cost
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meta: data.meta }),
+    }).catch(() => {})
+  } catch { /* keep the gameName fallback */ }
+}
+
+function consoleLabel(sys: string): string {
+  return systems.value.find(s => s.system === sys)?.name || sys || 'Other'
+}
+
+// Projects grouped by console, sorted (consoles A-Z, games A-Z within). The header
+// count is always shown so collapsing a console never hides how many you really have.
+const groupedProjects = computed(() => {
+  const by = new Map<string, Project[]>()
+  for (const p of projects.value) {
+    const k = p.system || ''
+    if (!by.has(k)) by.set(k, [])
+    by.get(k)!.push(p)
+  }
+  return [...by.entries()]
+    .map(([sys, list]) => ({
+      sys,
+      label: consoleLabel(sys),
+      projects: [...list].sort((a, b) => a.gameName.localeCompare(b.gameName)),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+})
+
+// Collapse state per console, remembered across sessions.
+const COLLAPSE_KEY = 'cpc.translate.collapsed'
+function loadCollapsed(): Record<string, boolean> {
+  try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '{}') } catch { return {} }
+}
+const collapsedConsoles = ref<Record<string, boolean>>(loadCollapsed())
+function toggleConsole(sys: string) {
+  collapsedConsoles.value = { ...collapsedConsoles.value, [sys]: !collapsedConsoles.value[sys] }
+  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(collapsedConsoles.value)) } catch { /* ignore */ }
 }
 
 // Create = "I want to work on it now": extract, persist, open the table.
@@ -327,33 +225,33 @@ async function createProject() {
       pickError.value = 'That project already exists. Open it from Previous Projects below.'
       return
     }
-    const res  = await fetch(`${API_BASE}/translate/extract?path=${encodeURIComponent(selGame.value)}`)
-    const data = await res.json()
-    if (!data.blocks) {
-      pickError.value = (data.error as string) || (data.detail as string) || 'Extraction failed.'
+    // Hold on the picker (the Create button shows "Scanning…") until the disc is
+    // scanned and the FIRST source is loaded; then open the table with content.
+    selGameName.value = gameName
+    curNs.value       = ns
+    blocks.value       = []
+    tabBlocks.value    = {}                                 // fresh project: no saved drafts
+    speakerNames.value = {}
+    await loadSources(selGame.value)
+    if (!tabs.value.length) {
+      pickError.value = 'No translatable text found in this game.'
+      curNs.value = ''
       return
     }
-    const newBlocks: Block[] = (data.blocks as { offset: number; jpBytes: number; hex: string; speaker: number }[]).map(b => ({
-      offset:    '0x' + b.offset.toString(16).toUpperCase().padStart(6, '0'),
-      speakerId: b.speaker ?? 0,
-      jp:        decodeBlock(b.hex),
-      jpBytes:   b.jpBytes,
-      ca:        '',
-    }))
+    // Persist the record + the primary source's blocks so resume is instant.
+    const primarySafe = tabs.value[0].safe
     await fetch(`${API_BASE}/translate/${encodeURIComponent(ns)}`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ gameName, lang: selLang.value, system: selSystem.value,
-                                path: selGame.value, total: newBlocks.length, blocks: newBlocks }),
+                                path: selGame.value, total: blocks.value.length, meta: meta.value,
+                                sources: { [primarySafe]: tabBlocks.value[primarySafe] || [] } }),
     })
-    blocks.value      = newBlocks
-    selGameName.value = gameName
-    curNs.value       = ns
     step.value        = 'table'
     router.push(`/translation/${encodeURIComponent(ns)}`)
     loadProjects()
   } catch {
-    pickError.value = 'Extraction request failed.'
+    pickError.value = 'Could not extract this game.'
   } finally {
     extracting.value = false
   }
@@ -365,16 +263,220 @@ async function openNs(ns: string) {
   try {
     const res  = await fetch(`${API_BASE}/translate/${encodeURIComponent(ns)}`)
     const data = await res.json()
-    if (Array.isArray(data.blocks)) {
-      blocks.value      = data.blocks as Block[]
+    if (data && data.path) {
       selGameName.value = (data.gameName as string) || ns
       selLang.value     = (data.lang as string) || ''
       curNs.value       = ns
+      tabBlocks.value    = (data.sources as Record<string, Block[]>) || {}   // preload saved drafts
+      speakerNames.value = (data.speakers as Record<string, Record<number, string>>) || {}
+      blocks.value       = []
       step.value        = 'table'
+      loadSources(data.path as string)   // tabs reuse saved drafts, fetch the rest
     } else {
       router.replace('/translation')   // project gone → back to the picker
     }
   } catch { /* ignore */ }
+}
+
+// ── Multitab: one tab per discovered source (box /sources), lazy per-tab load ──
+interface SourceTab {
+  file: string; safe: string; kind: string
+  view: number; loadOrder: number; size: number; kanaPct: number
+}
+const tabs      = ref<SourceTab[]>([])
+const activeTab = ref('')                                  // active source's safe-name
+const tabBlocks = ref<Record<string, Block[]>>({})
+const tabState  = ref<Record<string, 'idle' | 'loading' | 'ready' | 'error'>>({})
+const curPath   = ref('')                                  // the game's GDI path
+const discovering = ref(false)                             // /sources scan in flight
+
+// Disc metadata (IP.BIN) for the header card — instant (~74ms), fetched on open.
+const meta = ref<GameMeta | null>(null)
+async function fetchMeta(path: string) {
+  meta.value = null
+  try {
+    const res  = await fetch(`${API_BASE}/translate/meta?path=${encodeURIComponent(path)}`)
+    const data = await res.json()
+    meta.value = (data.meta as GameMeta) || null
+  } catch { meta.value = null }
+}
+
+// ── Speaker legend: editable names per source, persisted in state.json.speakers ──
+const speakerNames = ref<Record<string, Record<number, string>>>({})   // safe -> id -> name
+
+// Distinct speakers in the active source's blocks, major-first, with table colours.
+const activeSpeakers = computed(() => {
+  const counts = new Map<number, number>()
+  for (const b of blocks.value) counts.set(b.speakerId, (counts.get(b.speakerId) || 0) + 1)
+  return [...counts.entries()]
+    .map(([id, count]) => ({ id, count, color: speakerColor(id) }))
+    .sort((a, b) => b.count - a.count)
+})
+// Only a real legend if the source carries speaker tags (any non-zero id).
+const showLegend = computed(() => activeSpeakers.value.some(s => s.id !== 0))
+const activeNames = computed(() => speakerNames.value[activeTab.value] || {})
+// The display name for a speaker id — the legend name once set, else "Speaker NN".
+// Used by every table row, so naming a speaker propagates to all its occurrences.
+function speakerLabel(id: number): string {
+  return activeNames.value[id] || `Speaker ${id.toString().padStart(2, '0')}`
+}
+
+let speakerSaveTimer: ReturnType<typeof setTimeout> | undefined
+function renameSpeaker(id: number, name: string) {
+  const safe = activeTab.value
+  if (!safe) return
+  speakerNames.value = {
+    ...speakerNames.value,
+    [safe]: { ...(speakerNames.value[safe] || {}), [id]: name },
+  }
+  clearTimeout(speakerSaveTimer)
+  speakerSaveTimer = setTimeout(saveSpeakers, 600)        // debounce while typing
+}
+async function saveSpeakers() {
+  if (!curNs.value || !activeTab.value) return
+  try {
+    await fetch(`${API_BASE}/translate/${encodeURIComponent(curNs.value)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ speakers: { [activeTab.value]: speakerNames.value[activeTab.value] || {} } }),
+    })
+  } catch { /* offline — names stay local */ }
+}
+
+const KIND_LABEL: Record<string, string> = {
+  dialogue: 'Dialogue', menu: 'Menu', items: 'Items', ui: 'UI',
+  chat: 'Chat', secret: 'Secret', readme: 'Readme', text: 'Text',
+}
+// Every tab is named by its FILENAME (unique) with the kind as a hint, e.g.
+// "S1_1_SCENE (TEXT)" -- any kind can have multiple files (per-chapter dialogue,
+// several UI blobs...) and would otherwise dupe as "Dialogue"/"UI"/"Text".
+function tabLabel(t: SourceTab): string {
+  const base = (t.file.split(/[\\/]/).pop() || t.file).replace(/\.[^.]+$/, '')
+  return `${base} (${(KIND_LABEL[t.kind] || t.kind).toUpperCase()})`
+}
+function mapBlocks(raw: { offset: number; jpBytes: number; hex: string; speaker: number }[]): Block[] {
+  return (raw || []).map(b => ({
+    offset:    '0x' + b.offset.toString(16).toUpperCase().padStart(6, '0'),
+    speakerId: b.speaker ?? 0,
+    jp:        decodeBlock(b.hex),
+    jpBytes:   b.jpBytes,
+    ca:        '',
+  }))
+}
+
+// Discover the sources, AWAIT the primary (first content), then fire the rest in
+// PARALLEL. Tabs whose draft is already in tabBlocks (preloaded by openNs, or a
+// freshly-loaded one) are REUSED, not re-fetched. tabBlocks is set by the caller:
+// openNs preloads saved drafts; createProject clears it.
+async function loadSources(path: string) {
+  curPath.value = path
+  fetchMeta(path)                       // header card — parallel, non-blocking
+  tabs.value = []; tabState.value = {}
+  discovering.value = true
+  let srcs: SourceTab[] = []
+  try {
+    const res = await fetch(`${API_BASE}/translate/sources?path=${encodeURIComponent(path)}`)
+    srcs = ((await res.json()).sources as SourceTab[]) || []
+  } finally {
+    discovering.value = false
+  }
+  tabs.value = [...srcs].sort((a, b) => a.view - b.view)
+  const state: Record<string, 'idle' | 'ready'> = {}
+  srcs.forEach(s => { state[s.safe] = (tabBlocks.value[s.safe]?.length ? 'ready' : 'idle') })
+  tabState.value = state
+  const primary = tabs.value[0]
+  if (primary) {
+    activeTab.value = primary.safe
+    blocks.value = tabBlocks.value[primary.safe] || []
+    if (state[primary.safe] !== 'ready') await loadTab(primary.safe)   // first content
+  }
+  // the rest, in PARALLEL; once they all settle, persist the TRUE aggregate total
+  // (the saved `total` was the primary tab only — the list undercounted).
+  const rest = [...srcs]
+    .sort((a, b) => a.loadOrder - b.loadOrder)
+    .filter(s => s.safe !== primary?.safe && tabState.value[s.safe] !== 'ready')
+    .map(s => loadTab(s.safe))
+  Promise.all(rest).then(() => { if (curNs.value) persistTotal() })
+}
+
+// Write the all-sources block count back to state.json so the projects list shows
+// the whole disc, not just the first tab. Self-heals older projects when opened.
+async function persistTotal() {
+  try {
+    await fetch(`${API_BASE}/translate/${encodeURIComponent(curNs.value)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ total: stats.total }),
+    })
+  } catch { /* offline — list keeps the old count */ }
+}
+
+async function loadTab(safe: string) {
+  if (tabState.value[safe] === 'loading' || tabState.value[safe] === 'ready') return
+  // reassign the whole object so the update reliably triggers re-render (a per-key
+  // mutation was arriving but not rendering until a refresh).
+  tabState.value = { ...tabState.value, [safe]: 'loading' }
+  try {
+    const res  = await fetch(`${API_BASE}/translate/extract?path=${encodeURIComponent(curPath.value)}&file=${encodeURIComponent(safe)}`)
+    const data = await res.json()
+    tabBlocks.value = { ...tabBlocks.value, [safe]: mapBlocks(data.blocks) }
+    tabState.value  = { ...tabState.value, [safe]: 'ready' }
+    if (activeTab.value === safe) blocks.value = tabBlocks.value[safe]
+  } catch {
+    tabState.value = { ...tabState.value, [safe]: 'error' }
+  }
+}
+
+function selectTab(safe: string) {
+  activeTab.value = safe
+  blocks.value = tabBlocks.value[safe] || []
+  if (tabState.value[safe] !== 'ready') loadTab(safe)
+}
+
+// Re-fetch any source that errored or never loaded (cheap: already cached on the box).
+function retryTabs() {
+  tabs.value.forEach(t => loadTab(t.safe))   // loadTab skips the ones already 'ready'
+}
+
+// Save draft = persist the active tab's translations to state.json. No ROM build.
+const draftSaved = ref(false)
+async function saveDraft() {
+  clearTimeout(speakerSaveTimer)                       // flush pending speaker edits now
+  await Promise.all([saveState(), saveSpeakers()])     // blocks + speaker names
+  draftSaved.value = true
+  setTimeout(() => { draftSaved.value = false }, 1800)
+}
+
+// Build = rebuild the patched ROM on Batocera (translate.sh). Blocking on the box.
+// Success fires the shared ACHIEVEMENT toast; failure surfaces loud + red inline.
+const { unlock } = useAchievement()
+const building = ref(false)
+const buildMsg = ref('')
+const buildFailed = ref(false)
+async function runBuild() {
+  if (building.value || !curPath.value) return
+  building.value = true; buildMsg.value = ''; buildFailed.value = false
+  const startedAt = Date.now()
+  try {
+    const res  = await fetch(`${API_BASE}/translate/run`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body:   JSON.stringify({ path: curPath.value }),
+    })
+    const data = await res.json()
+    if (data.error) {
+      buildFailed.value = true
+      buildMsg.value = `Build failed: ${data.error}`.slice(0, 80)
+    } else {
+      const secs = Math.round((Date.now() - startedAt) / 1000)
+      unlock(`ROM Built — ${selGameName.value || 'game'}`, `${secs}s`)
+    }
+  } catch {
+    buildFailed.value = true
+    buildMsg.value = 'Build failed: no response from the box'
+  } finally {
+    building.value = false
+    if (buildFailed.value) setTimeout(() => { buildMsg.value = '' }, 8000)
+  }
 }
 
 // Clicking a project just navigates; the URL is the source of truth.
@@ -446,30 +548,31 @@ watch(selSystem, onSystemChange)   // refresh games when the system changes
 onMounted(() => {
   loadSystems()
   loadProjects()
-  poll()
-  pollTimer = setInterval(poll, 5000)
-})
-
-onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
 })
 </script>
 
 <template>
   <div class="tt-root">
 
-    <!-- ── EXPERIMENTAL DISCLAIMER ── -->
-    <div class="tt-disclaimer">
-      <div class="tt-disclaimer-content">
-        <strong>⚠️ Experimental Feature</strong>
-        <p>Text extraction and translation is under active development. Extraction methods are game-specific and documented per-title. <strong>Expect broken ROMs, corrupted text, and incomplete extractions.</strong> Test thoroughly before relying on output.</p>
-      </div>
+    <!-- ── EXPERIMENTAL DISCLAIMER (compact, dismissible for the session) ── -->
+    <div v-if="!disclaimerDismissed" class="tt-disclaimer">
+      <span class="tt-disclaimer-text"><strong>⚠️ Experimental</strong> Extraction is game-specific and WIP; expect broken ROMs &amp; corrupted text.</span>
+      <button class="tt-disclaimer-x" title="Hide for this session" @click="dismissDisclaimer">×</button>
     </div>
 
     <!-- ── Pick language + game, open the translation table ── -->
     <div v-if="step === 'pick'" class="tt-setup">
+      <div class="tt-setup-form">
       <div class="tt-lang-row">
-        <label class="tt-lang-label">Language</label>
+        <label class="tt-lang-label">Source language</label>
+        <UiSelect v-model="selSource" disabled>
+          <option value="ja">日本語 (Japanese)</option>
+        </UiSelect>
+        <span class="tt-lang-hint">Only Japanese source supported for now</span>
+      </div>
+
+      <div class="tt-lang-row">
+        <label class="tt-lang-label">Target language</label>
         <UiSelect v-model="selLang">
           <option value="" disabled>Pick a language</option>
           <option v-for="l in LANGUAGES" :key="l.code" :value="l.code">{{ l.label }}</option>
@@ -480,7 +583,7 @@ onUnmounted(() => {
         <label class="tt-lang-label">System</label>
         <UiSelect v-model="selSystem">
           <option value="" disabled>Pick a system</option>
-          <option v-for="s in systems" :key="s.system" :value="s.system" :disabled="!s.supported">{{ s.name }}{{ s.supported ? '' : ' (soon)' }}</option>
+          <option v-for="s in systems" :key="s.system" :value="s.system" :disabled="!s.supported">{{ s.name }}</option>
         </UiSelect>
       </div>
 
@@ -495,122 +598,48 @@ onUnmounted(() => {
       </div>
 
       <UiButton variant="primary" :disabled="!selGame || !selLang || extracting" @click="createProject">
-        {{ extracting ? 'Creating…' : 'Create' }}
+        {{ extracting ? 'Scanning…' : 'Create' }}
       </UiButton>
 
       <div v-if="extracting" class="tt-translating">
         <span class="tt-spinner" />
-        <span>Extracting dialogue on Batocera…</span>
+        <span>Scanning disc for text… first time on a game takes a minute.</span>
       </div>
       <p v-if="pickError" class="tt-upload-error">{{ pickError }}</p>
+      </div>
 
-      <!-- Previous projects: come back to a saved table (no DB — the dirs ARE the list) -->
-      <div v-if="projects.length" class="tt-projects">
+      <!-- Previous projects: a right rail of collapsible console groups (no DB —
+           the dirs ARE the list). Scrolls internally; header counts always show. -->
+      <aside v-if="projects.length" class="tt-projects tt-setup-rail">
         <p class="tt-projects-heading">Previous Projects</p>
-        <ul class="tt-projects-list">
-          <li v-for="p in projects" :key="p.ns" class="tt-project">
-            <button class="tt-project-open" @click="loadProject(p)">
-              <span class="tt-project-name">{{ p.gameName }}</span>
-              <span class="tt-project-lang">{{ langName(p.lang) }}</span>
-              <span class="tt-project-count">{{ p.total }} blocks</span>
-            </button>
-            <button class="tt-project-dir" title="Open project folder" @click="openProjectDir(p)">📁</button>
-            <button class="tt-project-dir tt-project-del" title="Delete project" @click="deleteProject(p)">🗑</button>
-          </li>
-        </ul>
-      </div>
-    </div>
-
-    <!-- ── Step 0: Drop ROM + pick language ── -->
-    <div v-if="step === 'setup'" class="tt-setup">
-      <div
-        class="tt-drop"
-        :class="{ 'tt-drop--active': dropActive, 'tt-drop--filled': romFile }"
-        @dragover="onDragOver"
-        @dragleave="onDragLeave"
-        @drop="onDrop"
-        @click="($refs.fileInput as HTMLInputElement).click()"
-      >
-        <input ref="fileInput" type="file" class="tt-file-input" @change="onFileInput" />
-        <span v-if="!romFile && !romError" class="tt-drop-label">Drop ROM here</span>
-        <span v-else-if="romError" class="tt-drop-label tt-drop-error">{{ romError }}</span>
-        <span v-else class="tt-drop-label tt-drop-label--ready">{{ romFile!.name }}</span>
-      </div>
-
-      <p v-if="uploadError" class="tt-upload-error">{{ uploadError }}</p>
-
-      <div class="tt-lang-row">
-        <label class="tt-lang-label">Translate to</label>
-        <select class="tt-lang-select" v-model="targetLang">
-          <option value="" disabled>Pick a language</option>
-          <option v-for="l in LANGUAGES" :key="l.code" :value="l.code">{{ l.label }}</option>
-        </select>
-      </div>
-
-      <button class="tt-submit" :disabled="!canSubmit()" @click="submitRom">Submit</button>
-    </div>
-
-    <!-- ── Step 1: Discovering / Ready ── -->
-    <div v-else-if="step === 'discovering' || step === 'ready'" class="tt-discovering">
-      <ul class="tt-checklist">
-        <li
-          v-for="s in extractSteps"
-          :key="s.id"
-          class="tt-checklist-item"
-          :class="`tt-checklist-item--${step === 'discovering' ? stepState(s.id) : 'done'}`"
-        >
-          <span class="tt-checklist-icon">
-            <template v-if="step === 'discovering'">
-              <span v-if="stepState(s.id) === 'done'"     class="tt-check">&#10003;</span>
-              <span v-else-if="stepState(s.id) === 'active'"  class="tt-spinner tt-spinner--sm" />
-              <span v-else-if="stepState(s.id) === 'awaiting'" class="tt-await-icon">&#9654;</span>
-              <span v-else class="tt-check-empty" />
-            </template>
-            <span v-else class="tt-check">&#10003;</span>
-          </span>
-          <span class="tt-checklist-label">{{
-            step !== 'discovering' || stepState(s.id) === 'done'   ? s.done
-            : stepState(s.id) === 'active'                         ? s.active
-            : stepState(s.id) === 'awaiting'                       ? s.pending
-            : s.pending
-          }}</span>
-        </li>
-      </ul>
-
-      <div v-if="extractPrompt && step === 'discovering'" class="tt-prompt-card">
-        <span class="tt-prompt-cta">Copy this prompt to Claude Code</span>
-        <pre class="tt-prompt-code">{{ extractPrompt }}</pre>
-        <button class="tt-disc-add" @click="copyPrompt">Copy</button>
-      </div>
-
-      <div class="tt-disc-card">
-        <p class="tt-disc-heading">Optional: add reference sources</p>
-        <p class="tt-disc-body">
-          Drop links to official sources in your target language: dubbed episodes,
-          character wikis, translated scripts or official subtitles. We'll use them
-          to give Claude richer context: better tone, canonical names, the right register.
-          Use official sources for better results.
-        </p>
-        <div class="tt-disc-input-row">
-          <input
-            class="tt-disc-input"
-            v-model="linkInput"
-            placeholder="https://..."
-            @keydown.enter.prevent="addLink"
-          />
-          <button class="tt-disc-add" @click="addLink">Add</button>
+        <div v-for="g in groupedProjects" :key="g.sys" class="tt-proj-group">
+          <button class="tt-proj-group-head" @click="toggleConsole(g.sys)">
+            <span class="tt-proj-caret">{{ collapsedConsoles[g.sys] ? '▸' : '▾' }}</span>
+            <span class="tt-proj-group-name">{{ g.label }}</span>
+            <span class="tt-proj-group-count">{{ g.projects.length }}</span>
+          </button>
+          <ul v-show="!collapsedConsoles[g.sys]" class="tt-projects-list">
+            <li v-for="p in g.projects" :key="p.ns" class="tt-project">
+              <button class="tt-project-open" @click="loadProject(p)">
+                <MetadataCard
+                  class="tt-proj-card"
+                  :meta="p.meta || null"
+                  :game-name="p.gameName"
+                  :pair="`日本語 → ${langName(p.lang)}`"
+                  variant="list"
+                />
+                <span class="tt-project-count">{{ p.total.toLocaleString() }} blocks</span>
+              </button>
+              <div class="tt-project-actions">
+                <button class="tt-project-dir" title="Open project folder" @click="openProjectDir(p)">📁</button>
+                <button class="tt-project-dir tt-project-del" title="Delete project" @click="deleteProject(p)">🗑</button>
+              </div>
+            </li>
+          </ul>
         </div>
-        <button v-if="step === 'ready'" class="tt-submit tt-disc-next" @click="step = 'table'">Continue to translation</button>
-
-        <ul v-if="discoveryLinks.length" class="tt-disc-links">
-          <li v-for="(url, i) in discoveryLinks" :key="i" class="tt-disc-link">
-            <span class="tt-disc-link-url">{{ url }}</span>
-            <button class="tt-disc-remove" @click="discoveryLinks.splice(i, 1)">✕</button>
-          </li>
-        </ul>
-      </div>
-
+      </aside>
     </div>
+
 
     <!-- ── Step 2: Header + table ── -->
     <template v-else-if="step === 'table'">
@@ -618,20 +647,53 @@ onUnmounted(() => {
     <div class="tt-header">
       <div class="tt-title">
         <UiButton class="tt-back" @click="backToProjects">‹ Projects</UiButton>
-        <span class="tt-game">{{ selGameName || 'Boku Doraemon' }}</span>
-        <span class="tt-sep">·</span>
-        <span class="tt-lang">日本語 → {{ langLabel || 'Català' }}</span>
-        <span class="tt-sep">·</span>
-        <span class="tt-count">{{ stats.total }} blocks</span>
+        <MetadataCard
+          :meta="meta"
+          :game-name="selGameName"
+          :pair="`日本語 → ${langLabel || 'Català'}`"
+          variant="header"
+        />
       </div>
       <div class="tt-stats">
+        <span class="tt-total">{{ stats.total.toLocaleString() }} blocks</span>
+        <span v-if="stats.pending" class="stat pending">{{ stats.pending }} pending</span>
         <span class="stat ok">{{ stats.ok }} ok</span>
         <span class="stat warn">{{ stats.warn }} warn</span>
         <span class="stat over">{{ stats.over }} overflow</span>
-        <span class="stat-sep">·</span>
-        <span class="stat muted">{{ stats.confirmedIds }}/{{ stats.totalIds }} speaker IDs confirmed</span>
+        <span class="tt-actions">
+          <span v-if="buildMsg" class="tt-build-msg" :class="{ 'tt-build-msg--fail': buildFailed }">{{ buildMsg }}</span>
+          <UiButton class="tt-action" @click="saveDraft">{{ draftSaved ? 'Saved ✓' : 'Save draft' }}</UiButton>
+          <UiButton variant="primary" :disabled="building" @click="runBuild">{{ building ? 'Building…' : 'Build ROM' }}</UiButton>
+        </span>
       </div>
     </div>
+
+    <!-- Source tabs: one per discovered file (view order); they fill in as they load -->
+    <div class="tt-tabs" v-if="tabs.length">
+      <button v-for="t in tabs" :key="t.safe"
+              class="tt-tab" :class="{ 'tt-tab--active': activeTab === t.safe }"
+              :title="t.file" @click="selectTab(t.safe)">
+        <span class="tt-tab-kind">{{ tabLabel(t) }}</span>
+        <span class="tt-tab-state">
+          <span v-if="tabState[t.safe] === 'loading'" class="tt-tab-spin"></span>
+          <span v-else-if="tabState[t.safe] === 'ready'">{{ (tabBlocks[t.safe] || []).length }}</span>
+          <span v-else-if="tabState[t.safe] === 'error'">!</span>
+          <span v-else class="tt-tab-dot">·</span>
+        </span>
+      </button>
+      <button v-if="tabs.some(t => tabState[t.safe] === 'error' || tabState[t.safe] === 'idle')"
+              class="tt-tab tt-tab-retry" title="Retry sources that didn't load" @click="retryTabs">
+        ↻ Retry
+      </button>
+    </div>
+
+    <!-- Speaker legend (only when the source carries speaker tags) -->
+    <SpeakerLegend
+      v-if="showLegend"
+      :speakers="activeSpeakers"
+      :names="activeNames"
+      @rename="renameSpeaker"
+    />
 
     <!-- Table -->
     <div class="tt-table-wrap">
@@ -654,34 +716,13 @@ onUnmounted(() => {
             <td class="col-offset mono">{{ block.offset }}</td>
 
             <td class="col-speaker">
-              <!-- Only render speaker info on the first row of each run -->
+              <!-- Speaker shown once per run; continuation rows get a thin colour line -->
               <template v-if="isFirstInRun(index)">
                 <div class="speaker-cell">
-                  <span
-                    class="speaker-dot"
-                    :style="{ background: speakerColor(block.speakerId) }"
-                  />
-                  <div class="speaker-info">
-                    <span class="speaker-name">{{ speakers[block.speakerId]?.name ?? `Speaker ${block.speakerId.toString().padStart(2,'0')}` }}</span>
-                    <span
-                      v-if="speakers[block.speakerId]?.status === 'inferred' && speakers[block.speakerId]?.suggestion"
-                      class="speaker-suggestion"
-                    >possibly: {{ speakers[block.speakerId].suggestion }}?</span>
-                    <span
-                      v-else-if="speakers[block.speakerId]?.status === 'rejected' && speakers[block.speakerId]?.suggestion"
-                      class="speaker-suggestion rejected-suggestion"
-                    >not {{ speakers[block.speakerId].suggestion }}</span>
-                  </div>
-                  <template v-if="speakers[block.speakerId]?.status === 'inferred'">
-                    <button class="thumb-btn" title="Yes, this is correct" @click="thumbsUp(block.speakerId)">👍</button>
-                    <button class="thumb-btn" title="No, this is wrong" @click="thumbsDown(block.speakerId)">👎</button>
-                  </template>
-                  <span v-else-if="speakers[block.speakerId]?.status === 'confirmed'" class="speaker-badge confirmed">✓</span>
-                  <span v-else-if="speakers[block.speakerId]?.status === 'rejected'" class="speaker-badge rejected">✗</span>
+                  <span class="speaker-dot" :style="{ background: speakerColor(block.speakerId) }" />
+                  <span class="speaker-name">{{ speakerLabel(block.speakerId) }}</span>
                 </div>
-                <div v-if="runLength(index) > 1" class="run-count">{{ runLength(index) }} lines</div>
               </template>
-              <!-- Continuation rows: just a thin colour line -->
               <div v-else class="speaker-cont">
                 <span class="speaker-cont-line" :style="{ background: speakerColor(block.speakerId) }" />
               </div>
@@ -730,31 +771,20 @@ onUnmounted(() => {
 }
 
 .tt-disclaimer {
-  background: linear-gradient(135deg, rgba(255, 193, 7, 0.15), rgba(244, 67, 54, 0.15));
-  border: 1px solid rgba(255, 152, 0, 0.5);
-  border-radius: 4px;
-  margin: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
-  flex-shrink: 0;
+  display: flex; align-items: center; gap: 10px;
+  background: linear-gradient(135deg, rgba(255, 193, 7, 0.12), rgba(244, 67, 54, 0.12));
+  border: 1px solid rgba(255, 152, 0, 0.4);
+  border-radius: var(--r-sm);
+  margin: var(--sp-3); padding: 6px 12px;
+  flex-shrink: 0; font-size: 12.5px; color: var(--text-secondary);
 }
-
-.tt-disclaimer-content {
-  color: var(--text);
-  font-size: 13px;
-  line-height: 1.5;
+.tt-disclaimer-text { flex: 1; }
+.tt-disclaimer-text strong { color: rgb(217, 119, 6); font-weight: 600; }
+.tt-disclaimer-x {
+  border: none; background: none; cursor: pointer;
+  color: var(--text-faint); font-size: 18px; line-height: 1; padding: 0 4px; flex-shrink: 0;
 }
-
-.tt-disclaimer-content strong {
-  display: block;
-  margin-bottom: var(--sp-2);
-  color: rgb(255, 152, 0);
-  font-weight: 600;
-}
-
-.tt-disclaimer-content p {
-  margin: 0;
-  color: var(--text-secondary);
-}
+.tt-disclaimer-x:hover { color: var(--text); }
 
 .tt-header {
   display: flex;
@@ -777,6 +807,9 @@ onUnmounted(() => {
 .tt-sep  { color: var(--text-faint); }
 .tt-lang { color: var(--text-muted); }
 .tt-count { color: var(--text-faint); font-family: var(--font-mono); font-size: 12px; }
+.tt-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: 16px; }
+.tt-build-msg { font-size: 12px; color: var(--text-faint); }
+.tt-build-msg--fail { color: var(--bad); font-weight: 600; }
 
 .tt-stats {
   display: flex;
@@ -785,13 +818,50 @@ onUnmounted(() => {
   font-size: 12px;
   font-family: var(--font-mono);
 }
+.tt-total { color: var(--text-muted); margin-right: var(--sp-1); }
 
 .stat { padding: 2px 6px; border-radius: var(--r-sm); font-weight: 500; }
+.stat.pending { background: #dbeafe; color: #2563eb; }
 .stat.ok   { background: #dcfce7; color: var(--ok); }
 .stat.warn { background: #fef3c7; color: var(--warn); }
 .stat.over { background: #fee2e2; color: var(--bad); }
 .stat.muted { color: var(--text-faint); padding: 0; }
 .stat-sep { color: var(--line-strong); }
+
+/* Source tabs (one per discovered file) */
+.tt-tabs {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 16px; padding-bottom: 12px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.tt-tab {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--text-faint); cursor: pointer;
+  font-size: 13px; transition: background .1s, border-color .1s, color .1s;
+}
+.tt-tab:hover { background: var(--surface-2); border-color: var(--line-strong); }
+.tt-tab--active {
+  color: var(--text); border-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.tt-tab-kind { font-weight: 600; }
+.tt-tab-state {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-faint); min-width: 14px; text-align: right;
+}
+.tt-tab-dot { color: var(--line-strong); }
+.tt-tab-spin {
+  display: inline-block; width: 10px; height: 10px;
+  border: 2px solid var(--line-strong); border-top-color: var(--accent);
+  border-radius: 50%; animation: tt-spin .7s linear infinite;
+}
+@keyframes tt-spin { to { transform: rotate(360deg); } }
+
+.tt-discovering-note {
+  display: flex; align-items: center; gap: 10px;
+  padding: 16px 4px; color: var(--text-faint); font-size: 13px;
+}
 
 .tt-table-wrap {
   flex: 1;
@@ -998,6 +1068,7 @@ onUnmounted(() => {
   border-radius: var(--r-sm);
   width: fit-content;
 }
+.bytes-cell.pending { background: #eff6ff; color: #2563eb; }
 .bytes-cell.ok   { background: #dcfce7; color: var(--ok); }
 .bytes-cell.warn { background: #fef3c7; color: var(--warn); }
 .bytes-cell.over { background: #fee2e2; color: var(--bad); }
@@ -1073,27 +1144,49 @@ onUnmounted(() => {
 .tt-projects { margin-top: 28px; width: 100%; max-width: 440px; text-align: left; }
 .tt-projects-heading {
   font-size: 12px; color: var(--text-faint);
-  text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 8px;
+  text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 10px;
+}
+.tt-proj-group { margin-bottom: 10px; }
+.tt-proj-group-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 4px 2px; margin-bottom: 6px;
+  background: none; border: none; cursor: pointer; text-align: left;
+}
+.tt-proj-caret { color: var(--text-faint); font-size: 10px; width: 10px; }
+.tt-proj-group-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.tt-proj-group-count {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+  background: var(--surface-2); border-radius: 999px; padding: 1px 8px;
 }
 .tt-projects-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.tt-project { display: flex; align-items: center; gap: 6px; }
-.tt-project-open {
-  flex: 1; display: flex; align-items: baseline; gap: 10px;
-  padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-sm);
-  background: var(--surface); cursor: pointer; text-align: left;
-  transition: background 0.1s, border-color 0.1s;
+/* the card IS the row: balanced, clickable, actions revealed on hover */
+.tt-project {
+  position: relative; display: flex; align-items: center;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--surface); transition: background 0.1s, border-color 0.1s;
 }
-.tt-project-open:hover { background: var(--surface-2); border-color: var(--line-strong); }
-.tt-project-name  { font-weight: 600; color: var(--text); }
-.tt-project-lang  { font-size: 12px; color: var(--accent); }
-.tt-project-count { font-size: 12px; color: var(--text-faint); margin-left: auto; }
+.tt-project:hover { background: var(--surface-2); border-color: var(--line-strong); }
+.tt-project-open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px;
+  padding: 8px 12px; background: none; border: none; cursor: pointer; text-align: left;
+}
+.tt-proj-card { flex: 1; min-width: 0; }
+.tt-project-count {
+  margin-left: auto; flex-shrink: 0;
+  font-size: 12px; color: var(--text-faint); font-family: var(--font-mono); white-space: nowrap;
+}
+.tt-project-actions {
+  display: flex; gap: 4px; padding-right: 8px;
+  opacity: 0; transition: opacity 0.1s;
+}
+.tt-project:hover .tt-project-actions { opacity: 1; }
 .tt-project-dir {
-  padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-sm);
-  background: var(--surface); cursor: pointer; font-size: 14px; line-height: 1;
+  padding: 5px 7px; border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--surface); cursor: pointer; font-size: 13px; line-height: 1;
   transition: background 0.1s, border-color 0.1s, color 0.1s;
 }
-.tt-project-dir:hover { background: var(--surface-2); border-color: var(--line-strong); }
-.tt-project-del:hover { background: var(--surface-2); border-color: var(--bad); color: var(--bad); }
+.tt-project-dir:hover { background: var(--surface); border-color: var(--line-strong); }
+.tt-project-del:hover { border-color: var(--bad); color: var(--bad); }
 .tt-back { margin-right: 12px; }
 .tt-disc-next  { align-self: center; }
 .tt-disc-card {
@@ -1182,13 +1275,31 @@ onUnmounted(() => {
 
 /* ── Setup step ── */
 .tt-setup {
+  position: relative;               /* anchor for the absolutely-placed rail */
+  display: flex;
+  align-items: center;
+  justify-content: center;          /* the picker stays dead-centre... */
+  height: 100%;
+  padding: 48px 24px;
+  overflow: hidden;                 /* the rail scrolls, not the page */
+}
+.tt-setup-form {
   display: flex;
   flex-direction: column;
-  align-items: center;
   justify-content: center;
   gap: 20px;
-  height: 100%;
-  padding: 60px 24px;
+  width: 100%;
+  max-width: 420px;
+}
+.tt-setup-rail {                    /* ...and the rail floats on the right, not displacing it */
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  bottom: 24px;
+  width: 340px;
+  max-width: 30%;
+  overflow-y: auto;                 /* scrolls when projects outgrow the viewport */
+  padding-right: 4px;
 }
 .tt-drop {
   width: 100%;
@@ -1247,9 +1358,10 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
-  width: 320px;
+  width: 100%;
 }
 .tt-lang-label  { font-size: 12px; color: var(--text-faint); }
+.tt-lang-hint   { font-size: 11px; color: var(--text-faint); margin-top: 4px; line-height: 1.35; }
 .tt-lang-select {
   font-size: 13px;
   padding: 6px 10px;
