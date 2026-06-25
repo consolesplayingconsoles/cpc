@@ -1,0 +1,73 @@
+openapi: 3.0.3
+info:
+  title: CPC Pi-Hub Sync API
+  version: 0.1.0
+  description: >
+    The HTTP "sync" surface of the Pi-Hub (`pluto-pi-hub`), served on PI_SYNC_PORT
+    in a daemon thread alongside the always-up controller-op receiver.
+
+    NOTE: the hub's PRIMARY interface is a raw-TCP controller-op stream on
+    PI_BRIDGE_PORT (length-framed binary ops, Pluto dials in) -- that is NOT REST
+    and is out of scope here. This documents only the HTTP `/health` + `/sync`.
+servers:
+  - url: http://{host}:{port}
+    variables:
+      host:
+        default: 192.168.68.51
+        description: Pi node HOST_IP
+      port:
+        default: '7721'
+        description: PI_SYNC_PORT (defaults to 7721 if unset)
+paths:
+  /health:
+    get:
+      summary: VMU presence probe
+      description: 200 if a Dreamcast VMU is currently discovered, 503 otherwise.
+      responses:
+        '200':
+          description: VMU present
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vmu: { type: boolean, example: true }
+        '503':
+          description: VMU not present
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vmu: { type: boolean, example: false }
+  /sync:
+    post:
+      summary: Run a cloud <-> console sync action
+      description: >
+        Delegates to the hub's sync handler. The reply shape depends on the action.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  default: sync
+                  description: Sync action to perform.
+                target:
+                  type: string
+                  description: Sync target (e.g. a console/save namespace).
+                dropbox_path:
+                  type: string
+                  description: Cloud-storage path for the sync.
+      responses:
+        '200':
+          description: Sync handler reply (shape varies by action; `{error}` on failure).
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          description: Unknown path (only /sync is accepted on POST)

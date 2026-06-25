@@ -24,6 +24,9 @@ const router = createRouter({
     // /control/source/target/mapping links keep parsing; it's only meaningful when
     // target === 'pi' (which of the node's picos to drive).
     { path: '/control/:source?/:target?/:mapping?/:pico?', name: 'control', component: Blank, meta: { hashtag: '#anything-playing-consoles' } },
+    // :ns is the project namespace (game + language) — rides the URL so a reload /
+    // HMR / bookmark restores the open table instead of dropping to the picker.
+    { path: '/translation/:ns?', name: 'translation', component: Blank, meta: { hashtag: '#consolas-traduciendo-consolas' } },
     { path: '/dreame', redirect: '/control/dreame' },   // back-compat
     // Anything else falls back to the network view.
     { path: '/:pathMatch(.*)*', redirect: '/' },

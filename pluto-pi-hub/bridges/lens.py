@@ -76,12 +76,12 @@ def _trigger(pluto, lang):
         print("[lens] grab: %s" % r.get("error", r))
         # non-fatal: try scanning whatever frame is already there
     # 2. scan
-    ok, r = _http("GET", "%s/control/lens" % pluto, timeout=15)
+    ok, r = _http("GET", "%s/control/google/" % pluto, timeout=15)
     if not ok:
         print("[lens] scan: %s" % r.get("error", r))
         return
     # 3. translate
-    ok, r = _http("POST", "%s/control/lens/translate-last" % pluto,
+    ok, r = _http("POST", "%s/control/google/translate-last" % pluto,
                   {"target": lang}, timeout=15)
     if ok:
         print("[lens] translated: %s" % str(r.get("translated", ""))[:80])
@@ -182,7 +182,7 @@ class LensTrigger(object):
         self._threads  = []
 
     def _fetch_lang(self):
-        ok, r = _http("GET", "%s/control/lens/config" % self.pluto_url, timeout=5)
+        ok, r = _http("GET", "%s/control/google/config" % self.pluto_url, timeout=5)
         lang = r.get("lang", "en") if ok else "en"
         return lang or "en"
 

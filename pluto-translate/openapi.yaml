@@ -1,0 +1,83 @@
+openapi: 3.0.3
+info:
+  title: CPC Translation API
+  version: 0.1.0
+  description: >
+    Runs ON the Batocera node (the `pluto-translate` payload), where the Dreamcast
+    GDIs and buildgdi live. Pluto calls it over HTTP for ROM-text discovery and
+    extraction instead of SSH-ing a script per request. Not a Pluto instance;
+    deployed via `deploy.sh nodes/local/batocera/.env` and kept up by
+    batocera-services. Endpoints below are the current surface; per-file extract
+    and streaming are planned.
+servers:
+  - url: http://{host}:7711
+    variables:
+      host:
+        default: 192.168.68.57
+        description: Batocera node HOST_IP
+paths:
+  /health:
+    get:
+      summary: Liveness probe
+      responses:
+        '200':
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  service: { type: string, example: cpc-translate }
+                  port: { type: integer, example: 7711 }
+  /sources:
+    get:
+      summary: Discover translatable text files on a disc (the workbench "tabs")
+      description: >
+        Extracts the disc once (cached on the box), scans every file by Shift-JIS
+        density, and returns the ones that read as real text (kana ratio >= ~45%).
+        Graphics, audio and video blobs are dropped. An empty `sources` list means
+        no text was found (the only real failure).
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Absolute GDI path on the box.
+          schema: { type: string }
+          example: /userdata/roms/dreamcast/Boku Doraemon (Japan)/disc.gdi
+      responses:
+        '200':
+          description: Ranked text files
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sources:
+                    type: array
+                    items: { $ref: '#/components/schemas/Source' }
+        '400':
+          description: path query parameter missing
+        '502':
+          description: discovery failed (extract/scan error on the box)
+components:
+  schemas:
+    Source:
+      type: object
+      properties:
+        file:
+          type: string
+          description: Original on-disc name (may contain literal backslashes).
+          example: DOUGU\ITEMTBL.PAC
+        safe:
+          type: string
+          description: Sanitized cache filename (backslashes/slashes flattened).
+          example: DOUGU_ITEMTBL.PAC
+        kanaPct:
+          type: integer
+          description: Percent of Shift-JIS byte-pairs that are kana (text-ness signal).
+          example: 74
+        size:
+          type: integer
+          description: File size in bytes.
+          example: 325632

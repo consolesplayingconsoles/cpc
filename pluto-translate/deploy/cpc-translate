@@ -1,0 +1,26 @@
+#!/bin/bash
+# Batocera service for the CPC translation API. deploy.sh installs this to
+# /userdata/system/services/cpc-translate and runs `batocera-services enable
+# cpc-translate` so it starts at boot. Batocera has NO systemd and / is an
+# ephemeral overlay, so both the service and the code live on /userdata.
+PORT=7711
+RUN=/userdata/cpc-scripts/run.sh
+LOG=/userdata/cpc-scripts/service.log
+
+start() {
+  # detach fully (own session + closed stdin) so the launching shell can exit
+  setsid sh "$RUN" serve > "$LOG" 2>&1 < /dev/null &
+}
+stop() {
+  # kill by PORT, never by name: a pkill -f on the script name self-matches the
+  # managing shell and takes out the SSH session too.
+  F=$(fuser ${PORT}/tcp 2>/dev/null); [ -n "$F" ] && kill $F 2>/dev/null
+}
+
+case "$1" in
+  start)   start ;;
+  stop)    stop ;;
+  restart) stop; sleep 1; start ;;
+  status)  fuser ${PORT}/tcp >/dev/null 2>&1 && echo started || echo stopped ;;
+  *)       echo "usage: $0 {start|stop|restart|status}" >&2; exit 1 ;;
+esac

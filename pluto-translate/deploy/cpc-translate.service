@@ -1,0 +1,18 @@
+[Unit]
+Description=CPC translation API (Pluto -> Dreamcast text extract / scan / patch)
+After=network-online.target
+Wants=network-online.target
+
+# Fallback unit for a systemd-managed node. Batocera (the real target) has no
+# systemd and uses the sibling batocera-service script instead; deploy.sh picks
+# whichever the node provides.
+
+[Service]
+Type=simple
+ExecStart=/userdata/cpc-scripts/run.sh serve
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target

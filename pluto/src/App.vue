@@ -8,6 +8,7 @@ import { useIdentity } from './composables/useIdentity'
 import NetworkDiagram from './components/NetworkDiagram.vue'
 import GroupChat from './components/GroupChat.vue'
 import Control from './components/Control.vue'
+import TranslationTable from './components/TranslationTable.vue'
 import AchievementToast from './components/AchievementToast.vue'
 import { useDeploy } from './composables/useDeploy'
 import plutoLabMark from './assets/avatars/pluto-lab.svg'
@@ -40,18 +41,20 @@ function toggleTheme() {
 // '/' → network, '/chat' → chat, '/control/...' → the Control surface.
 // The Command surface is the chat component (it's the node command bus); route is
 // 'command' but the internal panel key stays 'chat'.
-const activeTab = computed<'network' | 'chat' | 'control'>(() => {
+const activeTab = computed<'network' | 'chat' | 'control' | 'translation'>(() => {
   if (route.name === 'command') return 'chat'
   if (route.name === 'control') return 'control'
+  if (route.name === 'translation') return 'translation'
   return 'network'
 })
 
 // open-tab key (and the switcher buttons) → path. The Control tab lands on the bare
 // surface (it auto-selects the first available source); the node drawer's
 // 'robutek'/'dreame' jump straight to the dreame source.
-function goToTab(tab: 'network' | 'chat' | 'control' | 'robutek' | 'dreame') {
+function goToTab(tab: 'network' | 'chat' | 'control' | 'translation' | 'robutek' | 'dreame') {
   const path = tab === 'chat' ? '/command'
     : tab === 'control' ? '/control'
+    : tab === 'translation' ? '/translation'
     : (tab === 'robutek' || tab === 'dreame') ? '/control/dreame'
     : '/'
   if (route.path !== path) router.push(path)
@@ -242,6 +245,11 @@ const displayNodes = computed(() => {
           :class="{ 'tab--active': activeTab === 'control' }"
           @click="goToTab('control')"
         >Control</button>
+        <button
+          class="tab"
+          :class="{ 'tab--active': activeTab === 'translation' }"
+          @click="goToTab('translation')"
+        >Translation</button>
       </div>
 
       <div class="panels">
@@ -257,6 +265,8 @@ const displayNodes = computed(() => {
         />
 
         <Control v-show="activeTab === 'control'" :active="activeTab === 'control'" :nodes="nodes" :show-offline="showOffline" />
+
+        <TranslationTable v-show="activeTab === 'translation'" />
       </div>
     </main>
 
