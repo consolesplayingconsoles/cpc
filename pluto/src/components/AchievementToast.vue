@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps<{ show: boolean; consoleName: string; duration: string }>()
+defineProps<{ show: boolean; desc: string; points?: string }>()
 defineEmits<{ dismiss: [] }>()
 </script>
 
@@ -17,9 +17,9 @@ defineEmits<{ dismiss: [] }>()
       </div>
       <div class="achievement-toast__content">
         <div class="achievement-toast__title">ACHIEVEMENT UNLOCKED</div>
-        <div class="achievement-toast__desc">Successfully Deployed to {{ consoleName }}</div>
+        <div class="achievement-toast__desc">{{ desc }}</div>
       </div>
-      <div class="achievement-toast__points">{{ duration }}</div>
+      <div class="achievement-toast__points">{{ points }}</div>
     </div>
   </Transition>
 </template>

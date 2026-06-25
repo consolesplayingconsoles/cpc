@@ -133,6 +133,12 @@ paths:
       summary: Discover translatable text files on a disc
       parameters: [{ name: path, in: query, required: true, schema: { type: string } }]
       responses: { '200': { description: Sources } }
+  /translate/meta:
+    get:
+      tags: [translate]
+      summary: Disc IP.BIN metadata (title, region, product #, version, date) -- instant
+      parameters: [{ name: path, in: query, required: true, schema: { type: string } }]
+      responses: { '200': { description: Metadata } }
   /translate/run:
     post: { tags: [translate], summary: Run the translate -> rebuild build on the box, responses: { '200': { description: OK } } }
   /translate/open:

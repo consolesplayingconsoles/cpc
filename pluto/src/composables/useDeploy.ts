@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { API_BASE } from './useNodes'
 import type { NodeMap } from './useNodes'
+import { useAchievement } from './useAchievement'
 
 export interface DeployResult {
   raw:       string
@@ -34,13 +35,9 @@ const SUCCESS_BANNER = `
   DEPLOY SUCCESSFUL
 ──────────────────────────────────────────────────`
 
-// Toast state is module-level so all useDeploy() call sites share the same signal —
-// the deploy happens in NetworkDiagram, the toast renders in App.vue.
-const showToast        = ref(false)
-const toastConsoleName = ref('')
-const toastDuration    = ref('')
-
 export function useDeploy(getNodes: () => NodeMap = () => ({})) {
+  const { unlock } = useAchievement()
+
   const deploying        = ref<string | null>(null)
   const deployOutput     = ref<Record<string, DeployResult | null>>({})
   const lastDurations    = ref<Record<string, number>>(loadDurations())
@@ -89,12 +86,8 @@ export function useDeploy(getNodes: () => NodeMap = () => ({})) {
         rememberDuration(id, ms)        // only successful runs become the reference
         rememberDeployedAt(id, Date.now())
         raw += SUCCESS_BANNER
-        setTimeout(() => {
-          toastConsoleName.value = getNodes()[id]?.name ?? id.toUpperCase()
-          toastDuration.value    = `${elapsed}s`
-          showToast.value        = true
-          setTimeout(() => { showToast.value = false }, 4000)
-        }, 600)
+        const name = getNodes()[id]?.name ?? id.toUpperCase()
+        setTimeout(() => unlock(`Successfully Deployed to ${name}`, `${elapsed}s`), 600)
       }
 
       deployOutput.value = { ...deployOutput.value, [id]: { raw, ok, step: ok ? 'done' : 'failed', startedAt } }
@@ -116,11 +109,8 @@ export function useDeploy(getNodes: () => NodeMap = () => ({})) {
     deployOutput.value = { ...deployOutput.value, [id]: null }
   }
 
-  function dismissToast() { showToast.value = false }
-
   return {
     deploying, deployOutput, lastDurations, lastDeployedAt,
-    showToast, toastConsoleName, toastDuration,
-    deploy, clearOutput, dismissToast,
+    deploy, clearOutput,
   }
 }

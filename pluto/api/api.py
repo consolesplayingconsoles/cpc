@@ -1310,7 +1310,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/control/frame"), ("GET", "/control/google/lens"), ("GET", "/control/google/config"),
         ("GET", "/control/google/latest"),
         ("GET", "/translate/projects"), ("GET", "/translate/systems"), ("GET", "/translate/games"),
-        ("GET", "/translate/extract"), ("GET", "/translate/sources"), ("GET", "/translate/{game}"),
+        ("GET", "/translate/extract"), ("GET", "/translate/sources"), ("GET", "/translate/meta"),
+        ("GET", "/translate/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
         ("POST", "/messages"), ("POST", "/dreame/login"), ("POST", "/dreame/logout"),
         ("POST", "/control/drive"), ("POST", "/control/signal"), ("POST", "/control/capture"),
@@ -1384,10 +1385,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_translate_games((qs.get("system") or [""])[0])
         elif parts[:2] == ["translate", "extract"]:
             qs = urllib.parse.parse_qs(parsed.query)
-            self._handle_translate_extract((qs.get("path") or [""])[0])
+            self._handle_translate_extract((qs.get("path") or [""])[0],
+                                           (qs.get("file") or [""])[0])
         elif parts[:2] == ["translate", "sources"]:
             qs = urllib.parse.parse_qs(parsed.query)
             self._handle_translate_sources((qs.get("path") or [""])[0])
+        elif parts[:2] == ["translate", "meta"]:
+            qs = urllib.parse.parse_qs(parsed.query)
+            self._handle_translate_meta((qs.get("path") or [""])[0])
         elif len(parts) == 2 and parts[0] == "translate":
             self._handle_translate_get(parts[1])
 
@@ -2123,7 +2128,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     existing = json.load(f)
             except (ValueError, IOError):
                 pass
+        # deep-merge the per-source maps (`sources` blocks, `speakers` names) so
+        # saving one tab doesn't drop the others; every other key is a shallow merge.
+        per_source = ("sources", "speakers")
+        prev = {k: dict(existing.get(k) or {}) for k in per_source}
         existing.update(body)
+        for k in per_source:
+            if isinstance(body.get(k), dict):
+                prev[k].update(body[k])
+                existing[k] = prev[k]
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(existing, f, ensure_ascii=False, indent=2)
@@ -2513,35 +2526,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
             name = cfg.get("NODE_NAME", node_id)
             for cand in (node_id, name.lower()):
                 if cand in folders:
-                    # 'supported' = has a working build pipeline. Only DC so far
-                    # (translate.sh + dc_story_patch are DC-specific); others show
-                    # but are disabled in the picker until their pipeline lands.
+                    # 'supported' = selectable in the picker. DC has the full
+                    # extract->translate->build pipeline; Saturn is enabled for
+                    # extraction/translation (its build pipeline is still landing).
                     systems.append({"node": node_id, "name": name, "system": cand,
-                                    "supported": node_id == "dc"})
+                                    "supported": node_id in ("dc", "saturn")})
                     break
         self._send(200, {"systems": systems})
 
     def _handle_translate_games(self, system):
-        """GET /translate/games?system=<x> -> translatable GDI games on batocera."""
+        """GET /translate/games?system=<x> -> translatable games on the box,
+        proxied to the box translate API (which runs list-games.sh), same as
+        /meta, /sources and /extract. No more SSH-a-script from Pluto."""
         system = (system or "").strip()
         if not system:
             self._send(400, {"error": "system required"})
             return
-        rc, out = self._node_ssh("batocera",
-                                 ["sh", "/userdata/cpc-scripts/list-games.sh", system])
-        if rc != 0:
-            self._send(502, {"error": "list failed", "detail": out.strip()})
+        base = self._box_base()
+        if not base:
+            self._send(502, {"error": "translate node (batocera) not reachable"})
             return
-        games = []
-        for line in out.splitlines():
-            path = line.strip()
-            if not path:
-                continue
-            base   = os.path.basename(path)
-            parent = os.path.basename(os.path.dirname(path))
-            name   = parent if base.lower() == "disc.gdi" else os.path.splitext(base)[0]
-            games.append({"name": name, "path": path})
-        self._send(200, {"games": games})
+        try:
+            with urlopen(base + "/games?system=" + urllib.parse.quote(system), timeout=30) as r:
+                self._send(200, json.loads(r.read().decode()))
+        except Exception as exc:
+            self._send(502, {"error": "games via box failed: %s" % exc})
 
     def _handle_translate_projects(self):
         """GET /translate/projects -> saved translation projects. No DB: the dirs
@@ -2562,6 +2571,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "ns":       name,
                     "gameName": st.get("gameName", name),
                     "lang":     st.get("lang", ""),
+                    "system":   st.get("system", ""),
+                    "path":     st.get("path", ""),
+                    "meta":     st.get("meta"),
                     "total":    st.get("total", len(st.get("blocks", []))),
                 })
         self._send(200, {"projects": projects})
@@ -2600,31 +2612,61 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception as exc:
             self._send(500, {"error": str(exc)})
 
-    def _handle_translate_extract(self, path):
-        """GET /translate/extract?path=<gdi> -> the dialogue table as JSON.
-        Blocks carry RAW Shift-JIS bytes (hex); the browser decodes them (the box
-        has no shift_jis codec). Pure read -- nothing is written back."""
+    def _box_base(self, node_id="batocera", port=7711):
+        """http://<node HOST_IP>:<port> for the translate box API, or None."""
+        cfg = self.__class__.node_roster.get(node_id) or {}
+        ip = (cfg.get("HOST_IP") or "").strip()
+        return "http://%s:%d" % (ip, port) if ip else None
+
+    def _handle_translate_extract(self, path, file=""):
+        """GET /translate/extract?path=<gdi>[&file=<safe>] -> a source's table as
+        JSON, via the translate box API. With `file` (a /sources `safe` name) it
+        extracts THAT source -- the per-tab call for the multitab. Without it, it
+        discovers and picks the meaning-first (view 0) source -- the single-table
+        default. Blocks carry RAW Shift-JIS hex; the browser decodes."""
         path = (path or "").strip()
         if not path:
             self._send(400, {"error": "path required"})
             return
-        rc, out = self._node_ssh("batocera",
-                                 ["sh", "/userdata/cpc-scripts/extract.sh", path],
-                                 timeout=120)
-        # The script prints JSON on stdout: a {"blocks":...} table on success, or a
-        # {"error":...} on a handled failure (e.g. "no STORY.PAC in this disc").
-        # Surface the script's own message rather than burying it in a wrapper.
-        line = next((l for l in reversed(out.splitlines()) if l.strip()), "")
+        base = self._box_base()
+        if not base:
+            self._send(502, {"error": "translate node (batocera) not reachable"})
+            return
         try:
-            data = json.loads(line)
-        except Exception:
-            self._send(502 if rc != 0 else 500,
-                       {"error": "extract failed", "detail": out.strip()[:500]})
+            q = urllib.parse.quote(path)
+            safe = (file or "").strip()
+            if not safe:
+                # the first call on a game does a cold scan (~2 min) then caches
+                with urlopen(base + "/sources?path=" + q, timeout=240) as r:
+                    sources = json.loads(r.read().decode()).get("sources", [])
+                if not sources:
+                    self._send(200, {"blocks": [], "total": 0,
+                                     "note": "no translatable text found in this disc"})
+                    return
+                safe = min(sources, key=lambda s: s.get("view", 99))["safe"]
+            with urlopen("%s/extract?path=%s&file=%s" % (base, q, urllib.parse.quote(safe)),
+                         timeout=60) as r:
+                self._send(200, json.loads(r.read().decode()))
+        except Exception as exc:
+            self._send(502, {"error": "extract via box failed: %s" % exc})
+
+    def _handle_translate_meta(self, path):
+        """GET /translate/meta?path=<gdi> -> the disc's IP.BIN metadata (title,
+        region, product #, version, date). Instant -- a few-KB bootstrap read on
+        the box, no extract. Proxied to the box API over HTTP."""
+        path = (path or "").strip()
+        if not path:
+            self._send(400, {"error": "path required"})
             return
-        if "error" in data:
-            self._send(502, data)
+        base = self._box_base()
+        if not base:
+            self._send(502, {"error": "translate node (batocera) not reachable"})
             return
-        self._send(200, data)
+        try:
+            with urlopen(base + "/meta?path=" + urllib.parse.quote(path), timeout=30) as r:
+                self._send(200, json.loads(r.read().decode()))
+        except Exception as exc:
+            self._send(502, {"error": "meta via box failed: %s" % exc})
 
     def _handle_translate_sources(self, path):
         """GET /translate/sources?path=<gdi> -> the list of translatable text

@@ -10,7 +10,7 @@ import GroupChat from './components/GroupChat.vue'
 import Control from './components/Control.vue'
 import TranslationTable from './components/TranslationTable.vue'
 import AchievementToast from './components/AchievementToast.vue'
-import { useDeploy } from './composables/useDeploy'
+import { useAchievement } from './composables/useAchievement'
 import plutoLabMark from './assets/avatars/pluto-lab.svg'
 import plutoC2Mark from './assets/avatars/pluto-c2.svg'
 
@@ -63,7 +63,7 @@ function goToTab(tab: 'network' | 'chat' | 'control' | 'translation' | 'robutek'
 const { nodes, loading, error } = useNodes()
 const { connections } = useConnections()
 const { messages } = useMessages()
-const { showToast, toastConsoleName, toastDuration } = useDeploy()
+const { show: showToast, desc: toastDesc, points: toastPoints, dismiss: dismissToast } = useAchievement()
 
 // ── Global second header: a per-tab channel hashtag + your identity. Both headers
 // live HERE in the parent so the top is uniform across tabs (no per-page stacking).
@@ -276,8 +276,9 @@ const displayNodes = computed(() => {
 
     <AchievementToast
       :show="showToast"
-      :console-name="toastConsoleName"
-      :duration="toastDuration"
+      :desc="toastDesc"
+      :points="toastPoints"
+      @dismiss="dismissToast"
     />
   </div>
 </template>

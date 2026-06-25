@@ -26,7 +26,10 @@ SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 # so neither the dispatch nor the spec can silently drift. Keys are (METHOD, path).
 ROUTES = {
     ("GET", "/health"):  "_r_health",
+    ("GET", "/meta"):    "_r_meta",
+    ("GET", "/games"):   "_r_games",
     ("GET", "/sources"): "_r_sources",
+    ("GET", "/extract"): "_r_extract",
 }
 
 
@@ -68,6 +71,26 @@ class Handler(BaseHTTPRequestHandler):
     def _r_health(self, qs):
         self._send(200, {"ok": True, "service": "cpc-translate", "port": PORT})
 
+    def _r_games(self, qs):
+        system = (qs.get("system") or [""])[0]
+        if not system:
+            self._send(400, {"error": "system required"})
+            return
+        rc, out = _run(["sh", os.path.join(SCRIPTS, "list-games.sh"), system])
+        if rc != 0:
+            self._send(502, {"error": "list failed", "detail": out[-500:]})
+            return
+        games = []
+        for line in out.splitlines():
+            path = line.strip()
+            if not path:
+                continue
+            base   = os.path.basename(path)
+            parent = os.path.basename(os.path.dirname(path))
+            name   = parent if base.lower() == "disc.gdi" else os.path.splitext(base)[0]
+            games.append({"name": name, "path": path})
+        self._send(200, {"games": games})
+
     def _r_sources(self, qs):
         path = (qs.get("path") or [""])[0]
         if not path:
@@ -78,6 +101,29 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, _last_json(out))
         except Exception:
             self._send(502, {"error": "sources failed", "detail": out[-500:]})
+
+    def _r_meta(self, qs):
+        path = (qs.get("path") or [""])[0]
+        if not path:
+            self._send(400, {"error": "path required"})
+            return
+        rc, out = _run(["python3", os.path.join(SCRIPTS, "dc_meta.py"), path], timeout=30)
+        try:
+            self._send(200, _last_json(out))
+        except Exception:
+            self._send(502, {"error": "meta failed", "detail": out[-500:]})
+
+    def _r_extract(self, qs):
+        path = (qs.get("path") or [""])[0]
+        safe = (qs.get("file") or [""])[0]
+        if not path or not safe:
+            self._send(400, {"error": "path and file required"})
+            return
+        rc, out = _run(["sh", os.path.join(SCRIPTS, "dc_extract.sh"), path, safe])
+        try:
+            self._send(200, _last_json(out))
+        except Exception:
+            self._send(502, {"error": "extract failed", "detail": out[-500:]})
 
 
 class Server(ThreadingMixIn, HTTPServer):
