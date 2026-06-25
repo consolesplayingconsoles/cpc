@@ -225,17 +225,21 @@ async function createProject() {
       pickError.value = 'That project already exists. Open it from Previous Projects below.'
       return
     }
-    // Hold on the picker (the Create button shows "Scanning…") until the disc is
-    // scanned and the FIRST source is loaded; then open the table with content.
-    selGameName.value = gameName
-    curNs.value       = ns
+    // Reach the table page IMMEDIATELY; the scan + first extract run THERE (the
+    // table shows a scanning state), so a big disc no longer freezes the picker.
+    selGameName.value  = gameName
+    curNs.value        = ns
     blocks.value       = []
     tabBlocks.value    = {}                                 // fresh project: no saved drafts
     speakerNames.value = {}
+    step.value         = 'table'
+    router.push(`/translation/${encodeURIComponent(ns)}`)  // watcher: ns===curNs → no-op
     await loadSources(selGame.value)
     if (!tabs.value.length) {
-      pickError.value = 'No translatable text found in this game.'
+      step.value  = 'pick'                                 // bounce back with the error
       curNs.value = ''
+      router.replace('/translation')
+      pickError.value = 'No translatable text found in this game.'
       return
     }
     // Persist the record + the primary source's blocks so resume is instant.
@@ -243,12 +247,12 @@ async function createProject() {
     await fetch(`${API_BASE}/translate/${encodeURIComponent(ns)}`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
+      // NB: no `total` here on purpose — persistTotal() is the sole writer of the
+      // aggregate, so the create POST can't clobber it back to the primary count.
       body:    JSON.stringify({ gameName, lang: selLang.value, system: selSystem.value,
-                                path: selGame.value, total: blocks.value.length, meta: meta.value,
+                                path: selGame.value, meta: meta.value,
                                 sources: { [primarySafe]: tabBlocks.value[primarySafe] || [] } }),
     })
-    step.value        = 'table'
-    router.push(`/translation/${encodeURIComponent(ns)}`)
     loadProjects()
   } catch {
     pickError.value = 'Could not extract this game.'
@@ -406,8 +410,9 @@ async function persistTotal() {
     await fetch(`${API_BASE}/translate/${encodeURIComponent(curNs.value)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ total: stats.total }),
+      body: JSON.stringify({ total: stats.value.total }),
     })
+    loadProjects()   // refresh the list so the card reflects the new aggregate
   } catch { /* offline — list keeps the old count */ }
 }
 
@@ -662,10 +667,16 @@ onMounted(() => {
         <span class="stat over">{{ stats.over }} overflow</span>
         <span class="tt-actions">
           <span v-if="buildMsg" class="tt-build-msg" :class="{ 'tt-build-msg--fail': buildFailed }">{{ buildMsg }}</span>
-          <UiButton class="tt-action" @click="saveDraft">{{ draftSaved ? 'Saved ✓' : 'Save draft' }}</UiButton>
-          <UiButton variant="primary" :disabled="building" @click="runBuild">{{ building ? 'Building…' : 'Build ROM' }}</UiButton>
+          <UiButton class="tt-action" :disabled="building || extracting" @click="saveDraft">{{ draftSaved ? 'Saved ✓' : 'Save draft' }}</UiButton>
+          <UiButton variant="primary" :disabled="building || extracting" @click="runBuild">{{ building ? 'Building…' : 'Build ROM' }}</UiButton>
         </span>
       </div>
+    </div>
+
+    <!-- Cold scan: we're already on the table page, so show progress HERE, not a frozen picker -->
+    <div v-if="discovering" class="tt-scanning">
+      <span class="tt-spinner" />
+      <span>Scanning disc for text… first time on a game takes a minute.</span>
     </div>
 
     <!-- Source tabs: one per discovered file (view order); they fill in as they load -->
@@ -696,12 +707,12 @@ onMounted(() => {
     />
 
     <!-- Table -->
-    <div class="tt-table-wrap">
+    <div v-if="!discovering" class="tt-table-wrap">
       <table class="tt-table">
         <thead>
           <tr>
             <th class="col-offset">Offset</th>
-            <th class="col-speaker">Speaker</th>
+            <th v-if="showLegend" class="col-speaker">Speaker</th>
             <th class="col-jp">Japanese</th>
             <th class="col-ca">{{ langLabel || 'Catalan' }}</th>
             <th class="col-bytes">Bytes</th>
@@ -715,7 +726,7 @@ onMounted(() => {
           >
             <td class="col-offset mono">{{ block.offset }}</td>
 
-            <td class="col-speaker">
+            <td v-if="showLegend" class="col-speaker">
               <!-- Speaker shown once per run; continuation rows get a thin colour line -->
               <template v-if="isFirstInRun(index)">
                 <div class="speaker-cell">
@@ -831,7 +842,7 @@ onMounted(() => {
 /* Source tabs (one per discovered file) */
 .tt-tabs {
   display: flex; flex-wrap: wrap; gap: 6px;
-  margin-top: 16px; padding-bottom: 12px; margin-bottom: 4px;
+  margin-top: 16px; padding-bottom: 12px; margin-bottom: 4px; margin-left: 4px;
   border-bottom: 1px solid var(--line);
 }
 .tt-tab {
@@ -1128,6 +1139,10 @@ onMounted(() => {
   display: flex; align-items: center; gap: 10px;
   font-size: 14px; opacity: 0.85;
 }
+.tt-scanning {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: 80px 24px; color: var(--text-muted); font-size: 14px;
+}
 .tt-translate-ok {
   margin: 0;
   padding: 12px 14px;
@@ -1172,11 +1187,16 @@ onMounted(() => {
 }
 .tt-proj-card { flex: 1; min-width: 0; }
 .tt-project-count {
-  margin-left: auto; flex-shrink: 0;
+  flex-shrink: 0;     /* no margin-left:auto — it would starve the card's flex-grow */
   font-size: 12px; color: var(--text-faint); font-family: var(--font-mono); white-space: nowrap;
+  transition: opacity 0.1s;
 }
+.tt-project:hover .tt-project-count { opacity: 0; }   /* yield to the actions on hover */
+/* Actions overlay the right edge — ABSOLUTE so they reserve no layout space
+   (in-flow opacity:0 was stealing ~70px, squeezing the card to half the row). */
 .tt-project-actions {
-  display: flex; gap: 4px; padding-right: 8px;
+  position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  display: flex; gap: 4px;
   opacity: 0; transition: opacity 0.1s;
 }
 .tt-project:hover .tt-project-actions { opacity: 1; }

@@ -1098,7 +1098,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self._cors_headers()
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
@@ -2567,6 +2567,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         st = json.load(f)
                 except Exception:
                     st = {}
+                # total: the persisted aggregate (persistTotal) wins; before it lands,
+                # fall back to the sum of saved sources, then legacy blocks.
+                if "total" in st:
+                    total = st["total"]
+                else:
+                    total = sum(len(v) for v in (st.get("sources") or {}).values()) \
+                        or len(st.get("blocks", []))
                 projects.append({
                     "ns":       name,
                     "gameName": st.get("gameName", name),
@@ -2574,7 +2581,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "system":   st.get("system", ""),
                     "path":     st.get("path", ""),
                     "meta":     st.get("meta"),
-                    "total":    st.get("total", len(st.get("blocks", []))),
+                    "total":    total,
                 })
         self._send(200, {"projects": projects})
 
