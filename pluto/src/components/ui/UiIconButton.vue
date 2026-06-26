@@ -4,12 +4,15 @@
 // `ghost` (transparent, faint → accent). Square-ish, one consistent size; the icon
 // (glyph, emoji, or <svg>) goes in the slot. title/@click/etc. fall through.
 //   <UiIconButton variant="ghost" title="Copy" @click="copy"><svg…/></UiIconButton>
-// `active` is the pressed/selected state for toggle icon buttons (accent fill).
-defineProps<{ variant?: 'bordered' | 'ghost'; disabled?: boolean; active?: boolean }>()
+// `active` = pressed/selected (accent fill, for toggles). `danger` = destructive
+// affordance (red on hover, e.g. delete).
+defineProps<{ variant?: 'bordered' | 'ghost'; disabled?: boolean; active?: boolean; danger?: boolean }>()
 </script>
 
 <template>
-  <button class="ui-ibtn" :class="[`ui-ibtn--${variant || 'bordered'}`, { 'ui-ibtn--active': active }]" :disabled="disabled">
+  <button class="ui-ibtn"
+          :class="[`ui-ibtn--${variant || 'bordered'}`, { 'ui-ibtn--active': active, 'ui-ibtn--danger': danger }]"
+          :disabled="disabled">
     <slot />
   </button>
 </template>
@@ -50,5 +53,10 @@ defineProps<{ variant?: 'bordered' | 'ghost'; disabled?: boolean; active?: boole
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-ink);
+}
+.ui-ibtn--danger:hover:not(:disabled) {
+  background: transparent;
+  border-color: var(--bad);
+  color: var(--bad);
 }
 </style>

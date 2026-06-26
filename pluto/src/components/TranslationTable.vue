@@ -7,6 +7,7 @@ import UiSelect from './ui/UiSelect.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 import UiClose from './ui/UiClose.vue'
+import UiSpinner from './ui/UiSpinner.vue'
 import MetadataCard from './MetadataCard.vue'
 import type { GameMeta } from './MetadataCard.vue'
 import SpeakerLegend from './SpeakerLegend.vue'
@@ -676,7 +677,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
       </UiButton>
 
       <div v-if="extracting" class="tt-translating">
-        <span class="tt-spinner" />
+        <UiSpinner />
         <span>Scanning disc for text… first time on a game takes a minute.</span>
       </div>
       <p v-if="pickError" class="tt-upload-error">{{ pickError }}</p>
@@ -706,7 +707,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
               </button>
               <div class="tt-project-actions">
                 <UiIconButton variant="bordered" title="Open project folder" @click="openProjectDir(p)">📁</UiIconButton>
-                <UiIconButton variant="bordered" title="Delete project" @click="deleteProject(p)">🗑</UiIconButton>
+                <UiIconButton variant="bordered" danger title="Delete project" @click="deleteProject(p)">🗑</UiIconButton>
               </div>
             </li>
           </ul>
@@ -744,7 +745,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 
     <!-- Cold scan: we're already on the table page, so show progress HERE, not a frozen picker -->
     <div v-if="discovering" class="tt-scanning">
-      <span class="tt-spinner" />
+      <UiSpinner />
       <span>Scanning disc for text… first time on a game takes a minute.</span>
     </div>
 
@@ -759,7 +760,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
               :title="t.file" @click="selectTab(t.safe)">
         <span class="tt-tab-kind">{{ tabLabel(t) }}</span>
         <span class="tt-tab-state">
-          <span v-if="tabState[t.safe] === 'loading'" class="tt-tab-spin"></span>
+          <UiSpinner v-if="tabState[t.safe] === 'loading'" :size="10" />
           <span v-else-if="tabState[t.safe] === 'ready'">{{ (tabBlocks[t.safe] || []).length }}</span>
           <span v-else-if="tabState[t.safe] === 'error'">!</span>
           <span v-else class="tt-tab-dot">·</span>
@@ -884,7 +885,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   border: 1px solid rgba(255, 152, 0, 0.4);
   border-radius: var(--r-sm);
   margin: var(--sp-3); padding: 6px 12px;
-  flex-shrink: 0; font-size: 12.5px; color: var(--text-secondary);
+  flex-shrink: 0; font-size: 12.5px; color: var(--text-muted);
 }
 .tt-disclaimer-text { flex: 1; }
 .tt-disclaimer-text strong { color: rgb(217, 119, 6); font-weight: 600; }
@@ -956,12 +957,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   color: var(--text-faint); min-width: 14px; text-align: right;
 }
 .tt-tab-dot { color: var(--line-strong); }
-.tt-tab-spin {
-  display: inline-block; width: 10px; height: 10px;
-  border: 2px solid var(--line-strong); border-top-color: var(--accent);
-  border-radius: 50%; animation: tt-spin .7s linear infinite;
-}
-@keyframes tt-spin { to { transform: rotate(360deg); } }
+/* spinners are now UiSpinner */
 
 .tt-discovering-note {
   display: flex; align-items: center; gap: 10px;
@@ -1238,16 +1234,6 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   border: 1.5px solid var(--line-strong);
   border-radius: 50%;
 }
-.tt-spinner {
-  display: inline-block;
-  width: 14px; height: 14px;
-  border: 2px solid var(--line-strong);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-.tt-spinner--sm { width: 12px; height: 12px; }
-@keyframes spin { to { transform: rotate(360deg); } }
 .tt-translating {
   display: flex; align-items: center; gap: 10px;
   font-size: 14px; opacity: 0.85;
