@@ -125,5 +125,5 @@ function copyPrompt() {
 }
 .pc__copyrow { display: flex; align-items: center; gap: 10px; }
 .pc__copy { align-self: flex-start; }
-.pc__copyhint { font-size: 12px; color: var(--text-secondary); }
+.pc__copyhint { font-size: 12px; color: var(--text-muted); }
 </style>

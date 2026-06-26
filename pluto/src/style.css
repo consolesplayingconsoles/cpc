@@ -23,8 +23,8 @@
 
   /* text */
   --text:        #1a2233;   /* primary text — soft dark slate, not pure black */
-  --text-muted:  #677084;   /* secondary / labels */
-  --text-faint:  #9aa1ad;   /* hints, disabled */
+  --text-muted:  #565d6e;   /* secondary / labels — WCAG AA (6.6:1 on white) */
+  --text-faint:  #6b7280;   /* hints / tertiary — WCAG AA (4.8:1); was #9aa1ad (2.6:1, read as disabled) */
 
   /* surfaces & lines */
   --surface:     #ffffff;   /* cards */

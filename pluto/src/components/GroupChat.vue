@@ -4,6 +4,7 @@ import type { NodeMap, NodeData } from '../composables/useNodes'
 import { ICONS } from '../composables/useIcons'
 import { useMessages } from '../composables/useMessages'
 import { useIdentity } from '../composables/useIdentity'
+import { readableBrand } from '../composables/useTheme'
 import ConsoleAvatar from './ConsoleAvatar.vue'
 import chatConfig from '../../config/chat.json'
 
@@ -46,7 +47,7 @@ function displayName(id: string) {
 function nameColor(id: string) {
   const node = nodeFor(id)
   if (node?.status === 'unconfigured') return 'var(--text-muted)'
-  return node?.color ?? '#888884'
+  return readableBrand(node?.color ?? '#888884')
 }
 
 function formatTime(ts: string) {
@@ -361,7 +362,7 @@ function onKeydown(e: KeyboardEvent) {
           <p class="sidebar-section">Online &mdash; {{ onlineMembers.length }}</p>
           <div v-for="n in onlineMembers" :key="n.id" class="member">
             <ConsoleAvatar :id="n.id" :icon="ICONS[n.id]" :status="n.status" :color="n.color" :size="36" />
-            <span class="member-name" :style="{ color: n.color ?? 'var(--text)' }">
+            <span class="member-name" :style="{ color: readableBrand(n.color ?? 'var(--text)') }">
               {{ displayName(n.id) }}
             </span>
           </div>

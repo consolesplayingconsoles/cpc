@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import UiButton from './ui/UiButton.vue'
 import UiActionRow from './ui/UiActionRow.vue'
+import UiSelect from './ui/UiSelect.vue'
 
 // A node command is just a chat message: "@handle verb [arg]". The shapes are
 // finite, so one component renders the right input and emits the assembled line;
@@ -59,9 +60,9 @@ function fire(arg?: string) {
       <span v-if="sent" class="cmd__sent">sent &check;</span>
     </div>
     <div class="cmd__row">
-      <select v-model="target" class="cmd__select">
+      <UiSelect v-model="target" class="cmd__select">
         <option v-for="t in targets" :key="t.value" :value="t.value">{{ t.label }}</option>
-      </select>
+      </UiSelect>
       <UiButton variant="primary" class="cmd__send" @click="fire(target)">Send</UiButton>
     </div>
   </div>
@@ -84,10 +85,8 @@ function fire(arg?: string) {
   background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px;
 }
 .cmd__row { display: flex; gap: 8px; align-items: center; }
-.cmd__select {
-  flex: 1; font: inherit; font-size: 13px; color: var(--text);
-  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px;
-}
+/* layout only — the field look comes from UiSelect */
+.cmd__select { flex: 1; }
 /* layout only — the terracotta look + hover + disabled now come from UiButton */
 .cmd__send { margin-top: 8px; }
 .cmd__row .cmd__send { margin-top: 0; }

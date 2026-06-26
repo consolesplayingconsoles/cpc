@@ -5,6 +5,7 @@ import PetIcon from './PetIcon.vue'
 import CopyButton from './CopyButton.vue'
 import ControlKeyboard from './ControlKeyboard.vue'
 import UiButton from './ui/UiButton.vue'
+import UiIconButton from './ui/UiIconButton.vue'
 import type { NodeMap } from '../composables/useNodes'
 
 interface Point { x: number; y: number }
@@ -669,9 +670,9 @@ async function signIn() {
       <span class="rb-time mono">{{ fmtClock(currentTime) }} / {{ fmtClock(duration) }}</span>
       <input class="rb-scrub" type="range" min="0" :max="duration" step="1" :value="currentTime" @input="seek" :disabled="!sel?.route?.length" />
       <div class="rb-speed" title="Playback speed">
-        <button class="rb-step" @click="stepSpeed(-1)" :disabled="speedIdx <= 0" title="Slower" aria-label="Slower">−</button>
+        <UiIconButton variant="bordered" @click="stepSpeed(-1)" :disabled="speedIdx <= 0" title="Slower" aria-label="Slower">−</UiIconButton>
         <span class="rb-speed-val mono">{{ speed }}×</span>
-        <button class="rb-step" @click="stepSpeed(1)" :disabled="speedIdx >= SPEEDS.length - 1" title="Faster" aria-label="Faster">+</button>
+        <UiIconButton variant="bordered" @click="stepSpeed(1)" :disabled="speedIdx >= SPEEDS.length - 1" title="Faster" aria-label="Faster">+</UiIconButton>
       </div>
 
       <!-- Output + Mapping + any drive error live in the Control rail now. -->
@@ -863,13 +864,7 @@ async function signIn() {
 .rb-tx-gear:hover { color: var(--accent); }
 .rb-speed { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
 .rb-speed-val { font-size: 12px; min-width: 30px; text-align: center; color: var(--text); }
-.rb-step {
-  font: inherit; font-size: 14px; line-height: 1; width: 22px; height: 22px; cursor: pointer;
-  display: grid; place-items: center; color: var(--text);
-  border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface);
-}
-.rb-step:hover:not(:disabled) { border-color: var(--accent); }
-.rb-step:disabled { opacity: 0.4; cursor: default; }
+/* the speed steppers are now UiIconButton bordered */
 
 /* Tall/narrow window (e.g. Pluto docked beside an emulator): stack the map over the
    side column so each keeps usable width; the side then runs controller | clip. */

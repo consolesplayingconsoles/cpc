@@ -7,6 +7,7 @@ import NodeCommand from './NodeCommand.vue'
 import CopyButton from './CopyButton.vue'
 import UiClose from './ui/UiClose.vue'
 import UiActionRow from './ui/UiActionRow.vue'
+import UiIconButton from './ui/UiIconButton.vue'
 import chatConfig from '../../config/chat.json'
 
 interface Cmd  { verb: string; desc?: string; target?: string; multiline?: boolean; url?: string; script?: string; credit?: string }
@@ -170,7 +171,7 @@ function postCommand(text: string) {
           <p class="nd__lbl">{{ instanceSuffix }}</p>
           <!-- "Lab" + folder + gear reads as "Lab config dir": the section label IS
                the label, the icon (no text) is the action — open it in your IDE. -->
-          <button v-if="showLabConfig" class="nd__cfg" title="Open the Lab config folder in your disk" @click="emit('open-config')">
+          <UiIconButton v-if="showLabConfig" variant="bordered" class="nd__cfg" title="Open the Lab config folder in your disk" @click="emit('open-config')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 6A1.5 1.5 0 0 1 4.5 4.5H7.5L9 6h3.5A1.5 1.5 0 0 1 14 7.5V9"/>
               <path d="M3 6v8A1.5 1.5 0 0 0 4.5 15.5H8"/>
@@ -178,7 +179,7 @@ function postCommand(text: string) {
               <circle cx="15.5" cy="15.5" r="1.4" fill="currentColor" stroke="none"/>
               <path d="M15.5 9.3v1.6M15.5 20.1v1.6M21.7 15.5h-1.6M10.9 15.5H9.3M19.9 11.1l-1.1 1.1M12.2 18.8l-1.1 1.1M19.9 19.9l-1.1-1.1M12.2 12.2l-1.1-1.1"/>
             </svg>
-          </button>
+          </UiIconButton>
         </div>
         <UiActionRow v-if="showDeploy" :disabled="deploying || offline" @click="emit('deploy')">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l4 4M12 3l-4 4M12 3v12"/><path d="M5 21h14"/></svg>
@@ -312,13 +313,7 @@ function postCommand(text: string) {
    together read as "Lab config dir". A quiet icon button, no text, no full row. */
 .nd__lbl-row { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
 .nd__lbl-row .nd__lbl { margin: 0; }
-.nd__cfg {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; padding: 0;
-  color: var(--text-muted);
-  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; cursor: pointer;
-}
-.nd__cfg:hover { background: var(--surface-2); border-color: var(--line-strong); color: var(--accent); }
+/* frame is UiIconButton; just size the gear glyph */
 .nd__cfg svg { width: 19px; height: 19px; flex: 0 0 auto; }
 
 /* Pico fleet rows: one card per declared board. The chip id is the board's identity,
