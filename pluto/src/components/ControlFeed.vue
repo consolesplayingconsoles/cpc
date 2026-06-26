@@ -4,6 +4,7 @@
 // (Vision scan results). The caller owns the data; the component owns the scroll
 // and the layout.
 import { ref, watch, nextTick } from 'vue'
+import UiButton from './ui/UiButton.vue'
 
 export interface FeedLine {
   role?:  string
@@ -74,7 +75,7 @@ watch(() => props.lines, async () => {
       <input class="cf-input" v-model="cmd"
              :placeholder="placeholder ?? 'Type a message…'"
              @keydown.enter="sendCmd" />
-      <button class="cf-send" :disabled="!cmd.trim()" @click="sendCmd">Send</button>
+      <UiButton variant="primary" class="cf-send" :disabled="!cmd.trim()" @click="sendCmd">Send</UiButton>
     </div>
 
     <slot name="footer" />
@@ -114,14 +115,8 @@ watch(() => props.lines, async () => {
 }
 .cf-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .cf-input::placeholder { color: var(--text-faint); }
-.cf-send {
-  flex: 0 0 auto; font-family: var(--font-sans); font-size: 13px; font-weight: 600;
-  color: var(--accent-ink); cursor: pointer; padding: 9px 18px;
-  border: 0; border-radius: var(--r-sm); background: var(--accent);
-  transition: background 0.12s;
-}
-.cf-send:hover:not(:disabled) { background: var(--accent-hover); }
-.cf-send:disabled { opacity: 0.5; cursor: default; }
+/* layout only — the terracotta look now comes from UiButton */
+.cf-send { flex: 0 0 auto; }
 .cf-thumb {
   flex: 0 0 auto; font-size: 18px; line-height: 1; padding: 6px 8px;
   border: 1px solid var(--line-strong); border-radius: var(--r-sm);

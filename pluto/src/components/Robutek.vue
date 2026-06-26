@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import PetIcon from './PetIcon.vue'
 import CopyButton from './CopyButton.vue'
 import ControlKeyboard from './ControlKeyboard.vue'
+import UiButton from './ui/UiButton.vue'
 import type { NodeMap } from '../composables/useNodes'
 
 interface Point { x: number; y: number }
@@ -522,7 +523,7 @@ async function signIn() {
         <label class="rb-field"><span>Password</span>
           <input v-model="password" name="password" type="password" autocomplete="current-password" placeholder="••••••••" :disabled="submitting" required />
         </label>
-        <button class="rb-primary" type="submit" :disabled="submitting || !email || !password">{{ submitting ? 'Signing in…' : 'Sign in' }}</button>
+        <UiButton variant="primary" class="rb-primary" type="submit" :loading="submitting" loading-text="Signing in…" :disabled="!email || !password">Sign in</UiButton>
         <p v-if="loginError" class="rb-login-err">{{ loginError }}</p>
       </form>
     </div>
@@ -763,12 +764,8 @@ async function signIn() {
   padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface);
 }
 .rb-field input:focus, .rb-field select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.rb-primary {
-  margin-top: 4px; padding: 10px; font: inherit; font-weight: 600; font-size: 14px;
-  border: 0; border-radius: var(--r-sm); background: var(--accent); color: var(--accent-ink); cursor: pointer;
-}
-.rb-primary:hover:not(:disabled) { background: var(--accent-hover); }
-.rb-primary:disabled { opacity: 0.5; cursor: default; }
+/* layout only — terracotta look, hover, disabled + the loading spinner come from UiButton */
+.rb-primary { margin-top: 4px; }
 .rb-login-err { font-size: 13px; color: var(--bad); margin: 0; }
 
 /* ── main ── */

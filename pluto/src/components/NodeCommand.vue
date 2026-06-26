@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import UiButton from './ui/UiButton.vue'
+import UiActionRow from './ui/UiActionRow.vue'
 
 // A node command is just a chat message: "@handle verb [arg]". The shapes are
 // finite, so one component renders the right input and emits the assembled line;
@@ -33,11 +35,11 @@ function fire(arg?: string) {
 
 <template>
   <!-- command -->
-  <button v-if="kind === 'button'" class="cmd cmd--btn" @click="fire()">
+  <UiActionRow v-if="kind === 'button'" @click="fire()">
     <span class="cmd__label">{{ label }}</span>
     <span v-if="cmd.desc" class="cmd__desc">{{ cmd.desc }}</span>
     <span v-if="sent" class="cmd__sent">sent &check;</span>
-  </button>
+  </UiActionRow>
 
   <!-- command + text -->
   <div v-else-if="kind === 'text'" class="cmd cmd--form">
@@ -46,7 +48,7 @@ function fire(arg?: string) {
       <span v-if="sent" class="cmd__sent">sent &check;</span>
     </div>
     <textarea v-model="text" class="cmd__text" :placeholder="cmd.desc || 'Write…'" rows="3"></textarea>
-    <button class="cmd__send" :disabled="!text.trim()" @click="fire(text.trim())">Send</button>
+    <UiButton variant="primary" class="cmd__send" :disabled="!text.trim()" @click="fire(text.trim())">Send</UiButton>
   </div>
 
   <!-- command + node -->
@@ -60,19 +62,14 @@ function fire(arg?: string) {
       <select v-model="target" class="cmd__select">
         <option v-for="t in targets" :key="t.value" :value="t.value">{{ t.label }}</option>
       </select>
-      <button class="cmd__send" @click="fire(target)">Send</button>
+      <UiButton variant="primary" class="cmd__send" @click="fire(target)">Send</UiButton>
     </div>
   </div>
 </template>
 
 <style scoped>
 .cmd { width: 100%; margin-bottom: 8px; }
-.cmd--btn {
-  display: flex; align-items: center; gap: 8px;
-  padding: 9px 12px; text-align: left;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
-}
-.cmd--btn:hover { background: var(--surface-2); border-color: var(--line-strong); }
+/* the command-button row frame is now UiActionRow */
 .cmd--form {
   padding: 10px 12px;
   background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;
@@ -91,11 +88,7 @@ function fire(arg?: string) {
   flex: 1; font: inherit; font-size: 13px; color: var(--text);
   background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px;
 }
-.cmd__send {
-  margin-top: 8px; padding: 7px 14px; font-size: 13px; font-weight: 500;
-  color: var(--accent-ink); background: var(--accent); border: none; border-radius: 8px; cursor: pointer;
-}
+/* layout only — the terracotta look + hover + disabled now come from UiButton */
+.cmd__send { margin-top: 8px; }
 .cmd__row .cmd__send { margin-top: 0; }
-.cmd__send:hover:not(:disabled) { background: var(--accent-hover); }
-.cmd__send:disabled { opacity: 0.5; cursor: default; }
 </style>

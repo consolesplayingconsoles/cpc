@@ -27,6 +27,7 @@ class _StubLink(object):
     def close(self): pass
     def send(self, frame):
         self.sent.append(bytes(frame))
+    def read1(self): return None    # no rumble bytes in tests; the reader thread just idles
 
 
 # Patch UartLink before importing HidBridge

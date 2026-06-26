@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { API_BASE } from '../composables/useNodes'
 import { useAchievement } from '../composables/useAchievement'
 import UiSelect from './ui/UiSelect.vue'
 import UiButton from './ui/UiButton.vue'
+import UiIconButton from './ui/UiIconButton.vue'
+import UiClose from './ui/UiClose.vue'
 import MetadataCard from './MetadataCard.vue'
 import type { GameMeta } from './MetadataCard.vue'
 import SpeakerLegend from './SpeakerLegend.vue'
+import PromptCopier from './PromptCopier.vue'
 
 const route  = useRoute()
 const router = useRouter()
@@ -63,8 +66,12 @@ function speakerColor(id: number) {
   return `hsl(${(id * 67) % 360}, 42%, 58%)`              // stable, distinct-ish for the rest
 }
 
+// The game's font is FULL-WIDTH Shift-JIS: every character costs 2 bytes, and
+// accents fold to base Latin (à→a, the stock font has no accented glyphs). So the
+// real ROM cost is 2 * (folded char count) — NOT the UTF-8 length, which ran ~half.
 function caBytes(text: string) {
-  return new TextEncoder().encode(text).length
+  const folded = text.normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return folded.length * 2
 }
 
 function byteStatus(block: Block): 'pending' | 'ok' | 'warn' | 'over' {
@@ -232,6 +239,7 @@ async function createProject() {
     blocks.value       = []
     tabBlocks.value    = {}                                 // fresh project: no saved drafts
     speakerNames.value = {}
+    toneLinks.value    = ''
     step.value         = 'table'
     router.push(`/translation/${encodeURIComponent(ns)}`)  // watcher: ns===curNs → no-op
     await loadSources(selGame.value)
@@ -273,6 +281,7 @@ async function openNs(ns: string) {
       curNs.value       = ns
       tabBlocks.value    = (data.sources as Record<string, Block[]>) || {}   // preload saved drafts
       speakerNames.value = (data.speakers as Record<string, Record<number, string>>) || {}
+      toneLinks.value    = (data.toneLinks as string) || ''
       blocks.value       = []
       step.value        = 'table'
       loadSources(data.path as string)   // tabs reuse saved drafts, fetch the rest
@@ -358,6 +367,39 @@ function tabLabel(t: SourceTab): string {
   const base = (t.file.split(/[\\/]/).pop() || t.file).replace(/\.[^.]+$/, '')
   return `${base} (${(KIND_LABEL[t.kind] || t.kind).toUpperCase()})`
 }
+
+// ── Prompt rail: the Claude translation prompt + per-project reference links ──
+const RAIL_KEY = 'cpc.translate.rail'
+const railOpen = ref(localStorage.getItem(RAIL_KEY) === '1')
+function toggleRail() {
+  railOpen.value = !railOpen.value
+  try { localStorage.setItem(RAIL_KEY, railOpen.value ? '1' : '0') } catch { /* ignore */ }
+}
+const toneLinks = ref('')                                  // reference links, per project
+let toneSaveTimer: ReturnType<typeof setTimeout> | undefined
+function onToneLinks(v: string) {
+  toneLinks.value = v
+  clearTimeout(toneSaveTimer)
+  toneSaveTimer = setTimeout(saveToneLinks, 700)           // debounce while typing
+}
+async function saveToneLinks() {
+  if (!curNs.value) return
+  try {
+    await fetch(`${API_BASE}/translate/${encodeURIComponent(curNs.value)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ toneLinks: toneLinks.value }),
+    })
+  } catch { /* offline — links stay local */ }
+}
+// The active source, named for the prompt (kind label + on-disc filename).
+const activeTabObj   = computed(() => tabs.value.find(t => t.safe === activeTab.value))
+const activeKindLabel = computed(() => { const t = activeTabObj.value; return t ? (KIND_LABEL[t.kind] || t.kind) : 'Text' })
+const activeFileName  = computed(() => { const f = activeTabObj.value?.file || ''; return f.split(/[\\/]/).pop() || f })
+// While the rail is open, keep the active source persisted in state.json.sources so
+// the prompt's GET (json in) actually finds it — Claude reads + writes the same key.
+watch([railOpen, activeTab], () => {
+  if (railOpen.value && curNs.value && activeTab.value && blocks.value.length) saveState()
+})
 function mapBlocks(raw: { offset: number; jpBytes: number; hex: string; speaker: number }[]): Block[] {
   return (raw || []).map(b => ({
     offset:    '0x' + b.offset.toString(16).toUpperCase().padStart(6, '0'),
@@ -550,10 +592,37 @@ async function onSystemChange() {
 
 watch(selSystem, onSystemChange)   // refresh games when the system changes
 
+// External translators (Claude via cpc) write straight to state.json, so the open
+// table won't see them without a poll. Pull the saved state and merge changed `ca`
+// IN PLACE (mutate, don't replace) so only the changed rows re-render — never the
+// whole 7k-row table. Paused while an input is focused, so it can't clobber typing.
+let pollTimer: ReturnType<typeof setInterval> | undefined
+async function pollSaved() {
+  if (step.value !== 'table' || !curNs.value || stats.value.pending === 0) return
+  const ae = document.activeElement as HTMLElement | null
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return
+  const ns = curNs.value
+  try {
+    const res  = await fetch(`${API_BASE}/translate/${encodeURIComponent(ns)}`)
+    const data = await res.json()
+    if (ns !== curNs.value || !data || !data.sources) return     // navigated away mid-fetch
+    const src = data.sources as Record<string, Block[]>
+    for (const safe of Object.keys(tabBlocks.value)) {
+      const local = tabBlocks.value[safe], remote = src[safe]
+      if (!remote || !local || remote.length !== local.length) continue
+      for (let i = 0; i < local.length; i++) {
+        if (local[i].ca !== remote[i].ca) local[i].ca = remote[i].ca
+      }
+    }
+  } catch { /* offline — try again next tick */ }
+}
+
 onMounted(() => {
   loadSystems()
   loadProjects()
+  pollTimer = setInterval(pollSaved, 5000)
 })
+onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
 
 <template>
@@ -562,7 +631,7 @@ onMounted(() => {
     <!-- ── EXPERIMENTAL DISCLAIMER (compact, dismissible for the session) ── -->
     <div v-if="!disclaimerDismissed" class="tt-disclaimer">
       <span class="tt-disclaimer-text"><strong>⚠️ Experimental</strong> Extraction is game-specific and WIP; expect broken ROMs &amp; corrupted text.</span>
-      <button class="tt-disclaimer-x" title="Hide for this session" @click="dismissDisclaimer">×</button>
+      <UiClose class="tt-disclaimer-x" title="Hide for this session" @click="dismissDisclaimer" />
     </div>
 
     <!-- ── Pick language + game, open the translation table ── -->
@@ -602,8 +671,8 @@ onMounted(() => {
         </UiSelect>
       </div>
 
-      <UiButton variant="primary" :disabled="!selGame || !selLang || extracting" @click="createProject">
-        {{ extracting ? 'Scanning…' : 'Create' }}
+      <UiButton variant="primary" :loading="extracting" :disabled="!selGame || !selLang" loading-text="Scanning…" @click="createProject">
+        Create
       </UiButton>
 
       <div v-if="extracting" class="tt-translating">
@@ -636,8 +705,8 @@ onMounted(() => {
                 <span class="tt-project-count">{{ p.total.toLocaleString() }} blocks</span>
               </button>
               <div class="tt-project-actions">
-                <button class="tt-project-dir" title="Open project folder" @click="openProjectDir(p)">📁</button>
-                <button class="tt-project-dir tt-project-del" title="Delete project" @click="deleteProject(p)">🗑</button>
+                <UiIconButton variant="bordered" title="Open project folder" @click="openProjectDir(p)">📁</UiIconButton>
+                <UiIconButton variant="bordered" title="Delete project" @click="deleteProject(p)">🗑</UiIconButton>
               </div>
             </li>
           </ul>
@@ -668,7 +737,7 @@ onMounted(() => {
         <span class="tt-actions">
           <span v-if="buildMsg" class="tt-build-msg" :class="{ 'tt-build-msg--fail': buildFailed }">{{ buildMsg }}</span>
           <UiButton class="tt-action" :disabled="building || extracting" @click="saveDraft">{{ draftSaved ? 'Saved ✓' : 'Save draft' }}</UiButton>
-          <UiButton variant="primary" :disabled="building || extracting" @click="runBuild">{{ building ? 'Building…' : 'Build ROM' }}</UiButton>
+          <UiButton variant="primary" :loading="building" :disabled="extracting" loading-text="Building…" @click="runBuild">Build ROM</UiButton>
         </span>
       </div>
     </div>
@@ -678,6 +747,10 @@ onMounted(() => {
       <span class="tt-spinner" />
       <span>Scanning disc for text… first time on a game takes a minute.</span>
     </div>
+
+    <!-- Main work area (tabs + table) beside the collapsible Claude-prompt rail -->
+    <div v-else class="tt-body">
+    <div class="tt-main">
 
     <!-- Source tabs: one per discovered file (view order); they fill in as they load -->
     <div class="tt-tabs" v-if="tabs.length">
@@ -707,7 +780,7 @@ onMounted(() => {
     />
 
     <!-- Table -->
-    <div v-if="!discovering" class="tt-table-wrap">
+    <div class="tt-table-wrap">
       <table class="tt-table">
         <thead>
           <tr>
@@ -752,7 +825,7 @@ onMounted(() => {
                   rows="2"
                   @change="saveState"
                 />
-                <button class="suggest-btn" title="Suggest shorter variants">↩</button>
+                <UiIconButton variant="bordered" class="suggest-btn" title="Suggest shorter variants">↩</UiIconButton>
               </div>
             </td>
 
@@ -767,6 +840,30 @@ onMounted(() => {
         </tbody>
       </table>
     </div>
+    </div><!-- /tt-main -->
+
+      <!-- Collapsible Claude-prompt rail: a thin tab when closed, the copier when open -->
+      <aside class="tt-rail" :class="{ 'tt-rail--open': railOpen }">
+        <button class="tt-rail-tab" :title="railOpen ? 'Hide prompt' : 'Claude translation prompt'" @click="toggleRail">
+          {{ railOpen ? '›' : 'Automatic Translation' }}
+        </button>
+        <div class="tt-rail-body">
+          <PromptCopier
+            :title="selGameName"
+            :target="langLabel || 'Català'"
+            :file="activeFileName"
+            :safe="activeTab"
+            :kind-label="activeKindLabel"
+            :ns="curNs"
+            :api-base="API_BASE"
+            :blocks="blocks"
+            :speaker-names="activeNames"
+            :model-value="toneLinks"
+            @update:model-value="onToneLinks"
+          />
+        </div>
+      </aside>
+    </div><!-- /tt-body -->
     </template><!-- end v-else (table view) -->
 
   </div>
@@ -791,11 +888,8 @@ onMounted(() => {
 }
 .tt-disclaimer-text { flex: 1; }
 .tt-disclaimer-text strong { color: rgb(217, 119, 6); font-weight: 600; }
-.tt-disclaimer-x {
-  border: none; background: none; cursor: pointer;
-  color: var(--text-faint); font-size: 18px; line-height: 1; padding: 0 4px; flex-shrink: 0;
-}
-.tt-disclaimer-x:hover { color: var(--text); }
+/* layout only — the close look comes from UiClose */
+.tt-disclaimer-x { flex-shrink: 0; }
 
 .tt-header {
   display: flex;
@@ -872,6 +966,38 @@ onMounted(() => {
 .tt-discovering-note {
   display: flex; align-items: center; gap: 10px;
   padding: 16px 4px; color: var(--text-faint); font-size: 13px;
+}
+
+/* Table-page body: main work area + collapsible Claude-prompt rail */
+/* The prompt rail OVERLAYS the table (absolute + slide), so opening it never
+   reflows / re-renders the 7k-row table. The tab rides the panel's left edge. */
+.tt-body { position: relative; display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.tt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.tt-rail {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: 360px; max-width: 80%; z-index: 6;
+  background: var(--surface);            /* opaque — the table must not show through */
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+}
+.tt-rail--open { transform: translateX(0); box-shadow: -10px 0 30px rgba(0, 0, 0, 0.14); }
+.tt-rail-tab {
+  position: absolute; right: 100%; top: 50%; transform: translateY(-50%);
+  width: 34px; padding: 18px 0;
+  writing-mode: vertical-rl; text-orientation: mixed;
+  background: var(--accent); border: none; border-radius: 8px 0 0 8px;
+  cursor: pointer; color: #fff; font-size: 12px; font-weight: 600; letter-spacing: 0.06em;
+  box-shadow: -2px 0 10px rgba(0, 0, 0, 0.12); transition: filter 0.1s;
+}
+.tt-rail-tab:hover { filter: brightness(1.08); }
+.tt-rail--open .tt-rail-tab {
+  writing-mode: horizontal-tb; width: 28px; padding: 8px 0;
+  font-size: 18px; font-weight: 400;   /* stays terracotta, just the collapse chevron */
+}
+.tt-rail-body {
+  height: 100%; box-sizing: border-box;
+  padding: var(--sp-3); overflow-y: auto;
+  border-left: 1px solid var(--line); background: var(--surface);
 }
 
 .tt-table-wrap {
@@ -1052,21 +1178,8 @@ onMounted(() => {
   outline: none;
   border-color: var(--accent);
 }
-.suggest-btn {
-  padding: var(--sp-1) var(--sp-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 12px;
-  flex-shrink: 0;
-  transition: border-color 0.1s, color 0.1s;
-}
-.suggest-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
+/* layout only — the bordered look comes from UiIconButton */
+.suggest-btn { flex-shrink: 0; }
 
 /* Bytes */
 .bytes-cell {
@@ -1200,13 +1313,7 @@ onMounted(() => {
   opacity: 0; transition: opacity 0.1s;
 }
 .tt-project:hover .tt-project-actions { opacity: 1; }
-.tt-project-dir {
-  padding: 5px 7px; border: 1px solid var(--line); border-radius: var(--r-sm);
-  background: var(--surface); cursor: pointer; font-size: 13px; line-height: 1;
-  transition: background 0.1s, border-color 0.1s, color 0.1s;
-}
-.tt-project-dir:hover { background: var(--surface); border-color: var(--line-strong); }
-.tt-project-del:hover { border-color: var(--bad); color: var(--bad); }
+/* 📁/🗑 icon buttons are now <UiIconButton variant="bordered"> */
 .tt-back { margin-right: 12px; }
 .tt-disc-next  { align-self: center; }
 .tt-disc-card {

@@ -1,0 +1,69 @@
+#!/bin/sh
+# cpc -- CPC translation-workbench helper for the "Automatic Translation" prompt.
+#
+# This is the abstraction layer between the generated prompt and the API: the
+# prompt only ever calls `cpc get` / `cpc put`, so the workbench's endpoints or
+# payload shape can change here WITHOUT regenerating or re-copying the prompt.
+#
+#   cpc get <ns> <file>     print the source's JSON array (state.json .sources[<file>])
+#   cpc put <ns> <file>     read the updated array on STDIN, write it back
+#
+# <ns>   = the project namespace (e.g. "Boku Doraemon (Japan) [ca]")
+# <file> = the source key shown in the prompt (e.g. "STORY.PAC")
+#
+# Talks to http://localhost:7700 by default; override with CPC_API=http://host:7700.
+set -eu
+
+API="${CPC_API:-http://localhost:7700}"
+cmd="${1:-}"; ns="${2:-}"; file="${3:-}"
+[ -n "$cmd" ] && [ -n "$ns" ] && [ -n "$file" ] || {
+  echo "usage: cpc get|put <ns> <file>   (put reads the array on stdin)" >&2; exit 1; }
+
+url="$API/translate/$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$ns")"
+
+case "$cmd" in
+  get)
+    # Fetch the project, print just this source's array (jp / jpBytes / ca per line).
+    curl -fsS "$url" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+arr = (data.get("sources") or {}).get(sys.argv[1], [])
+print(json.dumps(arr, ensure_ascii=False))
+' "$file"
+    ;;
+  put)
+    # stdin = a JSON array of translation STRINGS, in order. They're written into the
+    # source's existing lines BY POSITION starting at <start> (default 0), so the
+    # translator can't reorder/dedupe/drift, and each batch persists immediately.
+    # jp/jpBytes/offset are preserved; out-of-bounds is rejected.
+    start="${4:-0}"
+    tmp=$(mktemp); body="$tmp.body"; trap 'rm -f "$tmp" "$body"' EXIT
+    cat > "$tmp"
+    curl -fsS "$url" | python3 -c '
+import json, sys
+cur = json.load(sys.stdin)
+with open(sys.argv[2]) as f: ca = json.load(f)
+blocks = (cur.get("sources") or {}).get(sys.argv[1], [])
+start = int(sys.argv[4])
+if not isinstance(ca, list):
+    sys.stderr.write("cpc: stdin must be a JSON array of translation strings\n"); sys.exit(2)
+if ca and isinstance(ca[0], dict):
+    sys.stderr.write("cpc: got objects, not strings -- submit just the translation strings "
+                     "IN ORDER (re-copy the prompt from the workbench)\n"); sys.exit(2)
+if any(not isinstance(x, str) for x in ca):
+    sys.stderr.write("cpc: every item must be a translation string\n"); sys.exit(2)
+if start < 0 or start + len(ca) > len(blocks):
+    sys.stderr.write("cpc: batch [%d:%d] out of bounds for %d lines -- check the start index\n"
+                     % (start, start + len(ca), len(blocks))); sys.exit(2)
+for i, t in enumerate(ca): blocks[start + i]["ca"] = t
+with open(sys.argv[3], "w") as f:
+    json.dump({"sources": {sys.argv[1]: blocks}}, f, ensure_ascii=False)
+sys.stderr.write("cpc: wrote %d lines at [%d:%d]\n" % (len(ca), start, start + len(ca)))
+' "$file" "$tmp" "$body" "$start"
+    curl -fsS -X PUT "$url" -H "Content-Type: application/json" --data-binary @"$body"
+    echo
+    ;;
+  *)
+    echo "cpc: unknown command '$cmd' (use get or put)" >&2; exit 1
+    ;;
+esac
