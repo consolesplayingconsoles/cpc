@@ -5,6 +5,8 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import ControlCapture from './ControlCapture.vue'
 import ControlKeyboard from './ControlKeyboard.vue'
+import UiClose from './ui/UiClose.vue'
+import UiIconButton from './ui/UiIconButton.vue'
 
 const props = defineProps<{
   active:     boolean
@@ -289,7 +291,7 @@ function fmtTime(ts: number) {
           <template v-if="imageUrl">
             <img :src="imageUrl" class="gl-strip-thumb" alt="test" />
             <span class="gl-strip-name">Test image</span>
-            <button class="gl-strip-x" @click.stop="clearImage" title="Clear">×</button>
+            <UiClose class="gl-strip-x" @click.stop="clearImage" title="Clear" />
           </template>
           <template v-else-if="captureRunning">
             <span class="gl-strip-hint">Stop capture to test an image</span>
@@ -310,19 +312,15 @@ function fmtTime(ts: number) {
         <div class="gl-output-head">
           <div class="gl-output-head-row">
             <span class="gl-output-title">Vision Output</span>
-            <button class="gl-icon-btn" :class="{ 'gl-icon-btn--active': subtitleMode }"
-                    @click="subtitleMode = !subtitleMode"
-                    :title="subtitleMode ? 'Exit subtitle mode' : 'Subtitle mode: full-width, larger text'">
+            <UiIconButton variant="bordered" :active="subtitleMode"
+                          @click="subtitleMode = !subtitleMode"
+                          :title="subtitleMode ? 'Exit subtitle mode' : 'Subtitle mode: full-width, larger text'">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
                 <rect x="1" y="4" width="14" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
                 <path d="M4 8h4M4 10.5h2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
               </svg>
-            </button>
-            <button v-if="results.length" class="gl-icon-btn" @click="clearResults" title="Clear results">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              </svg>
-            </button>
+            </UiIconButton>
+            <UiClose v-if="results.length" @click="clearResults" title="Clear results" />
           </div>
           <div v-if="usage.count || translateUsage.count" class="gl-quota-block mono">
             <span class="gl-quota-row"><span class="gl-quota-label">Vision</span>{{ usage.count }} / {{ MONTHLY_CAP }} scans</span>
@@ -429,13 +427,8 @@ function fmtTime(ts: number) {
 .gl-strip--loaded { min-height: 80px; }
 .gl-strip-thumb  { width: 110px; height: 66px; object-fit: cover; border-radius: var(--r-sm); flex-shrink: 0; }
 .gl-strip-name   { font-size: 11px; color: var(--text-muted); flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gl-strip-x {
-  flex-shrink: 0; width: 20px; height: 20px; padding: 0;
-  font-size: 14px; font-weight: 700; line-height: 1; cursor: pointer;
-  color: var(--text-muted); background: var(--surface-3); border: none; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center; transition: background 0.1s;
-}
-.gl-strip-x:hover { background: var(--line-strong); }
+/* layout only — the close look comes from UiClose */
+.gl-strip-x { flex-shrink: 0; }
 
 .gl-output-head {
   flex: 0 0 auto; display: flex; flex-direction: column; gap: var(--sp-1);
@@ -452,15 +445,7 @@ function fmtTime(ts: number) {
 .gl-quota-row   { font-size: 11px; color: var(--text-faint); display: flex; gap: var(--sp-3); }
 .gl-quota-label { font-weight: 600; color: var(--text-muted); min-width: 62px; }
 
-.gl-icon-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px; padding: 0; border-radius: var(--r-sm);
-  border: 1px solid var(--line-strong); background: var(--surface-3);
-  color: var(--text-muted); cursor: pointer; transition: background 0.1s, color 0.1s;
-}
-.gl-icon-btn:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-.gl-icon-btn:disabled { opacity: 0.35; cursor: default; }
-.gl-icon-btn--active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+/* the Vision-output icon buttons are now UiIconButton (toggle) + UiClose */
 
 .gl-output {
   flex: 1 1 0; overflow-y: auto; padding: var(--sp-3) var(--sp-4);

@@ -5,6 +5,8 @@ import { API_BASE } from '../composables/useNodes'
 import NodeBubble from './NodeBubble.vue'
 import NodeCommand from './NodeCommand.vue'
 import CopyButton from './CopyButton.vue'
+import UiClose from './ui/UiClose.vue'
+import UiActionRow from './ui/UiActionRow.vue'
 import chatConfig from '../../config/chat.json'
 
 interface Cmd  { verb: string; desc?: string; target?: string; multiline?: boolean; url?: string; script?: string; credit?: string }
@@ -134,9 +136,7 @@ function postCommand(text: string) {
 
 <template>
   <aside class="nd" @click.stop @wheel.stop>
-    <button class="nd__x" title="Close" aria-label="Close" @click="emit('close')">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-    </button>
+    <UiClose class="nd__x" title="Close" aria-label="Close" @click="emit('close')" />
 
     <!-- Header = the SAME bubble as the diagram (LED, OS badge, name, IP), just bigger. -->
     <header class="nd__head">
@@ -153,16 +153,16 @@ function postCommand(text: string) {
     <template v-if="isInstanceNode">
       <section class="nd__sec">
         <p class="nd__lbl">Pluto</p>
-        <button v-if="!isSelfInstance" class="nd__act" :disabled="offline" @click="openExternal(dashUrl)">
+        <UiActionRow v-if="!isSelfInstance" :disabled="offline" @click="openExternal(dashUrl)">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
           <span>{{ dashLabel }}</span>
           <span class="nd__ext">&#8599;</span>
-        </button>
-        <button class="nd__act" @click="openExternal(retroUrl)">
+        </UiActionRow>
+        <UiActionRow @click="openExternal(retroUrl)">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9h2M7 13h4"/><circle cx="16" cy="10" r="1.3"/><circle cx="16" cy="14" r="1.3"/></svg>
           <span>{{ retroLabel }}</span>
           <span class="nd__ext">&#8599;</span>
-        </button>
+        </UiActionRow>
       </section>
 
       <section v-if="instanceHasOps" class="nd__sec">
@@ -180,11 +180,11 @@ function postCommand(text: string) {
             </svg>
           </button>
         </div>
-        <button v-if="showDeploy" class="nd__act" :disabled="deploying || offline" @click="emit('deploy')">
+        <UiActionRow v-if="showDeploy" :disabled="deploying || offline" @click="emit('deploy')">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l4 4M12 3l-4 4M12 3v12"/><path d="M5 21h14"/></svg>
           <span>{{ deployLabel }}</span>
           <span v-if="deploying" class="nd__act-note">Running…</span>
-        </button>
+        </UiActionRow>
       </section>
     </template>
 
@@ -196,28 +196,28 @@ function postCommand(text: string) {
       <template v-if="isWii">
         <section class="nd__sec">
           <p class="nd__lbl">Linux</p>
-          <button v-if="node.deploy" class="nd__act" :disabled="deploying || offline" @click="emit('deploy')">
+          <UiActionRow v-if="node.deploy" :disabled="deploying || offline" @click="emit('deploy')">
             <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l4 4M12 3l-4 4M12 3v12"/><path d="M5 21h14"/></svg>
             <span>{{ deployLabel }}</span>
             <span v-if="deploying" class="nd__act-note">Running…</span>
-          </button>
-          <button v-if="node.folder" class="nd__act" :disabled="offline" @click="emit('open-smb')">
+          </UiActionRow>
+          <UiActionRow v-if="node.folder" :disabled="offline" @click="emit('open-smb')">
             <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
             <span>Files</span>
-          </button>
+          </UiActionRow>
           <p v-if="!node.deploy && !node.folder" class="nd__hint">No SSH or SMB configured.</p>
         </section>
 
         <section class="nd__sec">
           <p class="nd__lbl">System</p>
-          <button class="nd__act" :disabled="offline" @click="nativeAction('flash')">
+          <UiActionRow :disabled="offline" @click="nativeAction('flash')">
             <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>
             <span>Flash Homebrew</span>
-          </button>
-          <button class="nd__act" :disabled="offline" @click="nativeAction('games')">
+          </UiActionRow>
+          <UiActionRow :disabled="offline" @click="nativeAction('games')">
             <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.4"/></svg>
             <span>Game Library</span>
-          </button>
+          </UiActionRow>
           <p v-if="nativeNote" class="nd__hint">{{ nativeNote }}</p>
         </section>
       </template>
@@ -225,21 +225,21 @@ function postCommand(text: string) {
       <section v-else-if="isVacuum || hasInfra" class="nd__sec">
         <p class="nd__lbl">Actions</p>
 
-        <button v-if="isVacuum" class="nd__act" @click="emit('open-tab')">
+        <UiActionRow v-if="isVacuum" @click="emit('open-tab')">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 8h9M19 8h1M4 16h5M15 16h5"/><circle cx="15" cy="8" r="2"/><circle cx="11" cy="16" r="2"/></svg>
           <span>Open Dreame Controls</span>
           <span class="nd__arrow">&rarr;</span>
-        </button>
+        </UiActionRow>
 
-        <button v-if="node.deploy" class="nd__act" :disabled="deploying || offline" @click="emit('deploy')">
+        <UiActionRow v-if="node.deploy" :disabled="deploying || offline" @click="emit('deploy')">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l4 4M12 3l-4 4M12 3v12"/><path d="M5 21h14"/></svg>
           <span>{{ deployLabel }}</span>
           <span v-if="deploying" class="nd__act-note">Running…</span>
-        </button>
-        <button v-if="node.folder" class="nd__act" :disabled="offline" @click="emit('open-smb')">
+        </UiActionRow>
+        <UiActionRow v-if="node.folder" :disabled="offline" @click="emit('open-smb')">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
           <span>Files</span>
-        </button>
+        </UiActionRow>
       </section>
 
       <section v-if="picos.length" class="nd__sec">
@@ -295,31 +295,15 @@ function postCommand(text: string) {
   overflow-y: auto;
   padding: 18px 18px 22px;
 }
-.nd__x {
-  position: absolute;
-  top: 12px; right: 12px;
-  width: 30px; height: 30px;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--text-muted);
-  background: transparent; border: 1px solid var(--line);
-  border-radius: 8px; cursor: pointer;
-  z-index: 1;
-}
-.nd__x:hover { background: var(--surface-2); color: var(--text); }
+/* position only — the close look comes from UiClose */
+.nd__x { position: absolute; top: 12px; right: 12px; z-index: 1; }
 .nd__head { display: flex; justify-content: center; padding: 4px 0 2px; }
 .nd__bubble { display: block; width: 168px; height: auto; pointer-events: none; }
 .nd__deploy-meta { margin: 0; text-align: center; font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
 .nd__sec { margin-top: 18px; }
 .nd__lbl { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--text-faint); margin: 0 0 10px; }
 .nd__hint { margin: 2px 0 0; font-size: 12px; color: var(--text-faint); }
-.nd__act {
-  display: flex; align-items: center; gap: 10px;
-  width: 100%; margin-bottom: 8px; padding: 9px 12px;
-  font-size: 14px; color: var(--text); text-align: left;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
-}
-.nd__act:hover:not(:disabled) { background: var(--surface-2); border-color: var(--line-strong); }
-.nd__act:disabled { opacity: 0.5; cursor: default; }
+/* the action-row frame is now UiActionRow; these are the row CONTENTS */
 .nd__ic { width: 18px; height: 18px; color: var(--accent); flex: 0 0 auto; }
 .nd__act-note { margin-left: auto; font-size: 12px; color: var(--text-faint); }
 .nd__arrow { margin-left: auto; color: var(--text-faint); }
