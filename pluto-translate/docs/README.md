@@ -91,5 +91,19 @@ Document findings as you discover them:
 - **Link to community resources**: if you find a fan translation thread, ROM hacking guide, or existing tool, link it
 - **Test as you go**: extract → verify in emulator → document → next step
 - **Reuse across franchise**: glossaries and extraction patterns save half the work on the next game
+
+## Community Resources & Tooling
+
+Decades of reusable Dreamcast fan-translation tooling already exists — pull from it before reinventing. All of these are public GitHub/web; only the forum index is Cloudflare-gated (open it in a real browser).
+
+**Index:** [Dreamcast Games Translation Megathread](https://dreamcast-talk.com/forum/viewtopic.php?t=13952) — ~100 DC translations and the tools behind them.
+
+**Reusable tooling:**
+- **Derek Pascarella ("ateam")** — the most prolific DC translator; a wall of `github.com/DerekPascarella/<Game>EnglishPatchDreamcast` repos carrying reusable **pointer-table rewriting, font handling, and headless GDI rebuild** patterns. First stop for dialogue-patcher / pointer technique.
+- **[derplayer/PDN-FileTypePVR](https://github.com/derplayer/PDN-FileTypePVR)** — Paint.NET plugin to edit PVR textures (the menu/title art).
+- **Rolly's tool collection** — http://sega.c0.pl/romhacking_mods_translation.html
+- **[XadPT — Boku Doraemon EN-TL](https://dreamcast-talk.com/forum/viewtopic.php?f=52&t=14037)** — the in-progress English translation of our pilot game; complementary effort that hit the same font wall.
+
+**The font wall (every DC translation hits it):** the half-width / accented-glyph problem stalled even SEGAGAGA. For Dreamcast's `S18RM04.FON` we cracked the format (2bpp bitmap, 106-byte records, byte-swapped JIS code, 20px cells) — codec + accent authoring in `dist/scripts/fon_codec.py`, format notes in `dc/extract.md`.
 </content>
 </invoke>

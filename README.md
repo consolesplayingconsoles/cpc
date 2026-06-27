@@ -43,7 +43,7 @@ Pluto is a single app you run one of two ways:
 | Folder                                                             | What's inside                                                                                  |
 |--------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
 | [pluto/](./pluto/)                                                 | CPC Pluto: the server, dashboard and control plane (runs as Lab or C2)                         |
-| [pluto/api/modules/translation/](./pluto/api/modules/translation/) | Game text extraction and translation infrastructure (console-specific extractors and guides)   |
+| [pluto-translate/](./pluto-translate/) | Game text extraction/translation engine (parsers, patchers, font/PVR codecs); knowledge docs in `pluto-translate/docs/`   |
 | [pluto-python-tui/](./pluto-python-tui/)                           | The on-console client/TUI that Pluto deploys to Linux nodes                                    |
 | [pluto-pi-hub/](./pluto-pi-hub/)                                   | The Pi-side hub: native-protocol bridges for non-IP consoles, and the Pico firmware it flashes |
 

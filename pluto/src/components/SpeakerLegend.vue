@@ -6,20 +6,32 @@
 defineProps<{
   speakers: { id: number; color: string; count: number }[]
   names: Record<number, string>
+  pct?: Record<number, number>
 }>()
 const emit = defineEmits<{ (e: 'rename', id: number, name: string): void }>()
+
+// Faint completion tint behind each chip: red < 50%, yellow < 100%, green = 100%.
+function pctTint(p: number | undefined): string {
+  const v = p ?? 0
+  if (v >= 100) return 'rgba(70, 170, 90, 0.16)'    // green
+  if (v >= 50)  return 'rgba(210, 170, 50, 0.16)'   // yellow
+  return 'rgba(210, 80, 80, 0.13)'                  // red
+}
 </script>
 
 <template>
   <div class="sl">
     <span class="sl__label">Speakers</span>
-    <div v-for="s in speakers" :key="s.id" class="sl__chip">
+    <div v-for="s in speakers" :key="s.id" class="sl__chip"
+         :style="{ background: pctTint(pct?.[s.id]) }"
+         :title="`${pct?.[s.id] ?? 0}% done`">
       <span class="sl__dot" :style="{ background: s.color }"></span>
       <span class="sl__id">{{ s.id }}</span>
       <input
         class="sl__name"
         :value="names[s.id] || ''"
-        :placeholder="`Speaker ${s.id}`"
+        :size="Math.max((names[s.id] || 'Unknown').length, 4)"
+        placeholder="Unknown"
         spellcheck="false"
         @input="emit('rename', s.id, ($event.target as HTMLInputElement).value)"
       />
@@ -48,8 +60,8 @@ const emit = defineEmits<{ (e: 'rename', id: number, name: string): void }>()
 .sl__id { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
 .sl__name {
   border: none; border-bottom: 1px dashed var(--line); background: none; outline: none;
-  padding: 1px 3px; font-size: 12px; color: var(--text);
-  width: 9ch; min-width: 9ch; cursor: text;
+  padding: 1px 1px; font-size: 12px; color: var(--text);
+  min-width: 4ch; cursor: text; field-sizing: content;   /* fit the full name, no trailing gap */
   transition: border-color .12s, background .12s;
 }
 .sl__name:hover  { border-bottom-color: var(--accent); background: var(--surface-2); }

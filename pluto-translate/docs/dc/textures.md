@@ -6,7 +6,7 @@ exist; you edit the image. This is the proven method (done for Boku Doraemon's
 title menu: はじめから/つづきから/オプション/インターネット → COMENÇA/CONTINUA/OPCIONS/INTERNET).
 
 Dividing line: **editable text → patch the bytes** (see `extract.md`); **pixel
-text → this doc.** Reusable codec: [`pvr_codec.py`](pvr_codec.py).
+text → this doc.** Reusable codec: [`pvr_codec.py`](../../dc/pvr_codec.py).
 
 ## 1. Confirm it's a texture, not a string
 Search the extracted disc for the on-screen text as Shift-JIS bytes. If a label

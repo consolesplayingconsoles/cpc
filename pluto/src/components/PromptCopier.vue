@@ -95,7 +95,7 @@ function copyPrompt() {
       <UiButton variant="primary" class="pc__copy" @click="copyPrompt">
         {{ copied ? 'Copied ✓' : 'Copy prompt' }}
       </UiButton>
-      <span class="pc__copyhint">Paste this prompt to Claude Code.</span>
+      <span class="pc__copyhint">The Pluto API is accessible by the agent. Paste this prompt to Claude Code and keep chatting for better results. Changes will show on this page immediately.</span>
     </div>
   </div>
 </template>

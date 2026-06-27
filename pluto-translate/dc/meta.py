@@ -9,7 +9,7 @@ KB read off the track. Fast enough to fetch instantly, before /sources scans.
 Codec-free (Batocera has no shift_jis codec): ASCII fields are decoded here; the
 title also ships as raw hex so the browser can shift_jis-decode JP titles.
 
-    dc_meta.py <gdi-path>
+    meta.py <gdi-path>
 """
 import json
 import os
@@ -59,6 +59,6 @@ def main(gdi):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print('{"error":"usage: dc_meta.py <gdi>"}')
+        print('{"error":"usage: meta.py <gdi>"}')
         sys.exit(1)
     main(sys.argv[1])

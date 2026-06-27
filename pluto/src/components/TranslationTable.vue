@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { API_BASE } from '../composables/useNodes'
 import { useAchievement } from '../composables/useAchievement'
@@ -29,6 +29,7 @@ interface Block {
   jp: string
   jpBytes: number
   ca: string
+  done?: boolean       // marked handled / keep-as-original (counts as done, no translation)
   note?: string
 }
 
@@ -77,7 +78,7 @@ function caBytes(text: string) {
 
 function byteStatus(block: Block): 'pending' | 'ok' | 'warn' | 'over' {
   const used = caBytes(block.ca)
-  if (used === 0) return 'pending'        // untranslated -> pending, not "ok"
+  if (used === 0) return block.done ? 'ok' : 'pending'   // "done" = handled / keep-as-original
   const budget = block.jpBytes
   if (used <= budget) return 'ok'
   if (used <= budget * 1.3) return 'warn'
@@ -92,7 +93,11 @@ function isFirstInRun(idx: number): boolean {
 
 // Aggregate across ALL loaded sources (every tab), not just the active one, so the
 // header badges read project-wide progress. Grows as lazy tabs stream in.
-const stats = computed(() => {
+// DEBOUNCED: this loops all ~8k blocks, so as a reactive `computed` it re-ran on
+// every keystroke and froze editing. Now it's a ref recomputed ~300ms after edits
+// settle (badges lag a moment; typing stays instant).
+const stats = ref({ total: 0, pending: 0, ok: 0, warn: 0, over: 0 })
+function recomputeStats() {
   let total = 0, pending = 0, ok = 0, warn = 0, over = 0
   for (const arr of Object.values(tabBlocks.value)) {
     for (const b of arr) {
@@ -104,8 +109,9 @@ const stats = computed(() => {
       else over++
     }
   }
-  return { total, pending, ok, warn, over }
-})
+  stats.value = { total, pending, ok, warn, over }
+}
+let statsTimer: ReturnType<typeof setTimeout> | undefined
 
 // ── Drop + language step ──────────────────────────────────────────────────────
 
@@ -304,6 +310,76 @@ const tabState  = ref<Record<string, 'idle' | 'loading' | 'ready' | 'error'>>({}
 const curPath   = ref('')                                  // the game's GDI path
 const discovering = ref(false)                             // /sources scan in flight
 
+// % of the ACTIVE tab's lines that carry a translation. A computed over `blocks`
+// would re-run per keystroke (the freeze we just fixed), so it's a ref refreshed
+// on the same debounce as the badges, plus instantly on tab change.
+const tabProg = ref({ done: 0, total: 0, pct: 0 })
+const speakerPct = ref<Record<number, number>>({})    // per-speaker % done (debounced)
+function recomputeTabPct() {
+  const arr = blocks.value
+  let done = 0
+  const per: Record<number, [number, number]> = {}     // id -> [done, total]
+  for (const b of arr) {
+    const t = caBytes(b.ca) > 0 || !!b.done
+    if (t) done++
+    const e = per[b.speakerId] || [0, 0]
+    e[1]++; if (t) e[0]++
+    per[b.speakerId] = e
+  }
+  tabProg.value = { done, total: arr.length, pct: arr.length ? Math.round((done / arr.length) * 100) : 0 }
+  const sp: Record<number, number> = {}
+  for (const id in per) { const [d, tt] = per[id]; sp[Number(id)] = tt ? Math.round((d / tt) * 100) : 0 }
+  speakerPct.value = sp
+}
+
+watch(tabBlocks, () => {
+  clearTimeout(statsTimer)
+  statsTimer = setTimeout(() => { recomputeStats(); recomputeTabPct() }, 300)
+}, { deep: true })
+watch(activeTab, recomputeTabPct, { immediate: true })
+
+
+// ── Virtual scrolling: render only the visible rows ────────────────────────────
+// The dialogue table is ~7.6k rows; mounting them all froze tab switches. We keep
+// the <table> (columns stay aligned via table-layout:fixed) and render only a
+// window of rows, padding the scroll height with spacer <tr>s. Row height is fixed
+// in CSS and MEASURED at runtime so the spacer math can't drift.
+const scrollEl  = ref<HTMLElement | null>(null)
+const scrollTop = ref(0)
+const viewportH = ref(800)
+const rowH      = ref(58)                  // measured after first render; CSS keeps rows uniform
+const BUFFER    = 8                         // extra rows rendered above/below the viewport
+function onScroll() { if (scrollEl.value) scrollTop.value = scrollEl.value.scrollTop }
+function measure() {
+  if (!scrollEl.value) return
+  viewportH.value = scrollEl.value.clientHeight || viewportH.value
+  const row = scrollEl.value.querySelector('.tt-row') as HTMLElement | null
+  if (row && row.offsetHeight > 0) rowH.value = row.offsetHeight
+}
+const winStart = computed(() => Math.max(0, Math.floor(scrollTop.value / rowH.value) - BUFFER))
+const winEnd   = computed(() =>
+  Math.min(blocks.value.length, Math.ceil((scrollTop.value + viewportH.value) / rowH.value) + BUFFER))
+const topPad   = computed(() => winStart.value * rowH.value)
+const botPad   = computed(() => Math.max(0, (blocks.value.length - winEnd.value) * rowH.value))
+// visible slice carrying the REAL index, so isFirstInRun + keys stay correct
+const windowed = computed(() => {
+  const out: { block: Block; index: number }[] = []
+  for (let i = winStart.value; i < winEnd.value; i++) out.push({ block: blocks.value[i], index: i })
+  return out
+})
+// reset to the top + re-measure whenever the active tab changes
+watch(activeTab, () => {
+  scrollTop.value = 0
+  if (scrollEl.value) scrollEl.value.scrollTop = 0
+  nextTick(measure)
+})
+onMounted(() => {
+  nextTick(measure)
+  window.addEventListener('resize', measure)
+})
+onUnmounted(() => window.removeEventListener('resize', measure))
+
+
 // Disc metadata (IP.BIN) for the header card — instant (~74ms), fetched on open.
 const meta = ref<GameMeta | null>(null)
 async function fetchMeta(path: string) {
@@ -324,15 +400,24 @@ const activeSpeakers = computed(() => {
   for (const b of blocks.value) counts.set(b.speakerId, (counts.get(b.speakerId) || 0) + 1)
   return [...counts.entries()]
     .map(([id, count]) => ({ id, count, color: speakerColor(id) }))
-    .sort((a, b) => b.count - a.count)
+    .sort((a, b) => a.id - b.id)
 })
 // Only a real legend if the source carries speaker tags (any non-zero id).
 const showLegend = computed(() => activeSpeakers.value.some(s => s.id !== 0))
 const activeNames = computed(() => speakerNames.value[activeTab.value] || {})
-// The display name for a speaker id — the legend name once set, else "Speaker NN".
-// Used by every table row, so naming a speaker propagates to all its occurrences.
+
+// The table's speaker column reads names through a DEBOUNCED copy. Editing a name
+// in the legend otherwise re-rendered its label across all ~7k rows on every
+// keystroke; the legend input still updates live (cheap, ~10 chips), the table
+// catches up ~300ms after you pause. Refreshed instantly on tab change.
+const displayNames = ref<Record<number, string>>({})
+let displayTimer: ReturnType<typeof setTimeout> | undefined
+function refreshDisplayNames() { displayNames.value = activeNames.value }
+watch(activeTab, refreshDisplayNames, { immediate: true })
+
+// The display name for a speaker id — the legend name once set, else a fallback.
 function speakerLabel(id: number): string {
-  return activeNames.value[id] || `Speaker ${id.toString().padStart(2, '0')}`
+  return displayNames.value[id] || 'Speaker Unknown'
 }
 
 let speakerSaveTimer: ReturnType<typeof setTimeout> | undefined
@@ -344,7 +429,9 @@ function renameSpeaker(id: number, name: string) {
     [safe]: { ...(speakerNames.value[safe] || {}), [id]: name },
   }
   clearTimeout(speakerSaveTimer)
-  speakerSaveTimer = setTimeout(saveSpeakers, 600)        // debounce while typing
+  speakerSaveTimer = setTimeout(saveSpeakers, 600)        // debounce save while typing
+  clearTimeout(displayTimer)
+  displayTimer = setTimeout(refreshDisplayNames, 300)     // debounce the 7k-row re-render
 }
 async function saveSpeakers() {
   if (!curNs.value || !activeTab.value) return
@@ -527,6 +614,17 @@ async function runBuild() {
   }
 }
 
+// Pre-flight before building: all-green => go straight through; otherwise warn
+// (untranslated lines ship as Japanese; overflow lines truncate until the expander).
+const showBuildWarn = ref(false)
+function confirmBuild() {
+  if (building.value || !curPath.value) return
+  const s = stats.value
+  if (s.pending === 0 && s.over === 0) { runBuild(); return }   // all green -> safe to go
+  showBuildWarn.value = true
+}
+function proceedBuild() { showBuildWarn.value = false; runBuild() }
+
 // Clicking a project just navigates; the URL is the source of truth.
 function loadProject(p: Project) {
   router.push(`/translation/${encodeURIComponent(p.ns)}`)
@@ -631,7 +729,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 
     <!-- ── EXPERIMENTAL DISCLAIMER (compact, dismissible for the session) ── -->
     <div v-if="!disclaimerDismissed" class="tt-disclaimer">
-      <span class="tt-disclaimer-text"><strong>⚠️ Experimental</strong> Extraction is game-specific and WIP; expect broken ROMs &amp; corrupted text.</span>
+      <span class="tt-disclaimer-text"><strong>⚠️ Experimental</strong> Extraction is game-specific and a work in progress. Expect broken ROMs &amp; corrupted text. Contributions are very welcome.</span>
       <UiClose class="tt-disclaimer-x" title="Hide for this session" @click="dismissDisclaimer" />
     </div>
 
@@ -738,7 +836,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
         <span class="tt-actions">
           <span v-if="buildMsg" class="tt-build-msg" :class="{ 'tt-build-msg--fail': buildFailed }">{{ buildMsg }}</span>
           <UiButton class="tt-action" :disabled="building || extracting" @click="saveDraft">{{ draftSaved ? 'Saved ✓' : 'Save draft' }}</UiButton>
-          <UiButton variant="primary" :loading="building" :disabled="extracting" loading-text="Building…" @click="runBuild">Build ROM</UiButton>
+          <UiButton variant="primary" :loading="building" :disabled="extracting" loading-text="Building…" @click="confirmBuild">Build ROM</UiButton>
         </span>
       </div>
     </div>
@@ -777,24 +875,29 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
       v-if="showLegend"
       :speakers="activeSpeakers"
       :names="activeNames"
+      :pct="speakerPct"
       @rename="renameSpeaker"
     />
 
     <!-- Table -->
-    <div class="tt-table-wrap">
+    <div class="tt-table-wrap" ref="scrollEl" @scroll="onScroll">
       <table class="tt-table">
         <thead>
           <tr>
             <th class="col-offset">Offset</th>
             <th v-if="showLegend" class="col-speaker">Speaker</th>
             <th class="col-jp">Japanese</th>
-            <th class="col-ca">{{ langLabel || 'Catalan' }}</th>
+            <th class="col-ca">{{ langLabel || 'Catalan' }} <span class="col-ca-pct">{{ tabProg.done.toLocaleString() }}/{{ tabProg.total.toLocaleString() }} ({{ tabProg.pct }}%)</span></th>
             <th class="col-bytes">Bytes</th>
+            <th class="col-done" title="Mark handled — kept as original Japanese">Done</th>
           </tr>
         </thead>
         <tbody>
+          <tr v-if="topPad" class="tt-spacer" :style="{ height: topPad + 'px' }" aria-hidden="true">
+            <td :colspan="showLegend ? 6 : 5"></td>
+          </tr>
           <tr
-            v-for="(block, index) in blocks"
+            v-for="{ block, index } in windowed"
             :key="block.offset"
             :class="['tt-row', byteStatus(block), { 'run-start': isFirstInRun(index), 'run-cont': !isFirstInRun(index) }]"
           >
@@ -826,7 +929,6 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
                   rows="2"
                   @change="saveState"
                 />
-                <UiIconButton variant="bordered" class="suggest-btn" title="Suggest shorter variants">↩</UiIconButton>
               </div>
             </td>
 
@@ -837,6 +939,14 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
                 <span class="bytes-budget">{{ block.jpBytes }}</span>
               </div>
             </td>
+
+            <td class="col-done">
+              <input type="checkbox" v-model="block.done" @change="saveState"
+                     title="Done — keep original Japanese" />
+            </td>
+          </tr>
+          <tr v-if="botPad" class="tt-spacer" :style="{ height: botPad + 'px' }" aria-hidden="true">
+            <td :colspan="showLegend ? 6 : 5"></td>
           </tr>
         </tbody>
       </table>
@@ -866,6 +976,29 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
       </aside>
     </div><!-- /tt-body -->
     </template><!-- end v-else (table view) -->
+
+    <!-- Build pre-flight warning: shown only when lines are pending and/or overflow -->
+    <div v-if="showBuildWarn" class="tt-modal-backdrop" @click.self="showBuildWarn = false">
+      <div class="tt-modal">
+        <h3 class="tt-modal-title">Build with open issues?</h3>
+        <ul class="tt-modal-list">
+          <li v-if="stats.pending" class="tt-modal-item pending">
+            <strong>{{ stats.pending.toLocaleString() }}</strong> lines aren't translated yet: they'll ship as the original Japanese.
+          </li>
+          <li v-if="stats.over" class="tt-modal-item over">
+            <strong>{{ stats.over.toLocaleString() }}</strong> lines overflow the byte budget: they'll be truncated in-game until the expand/repack step exists.
+          </li>
+          <li v-if="stats.warn" class="tt-modal-item warn">
+            <strong>{{ stats.warn.toLocaleString() }}</strong> lines run tight against the budget: worth a second look.
+          </li>
+        </ul>
+        <p class="tt-modal-note">You can build anyway, just make sure you've got a plan for these before you ship it.</p>
+        <div class="tt-modal-actions">
+          <UiButton @click="showBuildWarn = false">Cancel</UiButton>
+          <UiButton variant="primary" @click="proceedBuild">Build anyway</UiButton>
+        </div>
+      </div>
+    </div>
 
   </div>
 </template>
@@ -1005,7 +1138,11 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  table-layout: fixed;   /* stable column widths while only a window of rows renders */
 }
+
+/* Virtual-scroll spacers: empty rows that pad the scroll height above/below the window */
+.tt-spacer td { padding: 0; border: 0; }
 
 .tt-table thead th {
   position: sticky;
@@ -1023,6 +1160,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 }
 
 .tt-row {
+  height: 58px;            /* fixed + uniform so the virtual-scroll math stays exact */
   border-bottom: 1px solid var(--line);
   background: var(--surface);
   transition: background 0.1s;
@@ -1035,13 +1173,37 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .tt-row td {
   padding: var(--sp-2) var(--sp-3);
   vertical-align: top;
+  overflow: hidden;        /* clip overflow to the fixed row height */
 }
 
 .col-offset { width: 100px; }
 .col-speaker { width: 160px; }
 .col-jp { width: 30%; }
 .col-ca { width: 35%; }
+.col-ca-pct { font-weight: 400; color: var(--text-muted); font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
 .col-bytes { width: 80px; }
+.col-done { width: 44px; text-align: center; }
+.col-done input { cursor: pointer; }
+
+/* Build pre-flight warning modal */
+.tt-modal-backdrop {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center;
+}
+.tt-modal {
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: var(--r-md); box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+  padding: var(--sp-4); width: min(460px, 92vw);
+}
+.tt-modal-title { margin: 0 0 var(--sp-3); font-size: 15px; font-weight: 600; color: var(--text); }
+.tt-modal-list { list-style: none; margin: 0 0 var(--sp-3); padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.tt-modal-item { font-size: 13px; color: var(--text); padding-left: var(--sp-3); border-left: 3px solid var(--line); }
+.tt-modal-item.pending { border-left-color: #2563eb; }
+.tt-modal-item.over    { border-left-color: var(--bad); }
+.tt-modal-item.warn    { border-left-color: var(--warn); }
+.tt-modal-note { margin: 0 0 var(--sp-4); font-size: 12.5px; color: var(--text-muted); }
+.tt-modal-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
 
 .mono { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
 
@@ -1165,8 +1327,9 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   font-size: 13px;
   color: var(--text);
   background: var(--surface);
-  resize: vertical;
-  min-height: 40px;
+  resize: none;            /* fixed height keeps rows uniform for virtual scroll; long text scrolls inside */
+  height: 42px;
+  min-height: 0;
   line-height: 1.5;
   transition: border-color 0.1s;
 }

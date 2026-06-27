@@ -96,7 +96,7 @@ class Handler(BaseHTTPRequestHandler):
         if not path:
             self._send(400, {"error": "path required"})
             return
-        rc, out = _run(["sh", os.path.join(SCRIPTS, "dc_sources.sh"), path])
+        rc, out = _run(["sh", os.path.join(SCRIPTS, "dc", "sources.sh"), path])
         try:
             self._send(200, _last_json(out))
         except Exception:
@@ -107,7 +107,7 @@ class Handler(BaseHTTPRequestHandler):
         if not path:
             self._send(400, {"error": "path required"})
             return
-        rc, out = _run(["python3", os.path.join(SCRIPTS, "dc_meta.py"), path], timeout=30)
+        rc, out = _run(["python3", os.path.join(SCRIPTS, "dc", "meta.py"), path], timeout=30)
         try:
             self._send(200, _last_json(out))
         except Exception:
@@ -119,7 +119,7 @@ class Handler(BaseHTTPRequestHandler):
         if not path or not safe:
             self._send(400, {"error": "path and file required"})
             return
-        rc, out = _run(["sh", os.path.join(SCRIPTS, "dc_extract.sh"), path, safe])
+        rc, out = _run(["sh", os.path.join(SCRIPTS, "dc", "extract.sh"), path, safe])
         try:
             self._send(200, _last_json(out))
         except Exception:

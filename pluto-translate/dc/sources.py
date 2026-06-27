@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """Discover translatable text files in an extracted DC disc and cache them.
 
-Scans every file by Shift-JIS density (reusing dc_text_scan's heuristic), keeps
+Scans every file by Shift-JIS density (reusing text_scan's heuristic), keeps
 the ones that read as real text (kana ratio high enough), copies just those
 (small) into a cache dir under sanitized names, and writes a JSON manifest of
 "tabs" for the translation workbench. The big non-text blobs (graphics, audio,
 video) are left behind, so the cache stays tiny and per-tab extraction later
 reads straight from the cache instead of re-extracting the whole disc.
 
-    dc_sources.py <extracted-dir> <cache-files-dir> <manifest-path>
+    sources.py <extracted-dir> <cache-files-dir> <manifest-path>
 """
 import json
 import os
 import shutil
 import sys
 
-from dc_text_scan import scan   # same density heuristic, one source of truth
+from text_scan import scan   # same density heuristic, one source of truth
 
 # Thresholds + typology live in config (sources.config.json), so expanding the
 # discovery is a DATA edit, not a code change. Falls back to a permissive default

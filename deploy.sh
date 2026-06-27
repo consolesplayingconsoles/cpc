@@ -237,9 +237,9 @@ payload_translate() {
   echo "##STEP:sync"
   $SSH "rm -rf ${TR_DIR}; mkdir -p ${TR_DIR}"
   tar --no-xattrs --no-fflags --no-mac-metadata -C pluto-translate \
-      --exclude='__pycache__' --exclude='deploy' -cf - . \
+      --exclude='__pycache__' --exclude='deploy' --exclude='docs' -cf - . \
       | $SSH "tar -xf - -C ${TR_DIR}"
-  $SSH "chmod +x ${TR_DIR}/run.sh ${TR_DIR}/*.sh"
+  $SSH "chmod +x ${TR_DIR}/run.sh ${TR_DIR}/*.sh ${TR_DIR}/dc/*.sh"
   echo "sync ok"
 
   echo "##STEP:restart"
