@@ -63,7 +63,7 @@ def patch(data):
 
 def main():
     if len(sys.argv) < 2:
-        print("usage: dc_story_patch.py <STORY.PAC> [out]", file=sys.stderr)
+        print("usage: story_patch.py <STORY.PAC> [out]", file=sys.stderr)
         sys.exit(1)
     src = sys.argv[1]
     dst = sys.argv[2] if len(sys.argv) > 2 else src

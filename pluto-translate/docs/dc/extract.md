@@ -69,7 +69,7 @@ All text files are human-readable (Shift-JIS or HTML-like). No custom encoding t
 
 ## Implementation & Per-Game Guides
 
-**Extraction code**: [`pluto/api/modules/translation/dc/extract.py`](../../../api/modules/translation/dc/extract.py)
+**Extraction code**: [`pluto-translate/dc/extract.py`](../../dc/extract.py) (parser dispatch) + [`parsers/`](../../parsers/) + [`pvr_codec.py`](../../dc/pvr_codec.py) (textures)
 
 Per-game notes:
 - [`games/boku-doraemon.md`](./games/boku-doraemon.md) — 60% extraction working, speaker tag pattern proven

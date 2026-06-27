@@ -7,13 +7,13 @@ files that light up are where the text lives (dialogue, menus, subtitles), in
 whatever container the studio happened to use.
 
 Codec-free (no shift_jis codec needed): we just test byte pairs against the
-Shift-JIS lead/trail ranges, same heuristic as dc_story_extract. Ranks by the
+Shift-JIS lead/trail ranges, same heuristic as story_extract. Ranks by the
 KANA RATIO (kana / all pairs), NOT raw count: real text is mostly kana, while a
 huge graphics/audio/video blob scatters many incidental pairs of which few are
 kana. (Doraemon: STORY.PAC 71%, ITEMTBL.PAC 74%, MESSAGE.INI 55% = text;
 STORYGRA.PAC 1.3%, *.SFD ~2%, *.AFS ~0.2% = graphics/video/voice, correctly sunk.)
 
-    python3 dc_text_scan.py <extracted-disc-dir> [top_n]
+    python3 text_scan.py <extracted-disc-dir> [top_n]
 """
 import os
 import sys

@@ -20,4 +20,4 @@ EXT="$WORK/x"; mkdir -p "$EXT"   # buildgdi -extract wants a subdir, not the tmp
 "$DOTNET" "$BUILDGDI" -extract -gdi "$GDI" -output "$EXT" >/dev/null 2>&1
 [ -f "$EXT/STORY.PAC" ] || { echo '{"error":"no STORY.PAC in this disc"}'; exit 1; }
 
-python3 "$HERE/dc_story_extract.py" "$EXT/STORY.PAC"
+python3 "$HERE/dc/story_extract.py" "$EXT/STORY.PAC"

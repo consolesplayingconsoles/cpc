@@ -685,6 +685,38 @@ def _translate_upload_dir(game):
     return os.path.join(_dist_dir(), "translations", "uploads", game)
 
 
+def _write_state_atomic(path, obj, backup=False):
+    """Write the translation state to `path` so a crash/race/interrupt can NEVER
+    leave a half-written, truncated or null-padded file. Writes a temp file in the
+    same dir then os.replace()s it in (atomic on POSIX). With backup=True, snapshot
+    the current file into a sibling backups/ dir first -- an endless stream of
+    backups while the flow stabilises. Every state write MUST go through here; a
+    plain open(path,"w")+json.dump is what corrupted state.json (truncate-then-write
+    is not atomic)."""
+    import tempfile, shutil
+    d = os.path.dirname(os.path.abspath(path))
+    os.makedirs(d, exist_ok=True)
+    if backup and os.path.exists(path):
+        bdir = os.path.join(d, "backups")
+        try:
+            os.makedirs(bdir, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+            shutil.copy2(path, os.path.join(bdir, "state.%s.json" % ts))
+        except OSError:
+            pass  # a backup failure must never block the actual save
+    fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def _capture_frame_path(): return os.path.join(_capture_dir(), "latest.jpg")
 def _capture_flag_path():  return os.path.join(_capture_dir(), "state.flag")
 
@@ -2037,20 +2069,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         ext        = os.path.splitext(filename)[1].lower()
         state_path = _translate_state_path(game_id)
-        import json as _json
-        os.makedirs(os.path.dirname(os.path.abspath(state_path)), exist_ok=True)
-        with open(state_path, "w") as _sf:
-            _json.dump({"game": game_id, "status": "pending", "statusText": "Uploading..."}, _sf)
+        _write_state_atomic(state_path, {"game": game_id, "status": "pending",
+                                         "statusText": "Uploading..."})
         repo_root  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
         COMPRESSED = {".zip", ".7z", ".rar", ".gz"}
 
         if ext in COMPRESSED:
-            os.makedirs(os.path.dirname(os.path.abspath(state_path)), exist_ok=True)
-            with open(state_path, "w") as _sf:
-                import json as _json
-                _json.dump({"game": game_id, "status": "decompressing",
-                            "statusText": "Decompressing archive..."}, _sf)
+            _write_state_atomic(state_path, {"game": game_id, "status": "decompressing",
+                                             "statusText": "Decompressing archive..."})
             try:
                 rom_path = self._decompress_archive(
                     rom_path,
@@ -2082,7 +2109,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             prompt = (
                 "No automatic extractor exists for {ext} files yet.\n"
                 "Write an extractor that reads the ROM at {rom} and outputs state JSON to {state}.\n"
-                "See api/modules/translation/dc/extract.py for the expected output schema."
+                "See pluto-translate/dc/extract.py + pluto-translate/parsers/ for the expected output schema."
             ).format(ext=ext, rom=os.path.relpath(rom_path, repo_root),
                      state=os.path.relpath(state_path, repo_root))
             console = "unknown"
@@ -2138,8 +2165,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 prev[k].update(body[k])
                 existing[k] = prev[k]
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(existing, f, ensure_ascii=False, indent=2)
+            _write_state_atomic(path, existing, backup=True)  # atomic + snapshot
             self._send(200, {"ok": True, "game": game})
         except IOError as exc:
             self._send(500, {"error": str(exc)})
@@ -2685,7 +2711,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(400, {"error": "path required"})
             return
         rc, out = self._node_ssh("batocera",
-                                 ["sh", "/userdata/cpc-scripts/dc_sources.sh", path],
+                                 ["sh", "/userdata/cpc-scripts/dc/sources.sh", path],
                                  timeout=180)
         line = next((l for l in reversed(out.splitlines()) if l.strip()), "")
         try:

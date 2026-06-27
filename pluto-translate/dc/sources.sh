@@ -4,7 +4,7 @@
 # manifest, and prints the manifest. Cached by disc path, so the second call (and
 # the per-tab extracts) skip the slow extraction.
 #
-#   dc_sources.sh <gdi-path>
+#   sources.sh <gdi-path>
 set -e
 
 GDI="$1"
@@ -22,6 +22,6 @@ mkdir -p "$CACHE/files"
 W=$(mktemp -d); mkdir -p "$W/x"
 /userdata/dotnet/dotnet /userdata/buildgdi-out/buildgdi.dll \
   -extract -gdi "$GDI" -output "$W/x" >/dev/null 2>&1
-python3 /userdata/cpc-scripts/dc_sources.py "$W/x" "$CACHE/files" "$MAN"
+python3 /userdata/cpc-scripts/dc/sources.py "$W/x" "$CACHE/files" "$MAN"
 rm -rf "$W"
 cat "$MAN"

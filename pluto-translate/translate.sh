@@ -22,7 +22,7 @@ VER="${VER:-v1.0}"
 
 DOTNET=/userdata/dotnet/dotnet
 BUILDGDI=/userdata/buildgdi-out/buildgdi.dll
-HERE=$(CDPATH= cd "$(dirname "$0")" && pwd)   # where dc_story_patch.py lives
+HERE=$(CDPATH= cd "$(dirname "$0")" && pwd)   # scripts root; dc/ holds story_patch.py
 
 GAMEDIR=$(dirname "$GDI")
 GAME=$(basename "$GAMEDIR")
@@ -38,7 +38,7 @@ echo "[1/4] extract"
 "$DOTNET" "$BUILDGDI" -extract -gdi "$GDI" -output "$EXTRACT" >/dev/null
 
 echo "[2/4] patch STORY.PAC (codec-free)"
-python3 "$HERE/dc_story_patch.py" "$EXTRACT/STORY.PAC" "$PATCH/STORY.PAC"
+python3 "$HERE/dc/story_patch.py" "$EXTRACT/STORY.PAC" "$PATCH/STORY.PAC"
 
 echo "[3/4] rebuild"
 "$DOTNET" "$BUILDGDI" -rebuild -gdi "$GDI" -data "$PATCH" -output "$OUT" >/dev/null
