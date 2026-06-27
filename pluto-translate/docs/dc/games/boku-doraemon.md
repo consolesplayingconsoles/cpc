@@ -39,15 +39,15 @@ The earlier "renders Latin natively / 1 byte per char / no font hack" notes were
 wrong. What the game actually does:
 
 - In-game dialogue renders through the game's own font `S18RM04.FON` (root-level,
-  JIS-indexed glyph table, **compressed/vector glyph payload** not raw bitmap).
-- The font has **full-width Latin only** (JIS row 0x23). Full-width Latin
-  (2-byte SJIS, e.g. `Ｃ`=0x8260+) renders cleanly. **ASCII renders as dots**, and
-  there is **no half-width font** (half-width katakana also draws as dots, proven
-  with a probe). So Catalan text costs **2 bytes per char**, same as Japanese.
-- **Accents are not Shift-JIS-encodable at all** (à è í ò ó ú ç l·l). They cannot
-  go in the file until you **add the glyphs to the font** (a small ~10-glyph add at
-  unused/half-width codepoints, plus a re-encoder for the vector format). This is
-  the gate for faithful gadget names; dialogue can phrase around accents.
+  JIS-indexed). Format **CRACKED 2026-06-27: plain linear 2bpp, 20px cells** (not
+  compressed/vector as first feared) — general format + method in [`../fonts.md`](../fonts.md).
+- The font has **full-width Latin only** (JIS row 0x23); ASCII / half-width draw as
+  dots (no half-width font, proven by probe), so Catalan costs **2 bytes per char**.
+- **Accents — SOLVED** via the Greek-slot trick (method in `../fonts.md`). Game-specific
+  facts: **0 of this game's 1817 text codes fall in the Greek range** (`0x839F–0x83D6`),
+  so it's safe to overwrite; 20 Catalan accents authored into slots `0x839F–0x83C8`
+  by `fon_codec.build_patched_font`; the patched `.FON` is a regen-able artifact.
+  Open: `ŀl` middot (folded to `ll`), uppercase marks are tight.
 - Menus are not text: the title screen and options are **PVR textures** (see
   `../textures.md`), translated by repainting the atlas.
 - `DPETC\MESSAGE.INI` is the Dream Passport **browser** string table, not the game
