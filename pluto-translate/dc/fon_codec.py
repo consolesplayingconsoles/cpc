@@ -49,20 +49,27 @@ def show(grid):
     return "\n".join("".join(pal[v] for v in row) for row in grid)
 
 # ── accent marks (up = uppercase cap fills rows ~3-18 -> mark at 0-2) ───────────
-def _grave(g, up):
-    for k, c in enumerate((8,9,10)):
-        if (0 if up else 1)+k < ROWS: g[(0 if up else 1)+k][c] = 3
+def _grave(g, up):              # OPEN accent: 3px-thick \, leans LEFT (left-of-centre)
+    r0 = 0 if up else 1
+    for i in range(3):
+        r = r0 + i
+        for c in (6+i, 7+i, 8+i):
+            if r < ROWS: g[r][c] = 3
     return g
-def _acute(g, up):
-    for k, c in enumerate((11,10,9)):
-        if (0 if up else 1)+k < ROWS: g[(0 if up else 1)+k][c] = 3
+def _acute(g, up):              # CLOSED accent: 3px-thick /, leans RIGHT (right-of-centre)
+    r0 = 0 if up else 1
+    for i in range(3):
+        r = r0 + i
+        for c in (13-i, 14-i, 15-i):
+            if r < ROWS: g[r][c] = 3
     return g
-def _dieresis(g, up):
-    b = 0 if up else 1
-    for c in (8,12): g[b][c] = 3; g[b+1][c] = 3
+def _dieresis(g, up):           # two bold 2x2 dots
+    r0 = 0 if up else 1
+    for rr, cc in ((r0,7),(r0,8),(r0+1,7),(r0+1,8),(r0,11),(r0,12),(r0+1,11),(r0+1,12)):
+        if rr < ROWS: g[rr][cc] = 3
     return g
-def _cedilla(g, up):
-    for (r,c) in ((17,11),(18,11),(18,10)): g[r][c] = 3
+def _cedilla(g, up):            # bolder tail under c/C
+    for r, c in ((16,10),(16,11),(17,11),(17,12),(18,10),(18,11)): g[r][c] = 3
     return g
 def _cleartop(g, n):
     for r in range(n):
