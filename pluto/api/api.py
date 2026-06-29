@@ -685,6 +685,26 @@ def _translate_upload_dir(game):
     return os.path.join(_dist_dir(), "translations", "uploads", game)
 
 
+def _order_key(b):
+    """Sort key for translation blocks on save: blocks with an `order` set float to the TOP
+    (ascending by order); everything else falls back to original OFFSET order. Stable and
+    build-safe (the packer keys on a block's offset, not its list position), so this only sets
+    the story sequence the translator sees, never the ROM. Drives the box-panel "sort the story
+    on save" behaviour."""
+    off = b.get("offset", 0)
+    try:
+        off = int(off, 16) if isinstance(off, str) else int(off or 0)
+    except (ValueError, TypeError):
+        off = 0
+    o = b.get("order", None)
+    if o is None or o == "":
+        return (1, 0.0, off)            # unset -> after the ordered ones, in offset order
+    try:
+        return (0, float(o), off)       # set -> first, ascending by order
+    except (ValueError, TypeError):
+        return (1, 0.0, off)
+
+
 def _write_state_atomic(path, obj, backup=False):
     """Write the translation state to `path` so a crash/race/interrupt can NEVER
     leave a half-written, truncated or null-padded file. Writes a temp file in the
@@ -1498,6 +1518,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_translate_delete()
         elif parsed.path == "/translate/upload":
             self._handle_translate_upload()
+        elif parts[:2] == ["translate", "measure"]:
+            qs = urllib.parse.parse_qs(parsed.query)
+            self._handle_translate_measure((qs.get("path") or [""])[0], (qs.get("file") or [""])[0])
         elif len(parts) == 2 and parts[0] == "translate":
             self._handle_translate_put(parts[1])
         else:
@@ -2164,6 +2187,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if isinstance(body.get(k), dict):
                 prev[k].update(body[k])
                 existing[k] = prev[k]
+        # Box-panel ordering, applied on SAVE only (so rows never jump mid-edit): float blocks
+        # with an `order` to the top in order, the rest stay in offset order. Build-safe (the
+        # packer keys on offset), so this sets the translator's story sequence, not the ROM.
+        for _blks in (existing.get("sources") or {}).values():
+            if isinstance(_blks, list):
+                _blks.sort(key=_order_key)
         try:
             _write_state_atomic(path, existing, backup=True)  # atomic + snapshot
             self._send(200, {"ok": True, "game": game})
@@ -2682,6 +2711,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(200, json.loads(r.read().decode()))
         except Exception as exc:
             self._send(502, {"error": "extract via box failed: %s" % exc})
+
+    def _handle_translate_measure(self, path, file):
+        """POST /translate/measure?path=<gdi>&file=<safe> with the translated blocks as the JSON body
+        -> proxy to the box's packer-backed /measure, returning {"used": {scene: bytes}} (the real
+        per-scene expansion for the box-budget meter)."""
+        path = (path or "").strip()
+        file = (file or "").strip()
+        if not path or not file:
+            self._send(400, {"error": "path and file required"})
+            return
+        base = self._box_base()
+        if not base:
+            self._send(502, {"error": "translate node (batocera) not reachable"})
+            return
+        n = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(n) if n > 0 else b"{}"
+        try:
+            req = Request("%s/measure?path=%s&file=%s" % (base, urllib.parse.quote(path),
+                                                          urllib.parse.quote(file)),
+                          data=body, method="POST")
+            req.add_header("Content-Type", "application/json")
+            with urlopen(req, timeout=60) as r:
+                self._send(200, json.loads(r.read().decode()))
+        except Exception as exc:
+            self._send(502, {"error": "measure via box failed: %s" % exc})
 
     def _handle_translate_meta(self, path):
         """GET /translate/meta?path=<gdi> -> the disc's IP.BIN metadata (title,

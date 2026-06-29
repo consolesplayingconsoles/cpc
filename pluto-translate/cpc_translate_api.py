@@ -30,11 +30,12 @@ ROUTES = {
     ("GET", "/games"):   "_r_games",
     ("GET", "/sources"): "_r_sources",
     ("GET", "/extract"): "_r_extract",
+    ("POST", "/measure"): "_r_measure",
 }
 
 
-def _run(argv, timeout=300):
-    p = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+def _run(argv, timeout=300, inp=None):
+    p = subprocess.run(argv, input=inp, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                        timeout=timeout)
     return p.returncode, p.stdout.decode("utf-8", "replace")
 
@@ -59,6 +60,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         self._dispatch("GET")
+
+    def do_POST(self):
+        self._dispatch("POST")
 
     def _dispatch(self, method):
         u = urlparse(self.path)
@@ -112,6 +116,24 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, _last_json(out))
         except Exception:
             self._send(502, {"error": "meta failed", "detail": out[-500:]})
+
+    def _r_measure(self, qs):
+        """POST /measure?path=<gdi>&file=<safe> with the translated blocks (carrying ca) as the JSON
+        body -> {"used": {scene: bytes}}, the real per-scene expansion the build pays (packer-computed,
+        the box-budget meter's authoritative number)."""
+        path = (qs.get("path") or [""])[0]
+        safe = (qs.get("file") or [""])[0]
+        if not path or not safe:
+            self._send(400, {"error": "path and file required"})
+            return
+        n = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(n) if n > 0 else b"{}"
+        rc, out = _run(["sh", os.path.join(SCRIPTS, "dc", "measure.sh"), path, safe],
+                       timeout=60, inp=body)
+        try:
+            self._send(200, _last_json(out))
+        except Exception:
+            self._send(502, {"error": "measure failed", "detail": out[-500:]})
 
     def _r_extract(self, qs):
         path = (qs.get("path") or [""])[0]

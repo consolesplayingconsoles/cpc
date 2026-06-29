@@ -104,6 +104,6 @@ Decades of reusable Dreamcast fan-translation tooling already exists — pull fr
 - **Rolly's tool collection** — http://sega.c0.pl/romhacking_mods_translation.html
 - **[XadPT — Boku Doraemon EN-TL](https://dreamcast-talk.com/forum/viewtopic.php?f=52&t=14037)** — the in-progress English translation of our pilot game; complementary effort that hit the same font wall.
 
-**The font wall (every DC translation hits it):** the half-width / accented-glyph problem stalled even SEGAGAGA. For Dreamcast's `S18RM04.FON` we cracked the format (2bpp bitmap, 106-byte records, byte-swapped JIS code, 20px cells) — codec + accent authoring in `dist/scripts/fon_codec.py`, format notes in `dc/extract.md`.
+**The font wall (every DC translation hits it):** the half-width / accented-glyph problem stalled even SEGAGAGA. For Dreamcast's `S18RM04.FON` we cracked the format (2bpp bitmap, 106-byte records, byte-swapped JIS code, 20px cells) — codec + accent authoring in `dc/fon_codec.py` (its `__main__` regenerates the patched `.FON`), format notes in `dc/extract.md`.
 </content>
 </invoke>

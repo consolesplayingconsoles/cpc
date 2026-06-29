@@ -54,19 +54,100 @@ wrong. What the game actually does:
   UI. **OFF-LIMITS**: latinizing it boots the INTERNET page blank/grey (browser
   chokes) and it needs DreamPi anyway.
 
-### Capacity: expand, don't truncate
+### Capacity: expand into slack, fixed-position (≈40% ceiling)
 
-Size-preserving in-place patching is NOT required. `STORY.PAC` is an `SCP`
-container of 76 sector-aligned scenarios; dialogue is read sequentially (no
-absolute text pointers for most lines) and the engine paginates natively via the
-`04ff` control code. So you can write **more** Catalan than the Japanese budget:
-expand a line, wrap to the (generous) box with `01ff`, paginate with `04ff`, shift
-the trailing bytes into the scenario's slack (~1.4 KB each, ~81 KB total), update
-any u32 message-table pointers that point past the edit, and keep the scenario at
-its 0x800-aligned size so the other 75 don't move. Proven on screen 2026-06-26
-(opening line expanded 67→111 B). Scripts in `dist/scripts/`
-(`expand-line.py` dialogue, `itemtbl-expand.py` gadgets); the ROM extracts,
-patches and dub corpus are the gitignored working data in `sandbox/`.
+`STORY.PAC` is an `SCP` container of 76 sector-aligned scenarios; each is
+`[ASM][CMD]`, where `CMD` is a u32 pointer table over variable-size commands and
+~1 in 7 commands carry text (`02ff <spk>` + SJIS). The script addresses commands
+**by index** through that table, so a text command can grow as long as you bump the
+later table entries. Dialogue paginates natively via `04ff`.
+
+**Build** (the repeatable way): `dc/build_patch.py` via `packers/nullsplit.py` with
+`grow=False`. Per scenario it greedily fills the trailing zero-slack with Catalan
+line-by-line, repoints the CMD table, and keeps the scenario at its 0x800-aligned
+size so the other 75 do not move. Lines that do not fit the slack stay Japanese.
+The technique was first proven on the opening line alone (67→111 B, 2026-06-26) and
+is now folded into the packer; build only via `build_patch.py`.
+
+**CONFIRMED on screen 2026-06-28** (Flycast, full safe build): loads, opening line
+and accents render, placement correct.
+
+**Ceiling ≈40%.** Slack is ~1.4 KB/scenario (~81 KB total) and full-width Catalan
+costs 2 bytes/char, so only ~3040 of 7575 lines fit; the rest render Japanese. This
+is a cartridge-space limit, not a code limit.
+
+**Do NOT relocate scenarios.** Growing scenarios and re-concatenating sector-aligned
+(the abandoned `grow=True` mode) **CRASHES**: the game locates scenarios by hardcoded
+offsets, not by scanning `SCP\0` (confirmed: New Game hangs / black screen
+2026-06-28). Fixed-position `grow=False` is the only viable mode.
+
+**Pagination is required.** Encode each line wrapped to **box=15** (the native box is
+~16 wide and 1–2 lines tall) and paginate with `04ff` every **2 lines**. A single
+`01ff`-only blob overflows the box and pushes the text out of vertical placement.
+
+**The clamp is required.** The `nullsplit` parser over-reads ~4 bytes past a `04ff`
+into the next command's header; the packer clamps each run to its command boundary so
+it does not corrupt the next command. (Skipping this corrupted commands and was an
+earlier crash cause; the clamp is also what took coverage from ~1% to ~40%.)
+
+**Path past ~30%: CONDENSE TO FIT, not engine hacks.** Both escape hatches are confirmed
+dead (2026-06-29): relocation crashes (hardcoded scattered offsets, confirmed even with a
+correct splice) and half-width is impossible (the font is 100% full-width, no half-width
+render path, engine draws dots for 1-byte codes). So the ~30% slack ceiling is the hard
+floor for full text; the only way up is writing tighter Catalan to fit each box's slack.
+Bar = comprehension + a wink at the dub, NOT dub fidelity (that's the licensor's job). See
+the per-box budget approach and [[feedback_translation_bar]].
+
+### Compression pass (2026-06-29): 232 KB overflow → 54.5 KB, ~77% recovered
+
+Starting point was **232 KB of overflow across 74 over-scenes**, i.e. 3.8× the 83 KB
+total slack (full Catalan wants ~4× the room that exists). Measure everything with
+`nullsplit.measure` + `fon_codec.fw` (the packer's real byte cost, not a char estimate);
+the number that matters is **per-scene overflow** `sum(max(0, used - slack))`, since slack
+never crosses scenes. Levers, biggest first, all at near-zero narrative loss:
+
+- **Terse menus** (~−97 KB): the navigation `Vols entrar a…? A:sí B:no` family is 1698
+  blocks. Drop `Botó` (the A/B labels are in the original JP, just verbose), then cut the
+  question to the room noun: `Passadís?`, `Habitació?` (のび太の部屋), `Cambra?`
+  (となりの部屋, the next room), `Sala?` (いま), `Saló?` (おうせつま), `Dormitori?` (しんしつ).
+- **Boilerplate by identical JP**: the dorayaki hunger-loop repeats 47–95×. `pastisset de
+  melmelada`→`pastisset` (the dub itself drops the qualifier for lip-sync), one short
+  canonical per recurring line.
+- **Tidy regex** (~−15 KB, zero judgment): `...`→`…` (the JP's own ellipsis glyph 0x8163,
+  6B→2B), `!!`→`!`, de-elongate (`Doraemooon`→`Doraemon`), destutter.
+- **`Gràcies`→`Merci`**, `Doraemon`→`D` in casual lines, terminal-period drop on
+  single-sentence lines.
+
+**Contraction combo-glyphs** (fon_codec.py, deployed, **−3.5 KB**): `l' L' d' D' m' M' n' N'
+s' S' t' T'` (apostrophe hugging the cell's right edge, wide M/N `_squeeze`d to 15 cols),
+enclitic-hyphen `-l -m -t -s -n -h -v` (dash at the left edge), enclitic-apos `'l 'n 's 't
+'m`. 24 glyphs in the free Greek slots after the 20 accents (`_CSPEC`/`_CSLOT`/`_FREE`).
+`fw()` does longest-match sequence encoding, so each combo is one glyph (2B not 4B): the
+text stays readable Catalan (`l'aigua`), the saving is encode-time only. The full-width cell
+has enough air that an edge-hugging mark never crowds the letter.
+
+**Kana reserve**: once nothing on screen renders kana (100% translated across every file),
+the whole hiragana+katakana block (~170 glyphs) is free to overwrite, so the glyph budget
+stops being a ceiling.
+
+**Propagate-by-identical-line** (Pluto, `TranslationTable.vue`): the `propagate to N` button
+fills every same-JP block with one canonical Catalan and saves. Use it so one edit lands on
+all copies, and to heal divergent duplicates (the same line had drifted into ~1000
+inconsistent translations).
+
+**Composition glyphs** (fon_codec.py, deployed, **−4.4 KB**): Sí/No menu glyphs, menu-only
+via the `A:sí`/`B:no` 4-char pattern in `fw()` so prose `sí`/`no` stay normal, plus one `?!`
+glyph mapped from both `!?` and `?!`. Built by `_compose` (`_COMPOSE`/`_OSLOT`): crop each
+letter to its ink, resize, set with even left/mid/right gaps (`no` is n8 + o9). Two-letter
+cells are denser than single glyphs but only ever land isolated (menu slot, line-end
+punctuation), never mid-prose. **Overflow now ~50 KB / 42 over, ~78% of the original 232 KB
+recovered.**
+
+**Next**: per-scene condensing of the remaining ~50 KB (worst is scene 22, the farewell
+monologue, the emotional climax you cannot truncate). Long lines are the best ratio but only
+~4 KB total; the bulk is many shorter lines, a grind, not a jackpot.
+
+ROM extracts, patches, and the dub corpus are gitignored working data in `sandbox/`.
 
 ## Translation notes
 

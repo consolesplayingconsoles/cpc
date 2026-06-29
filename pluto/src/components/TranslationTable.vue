@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { API_BASE } from '../composables/useNodes'
 import { useAchievement } from '../composables/useAchievement'
@@ -29,6 +29,8 @@ interface Block {
   jp: string
   jpBytes: number
   ca: string
+  scene?: number       // which scenario (box) this line lives in — drives the box budget
+  order?: number       // translator's story order; floats this block up on save (API _order_key)
   done?: boolean       // marked handled / keep-as-original (counts as done, no translation)
   note?: string
 }
@@ -85,6 +87,112 @@ function byteStatus(block: Block): 'pending' | 'ok' | 'warn' | 'over' {
   return 'over'
 }
 
+// ── Box (scenario) budget — the PRIMARY fit signal; per-line bytes stay as detail ───────────
+// The engine holds each scene in a fixed box with a little spare room (slack, from extraction).
+// The BOX is the unit that must fit: a single line over its own jpBytes is fine as long as the
+// box fits, because we trade space across the lines in it. sceneSlack is static (per active tab);
+// sceneFill (the live Catalan expansion) is debounced like the other badges so typing stays fast.
+const sceneSlackByTab = ref<Record<string, Record<number, number>>>({})   // tab -> scene -> slack
+const sceneSlack = computed<Record<number, number>>(() => sceneSlackByTab.value[activeTab.value] || {})
+const sceneFill  = ref<Record<number, number>>({})        // scene -> real expansion bytes (packer)
+const blockExp   = ref<Record<string, number>>({})        // block offset -> real per-line expansion
+// The meter's authoritative `used` comes from the PACKER, never a UI estimate (which ignores the
+// pagination/control bytes the build writes, and would under-report on already-tight slack). Posts
+// the tab's blocks to the box's /measure; debounced like the other badges so typing stays fast.
+async function measureScenes() {
+  const path = curPath.value, tab = activeTab.value
+  if (!path || !tab || !blocks.value.length) return
+  try {
+    const res = await fetch(
+      `${API_BASE}/translate/measure?path=${encodeURIComponent(path)}&file=${encodeURIComponent(tab)}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocks: blocks.value.map(b => ({ offset: b.offset, ca: b.ca, jpBytes: b.jpBytes })) }) })
+    const data = await res.json()
+    if (data && data.used) {
+      const f: Record<number, number> = {}
+      for (const k in data.used as Record<string, number>) f[+k] = (data.used as Record<string, number>)[k]
+      sceneFill.value = f
+      blockExp.value = (data.line as Record<string, number>) || {}   // per-line, for the cumulative
+    }
+  } catch { /* keep the last numbers on a transient failure */ }
+}
+function sceneStatus(scene: number): { used: number; slack: number; pct: number; state: 'ok' | 'warn' | 'over' } {
+  const slack = sceneSlack.value[scene] ?? 0
+  const used  = Math.max(0, sceneFill.value[scene] ?? 0)
+  const pct   = slack > 0 ? Math.round((used / slack) * 100) : (used > 0 ? 999 : 0)
+  const state: 'ok' | 'warn' | 'over' = used <= slack ? 'ok' : (used <= slack * 1.15 ? 'warn' : 'over')
+  return { used, slack, pct, state }
+}
+// Box-level project tally for the header: scenes that fit their slack vs scenes over it (from the
+// real measure). The meaningful aggregate — per-line "overflow" is noise, a line may exceed its own
+// bytes as long as its box fits.
+const sceneStats = computed(() => {
+  let fit = 0, over = 0
+  for (const k in sceneFill.value) {
+    if ((sceneFill.value[+k] ?? 0) <= (sceneSlack.value[+k] ?? 0)) fit++
+    else over++
+  }
+  return { fit, over, measured: fit + over }
+})
+
+// Per-scene navigation info for the header cells (speakers present + first/last JP and CA lines),
+// debounced like the other badges so typing stays fast.
+type SceneInfo = { speakers: number[]; firstJp: string; lastJp: string; firstCa: string; lastCa: string }
+const sceneInfoMap = ref<Record<number, SceneInfo>>({})
+function recomputeSceneInfo() {
+  // The game templates every scenario with the same opening line, so a line repeated across many
+  // scenes is boilerplate and useless for navigation. Count line frequency and surface each
+  // scene's first/last DISTINCTIVE line instead (fall back to any line if a scene is all-boilerplate).
+  // `done` lines (handled / texture artifacts marked done at extract) are skipped — they're noise.
+  const freq = new Map<string, number>()
+  for (const b of blocks.value) if (!b.done && b.jp) freq.set(b.jp, (freq.get(b.jp) || 0) + 1)
+  const BOILER = 8
+  const m: Record<number, SceneInfo & { seen: Set<number>; anyJp: string; anyCa: string }> = {}
+  for (const b of blocks.value) {
+    if (b.done) continue
+    const sc = b.scene ?? 0
+    let e = m[sc]
+    if (!e) e = m[sc] = { speakers: [], firstJp: '', lastJp: '', firstCa: '', lastCa: '', seen: new Set(), anyJp: b.jp, anyCa: b.ca }
+    if (!e.seen.has(b.speakerId)) { e.seen.add(b.speakerId); e.speakers.push(b.speakerId) }
+    if ((freq.get(b.jp) || 0) < BOILER) {                 // distinctive (not the templated boilerplate)
+      if (!e.firstJp) { e.firstJp = b.jp; e.firstCa = b.ca }
+      e.lastJp = b.jp; e.lastCa = b.ca
+    }
+  }
+  const out: Record<number, SceneInfo> = {}
+  for (const k in m) {
+    const e = m[+k]
+    out[+k] = {
+      speakers: e.speakers,
+      firstJp: e.firstJp || e.anyJp, lastJp: e.lastJp || e.anyJp,
+      firstCa: e.firstJp ? e.firstCa : e.anyCa, lastCa: e.lastJp ? e.lastCa : e.anyCa,
+    }
+  }
+  sceneInfoMap.value = out
+}
+function sceneInfo(scene: number): SceneInfo {
+  return sceneInfoMap.value[scene] || { speakers: [], firstJp: '', lastJp: '', firstCa: '', lastCa: '' }
+}
+
+// Story order is per SCENE (you reorder whole scenes, not lines): read/write `order` on every
+// block in the scene so the save-sort groups them. Duplicate story numbers are flagged on screen.
+function sceneOrder(scene: number): number | undefined {
+  return blocks.value.find(x => (x.scene ?? 0) === scene && x.order != null)?.order
+}
+function setSceneOrder(scene: number, ev: Event) {
+  const raw = (ev.target as HTMLInputElement).value
+  const n = raw === '' ? undefined : Number(raw)
+  for (const b of blocks.value) if ((b.scene ?? 0) === scene) b.order = n
+  saveState()
+}
+const dupStoryOrders = computed<Set<number>>(() => {
+  const byScene = new Map<number, number>()
+  for (const b of blocks.value) if (b.order != null) byScene.set(b.scene ?? 0, b.order)
+  const counts = new Map<number, number>()
+  for (const o of byScene.values()) counts.set(o, (counts.get(o) || 0) + 1)
+  return new Set([...counts].filter(([, c]) => c > 1).map(([o]) => o))
+})
+
 // Returns true if this block starts a new speaker run
 function isFirstInRun(idx: number): boolean {
   if (idx === 0) return true
@@ -135,9 +243,29 @@ async function saveState() {
     await fetch(`${API_BASE}/translate/${encodeURIComponent(curNs.value)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sources: { [activeTab.value]: blocks.value } }),
+      body: JSON.stringify({ sources: { [activeTab.value]: blocks.value }, sceneBudget: sceneSlackByTab.value }),
     })
   } catch { /* offline — edits stay local */ }
+}
+
+// ── Propagate: make every block with the SAME Japanese share one Catalan ───────
+// A line recurs dozens of times as separate blocks; without this they drift (1,000+
+// blocks were inconsistent) and every tightening would need N hand-edits. Click the
+// row you want as canonical -> it fills all identical-JP copies and saves once.
+const jpCounts = ref<Map<string, number>>(new Map())
+function recomputeJpCounts() {
+  const m = new Map<string, number>()
+  for (const b of blocks.value) if (b.jp) m.set(b.jp, (m.get(b.jp) || 0) + 1)
+  jpCounts.value = m
+}
+function dupCount(jp: string | undefined): number {
+  return jp ? (jpCounts.value.get(jp) || 1) : 1
+}
+function propagate(block: Block) {
+  if (!block.jp) return
+  const ca = block.ca
+  for (const b of blocks.value) if (b.jp === block.jp) b.ca = ca
+  saveState()
 }
 
 // ── Batocera pick → translate flow ─────────────────────────────────────────
@@ -287,6 +415,7 @@ async function openNs(ns: string) {
       selLang.value     = (data.lang as string) || ''
       curNs.value       = ns
       tabBlocks.value    = (data.sources as Record<string, Block[]>) || {}   // preload saved drafts
+      sceneSlackByTab.value = (data.sceneBudget as Record<string, Record<number, number>>) || {}  // box budgets baked into state
       speakerNames.value = (data.speakers as Record<string, Record<number, string>>) || {}
       toneLinks.value    = (data.toneLinks as string) || ''
       blocks.value       = []
@@ -309,6 +438,10 @@ const tabBlocks = ref<Record<string, Block[]>>({})
 const tabState  = ref<Record<string, 'idle' | 'loading' | 'ready' | 'error'>>({})
 const curPath   = ref('')                                  // the game's GDI path
 const discovering = ref(false)                             // /sources scan in flight
+// True while the disc is being scanned or any tab is still extracting -- the header stats are
+// partial/meaningless until everything's in, so we show a skeleton instead of flashing counts.
+const tabsLoading = computed(() =>
+  discovering.value || !tabs.value.length || tabs.value.some(t => tabState.value[t.safe] !== 'ready'))
 
 // % of the ACTIVE tab's lines that carry a translation. A computed over `blocks`
 // would re-run per keystroke (the freeze we just fixed), so it's a ref refreshed
@@ -334,50 +467,74 @@ function recomputeTabPct() {
 
 watch(tabBlocks, () => {
   clearTimeout(statsTimer)
-  statsTimer = setTimeout(() => { recomputeStats(); recomputeTabPct() }, 300)
+  statsTimer = setTimeout(() => { recomputeStats(); recomputeTabPct(); measureScenes(); recomputeSceneInfo() }, 300)
 }, { deep: true })
 watch(activeTab, recomputeTabPct, { immediate: true })
 
 
-// ── Virtual scrolling: render only the visible rows ────────────────────────────
-// The dialogue table is ~7.6k rows; mounting them all froze tab switches. We keep
-// the <table> (columns stay aligned via table-layout:fixed) and render only a
-// window of rows, padding the scroll height with spacer <tr>s. Row height is fixed
-// in CSS and MEASURED at runtime so the spacer math can't drift.
-const scrollEl  = ref<HTMLElement | null>(null)
-const scrollTop = ref(0)
-const viewportH = ref(800)
-const rowH      = ref(58)                  // measured after first render; CSS keeps rows uniform
-const BUFFER    = 8                         // extra rows rendered above/below the viewport
-function onScroll() { if (scrollEl.value) scrollTop.value = scrollEl.value.scrollTop }
-function measure() {
-  if (!scrollEl.value) return
-  viewportH.value = scrollEl.value.clientHeight || viewportH.value
-  const row = scrollEl.value.querySelector('.tt-row') as HTMLElement | null
-  if (row && row.offsetHeight > 0) rowH.value = row.offsetHeight
+// ── Scene accordion ────────────────────────────────────────────────────────────
+// The dialogue is grouped into scenario "boxes" the engine packs text into. Each is a
+// bordered, collapsible section so the translator works one scene at a time. Collapsed by
+// default: opening a project shows a clean scene index (~76 headers), not 7.6k rows, which
+// also means no virtual-scroll machinery is needed (a collapsed scene is one header row).
+const scrollEl = ref<HTMLElement | null>(null)
+const expanded = ref<Set<number>>(new Set())     // which scenes are open (empty = all collapsed)
+function toggleScene(scene: number) {
+  const next = new Set(expanded.value)
+  if (next.has(scene)) next.delete(scene); else next.add(scene)
+  expanded.value = next
 }
-const winStart = computed(() => Math.max(0, Math.floor(scrollTop.value / rowH.value) - BUFFER))
-const winEnd   = computed(() =>
-  Math.min(blocks.value.length, Math.ceil((scrollTop.value + viewportH.value) / rowH.value) + BUFFER))
-const topPad   = computed(() => winStart.value * rowH.value)
-const botPad   = computed(() => Math.max(0, (blocks.value.length - winEnd.value) * rowH.value))
-// visible slice carrying the REAL index, so isFirstInRun + keys stay correct
-const windowed = computed(() => {
-  const out: { block: Block; index: number }[] = []
-  for (let i = winStart.value; i < winEnd.value; i++) out.push({ block: blocks.value[i], index: i })
+type Disp =
+  | { kind: 'head'; scene: number; slack: number; offset: string }
+  | { kind: 'row'; block: Block; index: number; cum: number; slack: number }
+// Flat render list: each scene's header (carrying its start offset), then (only if expanded) its
+// rows. Reads scene/identity, not ca text, so editing a translation never rebuilds it.
+const displayRows = computed<Disp[]>(() => {
+  const arr = blocks.value
+  // Group blocks into scenes (disc order within each), then order the SCENES by the Story # you
+  // assign: numbered scenes float to the top ascending, the rest stay in disc order. Reads
+  // `order`/`scene`, not ca text, so this re-sorts when you set a Story # but not while translating.
+  type G = { scene: number; order: number | null; slack: number; offset: string; rows: { block: Block; index: number }[] }
+  const byScene = new Map<number, G>()
+  const groups: G[] = []
+  for (let i = 0; i < arr.length; i++) {
+    const b = arr[i]
+    const sc = b.scene ?? 0
+    let g = byScene.get(sc)
+    if (!g) {
+      g = { scene: sc, order: b.order ?? null, slack: sceneSlack.value[sc] ?? 0, offset: b.offset, rows: [] }
+      byScene.set(sc, g); groups.push(g)
+    }
+    if (g.order == null && b.order != null) g.order = b.order
+    g.rows.push({ block: b, index: i })
+  }
+  groups.sort((a, b) => {
+    if (a.order != null && b.order != null) return a.order - b.order
+    if (a.order != null) return -1
+    if (b.order != null) return 1
+    return a.scene - b.scene
+  })
+  const out: Disp[] = []
+  for (const g of groups) {
+    out.push({ kind: 'head', scene: g.scene, slack: g.slack, offset: g.offset })
+    if (expanded.value.has(g.scene)) {
+      let cum = 0
+      // running box usage in disc order, so each row shows how full the box is up to (and incl.) it
+      for (const r of g.rows) {
+        cum += blockExp.value[r.block.offset] || 0
+        out.push({ kind: 'row', block: r.block, index: r.index, cum, slack: g.slack })
+      }
+    }
+  }
   return out
 })
-// reset to the top + re-measure whenever the active tab changes
+// Collapse everything + scroll to top when the active tab changes.
 watch(activeTab, () => {
-  scrollTop.value = 0
+  expanded.value = new Set()
   if (scrollEl.value) scrollEl.value.scrollTop = 0
-  nextTick(measure)
+  sceneFill.value = {}                   // clear -> meters show "…" until the new measure lands
+  measureScenes()                        // real per-scene budget for the newly active tab
 })
-onMounted(() => {
-  nextTick(measure)
-  window.addEventListener('resize', measure)
-})
-onUnmounted(() => window.removeEventListener('resize', measure))
 
 
 // Disc metadata (IP.BIN) for the header card — instant (~74ms), fetched on open.
@@ -488,13 +645,14 @@ const activeFileName  = computed(() => { const f = activeTabObj.value?.file || '
 watch([railOpen, activeTab], () => {
   if (railOpen.value && curNs.value && activeTab.value && blocks.value.length) saveState()
 })
-function mapBlocks(raw: { offset: number; jpBytes: number; hex: string; speaker: number }[]): Block[] {
+function mapBlocks(raw: { offset: number; jpBytes: number; hex: string; speaker: number; scene?: number }[]): Block[] {
   return (raw || []).map(b => ({
     offset:    '0x' + b.offset.toString(16).toUpperCase().padStart(6, '0'),
     speakerId: b.speaker ?? 0,
     jp:        decodeBlock(b.hex),
     jpBytes:   b.jpBytes,
     ca:        '',
+    scene:     b.scene ?? 0,
   }))
 }
 
@@ -516,7 +674,12 @@ async function loadSources(path: string) {
   }
   tabs.value = [...srcs].sort((a, b) => a.view - b.view)
   const state: Record<string, 'idle' | 'ready'> = {}
-  srcs.forEach(s => { state[s.safe] = (tabBlocks.value[s.safe]?.length ? 'ready' : 'idle') })
+  // Re-extract (to gain `scene`/budget tags) unless the saved draft already carries them; loadTab
+  // reconciles the saved ca/order/done back in by offset, so this self-heals pre-scene projects.
+  srcs.forEach(s => {
+    const saved = tabBlocks.value[s.safe]
+    state[s.safe] = (saved && saved.length && saved[0].scene !== undefined) ? 'ready' : 'idle'
+  })
   tabState.value = state
   const primary = tabs.value[0]
   if (primary) {
@@ -530,7 +693,11 @@ async function loadSources(path: string) {
     .sort((a, b) => a.loadOrder - b.loadOrder)
     .filter(s => s.safe !== primary?.safe && tabState.value[s.safe] !== 'ready')
     .map(s => loadTab(s.safe))
-  Promise.all(rest).then(() => { if (curNs.value) persistTotal() })
+  Promise.all(rest).then(() => {
+    // Everything's in: compute the real stats NOW so they're fresh the instant the skeleton lifts.
+    recomputeStats(); recomputeTabPct(); recomputeSceneInfo(); recomputeJpCounts(); measureScenes()
+    if (curNs.value) persistTotal()
+  })
 }
 
 // Write the all-sources block count back to state.json so the projects list shows
@@ -554,7 +721,25 @@ async function loadTab(safe: string) {
   try {
     const res  = await fetch(`${API_BASE}/translate/extract?path=${encodeURIComponent(curPath.value)}&file=${encodeURIComponent(safe)}`)
     const data = await res.json()
-    tabBlocks.value = { ...tabBlocks.value, [safe]: mapBlocks(data.blocks) }
+    // Reconcile: the fresh extract carries `scene` + jpBytes; overlay any saved draft's
+    // ca/order/done onto it by offset, so re-extracting to gain scene tags never loses work.
+    const fresh = mapBlocks(data.blocks)
+    const prior = tabBlocks.value[safe]
+    if (prior && prior.length) {
+      const byOff = new Map(prior.map(b => [b.offset, b]))
+      for (const b of fresh) {
+        const s = byOff.get(b.offset)
+        if (s) { b.ca = s.ca || ''; b.order = s.order; b.done = s.done ?? b.done }   // keep extract's done (artifacts) if the draft has none
+      }
+    }
+    tabBlocks.value = { ...tabBlocks.value, [safe]: fresh }
+    // Bake the per-scene slack (from extraction) for this tab's box-budget meter. Only the
+    // SCP/CMD source (nullsplit) ships scenes; others simply have no box meter.
+    if (Array.isArray(data.scenes)) {
+      const sl: Record<number, number> = {}
+      for (const s of data.scenes as { scene: number; slack: number }[]) sl[s.scene] = s.slack
+      sceneSlackByTab.value = { ...sceneSlackByTab.value, [safe]: sl }
+    }
     tabState.value  = { ...tabState.value, [safe]: 'ready' }
     if (activeTab.value === safe) blocks.value = tabBlocks.value[safe]
   } catch {
@@ -828,11 +1013,12 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
         />
       </div>
       <div class="tt-stats">
-        <span class="tt-total">{{ stats.total.toLocaleString() }} blocks</span>
-        <span v-if="stats.pending" class="stat pending">{{ stats.pending }} pending</span>
-        <span class="stat ok">{{ stats.ok }} ok</span>
-        <span class="stat warn">{{ stats.warn }} warn</span>
-        <span class="stat over">{{ stats.over }} overflow</span>
+        <template v-if="tabsLoading">
+          <span class="stat-skel" style="width:78px"></span>
+        </template>
+        <template v-else>
+          <span class="tt-total">{{ stats.total.toLocaleString() }} blocks</span>
+        </template>
         <span class="tt-actions">
           <span v-if="buildMsg" class="tt-build-msg" :class="{ 'tt-build-msg--fail': buildFailed }">{{ buildMsg }}</span>
           <UiButton class="tt-action" :disabled="building || extracting" @click="saveDraft">{{ draftSaved ? 'Saved ✓' : 'Save draft' }}</UiButton>
@@ -863,6 +1049,11 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
           <span v-else-if="tabState[t.safe] === 'error'">!</span>
           <span v-else class="tt-tab-dot">·</span>
         </span>
+        <!-- scenes are a STORY.PAC concept; show fit/total only on the active tab that has them -->
+        <span v-if="activeTab === t.safe && sceneStats.measured" class="tt-tab-scenes"
+              :title="`${sceneStats.fit} of ${sceneStats.measured} scenes fit their byte budget · ${sceneStats.over} over`">
+          {{ sceneStats.fit }}/{{ sceneStats.measured }} fit
+        </span>
       </button>
       <button v-if="tabs.some(t => tabState[t.safe] === 'error' || tabState[t.safe] === 'idle')"
               class="tt-tab tt-tab-retry" title="Retry sources that didn't load" @click="retryTabs">
@@ -880,74 +1071,115 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
     />
 
     <!-- Table -->
-    <div class="tt-table-wrap" ref="scrollEl" @scroll="onScroll">
+    <div class="tt-table-wrap" ref="scrollEl">
       <table class="tt-table">
         <thead>
           <tr>
-            <th class="col-offset">Offset</th>
+            <th class="col-order" title="Disk / Story # — the scene's disk position and the story order you assign (floats up on save)">Disk/Story #</th>
+            <th class="col-offset" title="Offset — the line's byte position on the disc">Offset</th>
             <th v-if="showLegend" class="col-speaker">Speaker</th>
             <th class="col-jp">Japanese</th>
-            <th class="col-ca">{{ langLabel || 'Catalan' }} <span class="col-ca-pct">{{ tabProg.done.toLocaleString() }}/{{ tabProg.total.toLocaleString() }} ({{ tabProg.pct }}%)</span></th>
-            <th class="col-bytes">Bytes</th>
+            <th class="col-ca">{{ langLabel || 'Catalan' }} <span class="col-ca-pct">{{ tabProg.done.toLocaleString() }}/{{ tabProg.total.toLocaleString() }} <strong>({{ tabProg.pct }}%)</strong></span></th>
+            <th class="col-bytes" title="Per-line bytes vs the original — informational">Bytes</th>
             <th class="col-done" title="Mark handled — kept as original Japanese">Done</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-if="topPad" class="tt-spacer" :style="{ height: topPad + 'px' }" aria-hidden="true">
-            <td :colspan="showLegend ? 6 : 5"></td>
-          </tr>
-          <tr
-            v-for="{ block, index } in windowed"
-            :key="block.offset"
-            :class="['tt-row', byteStatus(block), { 'run-start': isFirstInRun(index), 'run-cont': !isFirstInRun(index) }]"
-          >
-            <td class="col-offset mono">{{ block.offset }}</td>
-
-            <td v-if="showLegend" class="col-speaker">
-              <!-- Speaker shown once per run; continuation rows get a thin colour line -->
-              <template v-if="isFirstInRun(index)">
-                <div class="speaker-cell">
-                  <span class="speaker-dot" :style="{ background: speakerColor(block.speakerId) }" />
-                  <span class="speaker-name">{{ speakerLabel(block.speakerId) }}</span>
+          <template v-for="item in displayRows"
+                    :key="item.kind === 'head' ? 'h' + item.scene : item.block.offset">
+            <!-- Scene box: a collapsible header with the budget as used / available bytes -->
+            <tr v-if="item.kind === 'head'"
+                :class="['scene-head', sceneStatus(item.scene).state]"
+                @click="toggleScene(item.scene)">
+              <td class="col-order disk-story">
+                <span class="scene-caret">{{ expanded.has(item.scene) ? '▾' : '▸' }}</span>
+                <span class="scene-id mono">{{ item.scene + 1 }}/</span>
+                <input class="order-input" type="number" min="1" placeholder="—"
+                       :class="{ dup: sceneOrder(item.scene) != null && dupStoryOrders.has(sceneOrder(item.scene)!) }"
+                       :value="sceneOrder(item.scene)" @change="setSceneOrder(item.scene, $event)" @click.stop
+                       title="Story Scene number — unique; reorders scenes on save" />
+              </td>
+              <td class="col-offset mono">{{ item.offset }}</td>
+              <td v-if="showLegend" class="col-speaker">
+                <span class="scene-speakers">
+                  <span v-for="sid in sceneInfo(item.scene).speakers" :key="sid"
+                        class="speaker-dot" :style="{ background: speakerColor(sid) }" :title="speakerLabel(sid)" />
+                </span>
+              </td>
+              <td class="col-jp scene-snippet">
+                {{ sceneInfo(item.scene).firstJp }}<template v-if="sceneInfo(item.scene).lastJp && sceneInfo(item.scene).lastJp !== sceneInfo(item.scene).firstJp"> … {{ sceneInfo(item.scene).lastJp }}</template>
+              </td>
+              <td class="col-ca scene-snippet">
+                {{ sceneInfo(item.scene).firstCa }}<template v-if="sceneInfo(item.scene).lastCa && sceneInfo(item.scene).lastCa !== sceneInfo(item.scene).firstCa"> … {{ sceneInfo(item.scene).lastCa }}</template>
+              </td>
+              <td class="col-bytes">
+                <div class="bytes-cell" :class="sceneFill[item.scene] !== undefined ? sceneStatus(item.scene).state : ''">
+                  <template v-if="sceneFill[item.scene] !== undefined">
+                    <span class="bytes-used">{{ sceneStatus(item.scene).used.toLocaleString() }}</span>
+                    <span class="bytes-sep">/</span>
+                    <span class="bytes-budget">{{ item.slack.toLocaleString() }}</span>
+                  </template>
+                  <span v-else class="stat-skel" style="width:56px"></span>
                 </div>
-              </template>
-              <div v-else class="speaker-cont">
-                <span class="speaker-cont-line" :style="{ background: speakerColor(block.speakerId) }" />
-              </div>
-            </td>
+              </td>
+              <td class="col-done"></td>
+            </tr>
+            <!-- A line within the scene -->
+            <tr v-else
+                :class="['tt-row', 'scene-body', { 'run-start': isFirstInRun(item.index), 'run-cont': !isFirstInRun(item.index) }]">
+              <td class="col-order"></td>
+              <td class="col-offset mono">{{ item.block.offset }}</td>
 
-            <td class="col-jp">
-              <span class="jp-text">{{ block.jp }}</span>
-              <span v-if="block.note" class="block-note" :title="block.note">⚠</span>
-            </td>
+              <td v-if="showLegend" class="col-speaker">
+                <template v-if="isFirstInRun(item.index)">
+                  <div class="speaker-cell">
+                    <span class="speaker-dot" :style="{ background: speakerColor(item.block.speakerId) }" />
+                    <span class="speaker-name">{{ speakerLabel(item.block.speakerId) }}</span>
+                  </div>
+                </template>
+                <div v-else class="speaker-cont">
+                  <span class="speaker-cont-line" :style="{ background: speakerColor(item.block.speakerId) }" />
+                </div>
+              </td>
 
-            <td class="col-ca">
-              <div class="ca-cell">
-                <textarea
-                  class="ca-input"
-                  v-model="block.ca"
-                  rows="2"
-                  @change="saveState"
-                />
-              </div>
-            </td>
+              <td class="col-jp">
+                <span class="jp-text">{{ item.block.jp }}</span>
+                <span v-if="item.block.note" class="block-note" :title="item.block.note">⚠</span>
+              </td>
 
-            <td class="col-bytes">
-              <div class="bytes-cell" :class="byteStatus(block)">
-                <span class="bytes-used">{{ caBytes(block.ca) }}</span>
-                <span class="bytes-sep">/</span>
-                <span class="bytes-budget">{{ block.jpBytes }}</span>
-              </div>
-            </td>
+              <td class="col-ca">
+                <div class="ca-cell">
+                  <textarea class="ca-input" v-model="item.block.ca" rows="2" @change="saveState" />
+                  <button v-if="dupCount(item.block.jp) > 1" class="ca-prop" type="button"
+                          :title="`Copy this Catalan into all ${dupCount(item.block.jp)} identical lines`"
+                          @click="propagate(item.block)">propagate to {{ dupCount(item.block.jp) }}</button>
+                </div>
+              </td>
 
-            <td class="col-done">
-              <input type="checkbox" v-model="block.done" @change="saveState"
-                     title="Done — keep original Japanese" />
-            </td>
-          </tr>
-          <tr v-if="botPad" class="tt-spacer" :style="{ height: botPad + 'px' }" aria-hidden="true">
-            <td :colspan="showLegend ? 6 : 5"></td>
-          </tr>
+              <td class="col-bytes">
+                <!-- the line's own size vs its Japanese (neutral reference) -->
+                <div class="bytes-cell">
+                  <span class="bytes-used">{{ caBytes(item.block.ca) }}</span>
+                  <span class="bytes-sep">/</span>
+                  <span class="bytes-budget">{{ item.block.jpBytes }}</span>
+                </div>
+                <!-- cumulative box fill to this line: bar + running aggregate; over where it exceeds slack -->
+                <div class="box-agg" :class="{ over: item.cum > item.slack }"
+                     :title="`box used to here: ${item.cum.toLocaleString()} / ${item.slack.toLocaleString()} B`">
+                  <span class="box-agg-label">Agg</span>
+                  <span class="box-progress">
+                    <span class="box-progress-fill"
+                          :style="{ width: Math.min(100, item.slack ? item.cum / item.slack * 100 : 0) + '%' }"></span>
+                  </span>
+                </div>
+              </td>
+
+              <td class="col-done">
+                <input type="checkbox" v-model="item.block.done" @change="saveState"
+                       title="Done — keep original Japanese" />
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </div>
@@ -1067,6 +1299,14 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .stat.muted { color: var(--text-faint); padding: 0; }
 .stat-sep { color: var(--line-strong); }
 
+/* Skeleton bars for the header stats while the disc scans / tabs extract (no flashing counts). */
+.stat-skel {
+  display: inline-block; height: 14px; border-radius: 7px;
+  margin-right: var(--sp-2); background: var(--line);
+  animation: tt-skel 1.2s ease-in-out infinite;
+}
+@keyframes tt-skel { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.85; } }
+
 /* Source tabs (one per discovered file) */
 .tt-tabs {
   display: flex; flex-wrap: wrap; gap: 6px;
@@ -1090,6 +1330,12 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   color: var(--text-faint); min-width: 14px; text-align: right;
 }
 .tt-tab-dot { color: var(--line-strong); }
+/* scene fit/total badge, shown only on the active tab that has scenes (STORY.PAC) */
+.tt-tab-scenes {
+  font-family: var(--font-mono); font-size: 11px;
+  padding-left: 8px; margin-left: 6px; border-left: 1px solid var(--line-strong);
+  color: var(--text-muted);
+}
 /* spinners are now UiSpinner */
 
 .tt-discovering-note {
@@ -1181,9 +1427,43 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .col-jp { width: 30%; }
 .col-ca { width: 35%; }
 .col-ca-pct { font-weight: 400; color: var(--text-muted); font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
-.col-bytes { width: 80px; }
+.col-bytes { width: 84px; }
 .col-done { width: 44px; text-align: center; }
 .col-done input { cursor: pointer; }
+
+/* Disk/Story # column: the scene header shows disk# / story-input ("1/[5]"); rows leave it blank. */
+.col-order { width: 92px; }
+.disk-story { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.order-input {
+  width: 44px; padding: 2px 4px; text-align: center;
+  border: 1px solid var(--line); border-radius: 4px;
+  background: var(--surface); color: var(--text);
+  font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.order-input::placeholder { color: var(--text-faint); }
+.order-input.dup { border-color: var(--bad); color: var(--bad); }   /* duplicate story number */
+
+/* Scene accordion — the header row mirrors the columns: id, speakers, JP/CA snippets, budget. */
+.scene-head { cursor: pointer; border-top: 2px solid var(--line-strong); background: var(--surface-2, var(--surface)); }
+.scene-head:hover { filter: brightness(0.985); }
+.scene-head td { padding: var(--sp-2) var(--sp-3); vertical-align: middle; }
+.scene-caret { color: var(--text-muted); font-size: 11px; }
+.scene-id { font-weight: 600; color: var(--text); font-size: 12px; }
+.scene-speakers { display: flex; gap: 4px; flex-wrap: wrap; }
+/* First … last line preview, clipped to the row height. */
+.scene-snippet {
+  color: var(--text-muted); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+/* Budget colour + a left rail so each scene reads as a bordered box. */
+.scene-head.ok   { border-left: 3px solid var(--ok); }
+.scene-head.warn { border-left: 3px solid var(--warn); }
+.scene-head.over { border-left: 3px solid var(--bad); }
+.tt-row.scene-body td:first-child { border-left: 3px solid var(--line); }
+
+/* Keep the whole table clear of the floating "Automatic Translation" rail tab on the right.
+   Margin on the table area shifts the header and rows together — no internal misalignment. */
+.tt-table-wrap { margin-right: 34px; }
 
 /* Build pre-flight warning modal */
 .tt-modal-backdrop {
@@ -1318,6 +1598,15 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   gap: var(--sp-1);
   align-items: flex-start;
 }
+/* Propagate-to-identical button: shows the duplicate count; fills all copies with this Catalan. */
+.ca-prop {
+  flex: none; align-self: stretch;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.2;
+  padding: 2px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--text-muted); cursor: pointer; white-space: nowrap;
+}
+.ca-prop:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-weak, var(--surface)); }
 .ca-input {
   flex: 1;
   border: 1px solid var(--line);
@@ -1344,6 +1633,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .bytes-cell {
   font-family: var(--font-mono);
   font-size: 12px;
+  color: var(--text-muted);          /* per-line = a neutral reference, not a verdict */
   display: flex;
   align-items: center;
   gap: 2px;
@@ -1351,10 +1641,21 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   border-radius: var(--r-sm);
   width: fit-content;
 }
+/* (the coloured variants below are for the SCENE-HEAD budget cell, which carries the box verdict) */
 .bytes-cell.pending { background: #eff6ff; color: #2563eb; }
 .bytes-cell.ok   { background: #dcfce7; color: var(--ok); }
 .bytes-cell.warn { background: #fef3c7; color: var(--warn); }
 .bytes-cell.over { background: #fee2e2; color: var(--bad); }
+
+/* Cumulative box fill under each line: how full the scene's slack is up to (and incl.) this line,
+   as a bar + a running aggregate number. Grows as you go down; turns red on the line where the scene
+   crosses its slack = trim above here. */
+.box-agg { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
+.box-progress { flex: none; height: 3px; width: 34px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.box-progress-fill { display: block; height: 100%; background: var(--ok); transition: width 0.2s ease; }
+.box-agg-label { font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-faint); }
+.box-agg.over .box-progress-fill { background: var(--bad); }
+.box-agg.over .box-agg-label { color: var(--bad); }
 .bytes-sep { opacity: 0.5; }
 .bytes-budget { opacity: 0.7; }
 
