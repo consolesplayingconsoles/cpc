@@ -126,6 +126,48 @@ paths:
           description: path or file missing
         '502':
           description: extraction failed / source not cached
+  /measure:
+    post:
+      summary: Per-scene Catalan byte cost (the box-budget meter)
+      description: >
+        Runs the packer's `nullsplit.measure` on the posted blocks (each carrying its
+        current `ca`) against the cached source, returning the real per-scene expansion
+        the build will pay plus the per-line cost for the cumulative bar. Pluto proxies
+        this to drive the translation tab's budget meter. Only SCP/nullsplit sources have
+        per-scene boxes.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Absolute GDI path on the box (same one passed to /sources).
+          schema: { type: string }
+        - name: file
+          in: query
+          required: true
+          description: The source's `safe` name (a nullsplit source, e.g. STORY.PAC).
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                blocks:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      offset:  { type: string }
+                      ca:      { type: string }
+                      jpBytes: { type: integer }
+      responses:
+        '200':
+          description: '{ used: {scene: bytes}, line: {offset: bytes} } per-scene total + per-line'
+        '400':
+          description: path or file missing
+        '502':
+          description: measure failed / source not cached
 components:
   schemas:
     Source:

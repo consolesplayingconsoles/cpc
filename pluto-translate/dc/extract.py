@@ -23,6 +23,23 @@ from parsers import nullsplit, lines, ptrtable   # console-agnostic format strat
 PARSERS = {"nullsplit": nullsplit.parse, "lines": lines.parse, "ptrtable": ptrtable.parse}
 
 
+def _has_gaiji(hexstr):
+    """True if a block contains an SJIS user-defined (gaiji) glyph -- lead byte 0xF0-0xFC. Those are
+    font/texture data, not real text. Walks SJIS lead/trail so a normal char's trail isn't misread.
+    Codec-free (Batocera's python has no shift_jis)."""
+    try:
+        b = bytes.fromhex(hexstr or "")
+    except ValueError:
+        return False
+    i = 0
+    while i < len(b):
+        c = b[i]
+        if 0xf0 <= c <= 0xfc:
+            return True
+        i += 2 if (0x81 <= c <= 0x9f or 0xe0 <= c <= 0xef) else 1
+    return False
+
+
 def main(cache_dir, safe):
     cfg = sources._load_config()
     parser_by_kind = {e["kind"]: e.get("parser", "nullsplit")
@@ -40,8 +57,29 @@ def main(cache_dir, safe):
     with open(os.path.join(cache_dir, "files", safe), "rb") as fh:
         data = bytearray(fh.read())
     blocks = PARSERS.get(parser, nullsplit.parse)(data)
-    print(json.dumps({"blocks": blocks, "total": len(blocks),
-                      "kind": kind, "parser": parser}))
+    # Mark texture/graphics artifacts as DONE (keep-original) up front: a block carrying an SJIS
+    # user-defined (gaiji) glyph -- lead byte 0xF0-0xFC -- is font/texture data the parser swept up,
+    # never real dialogue. Using the existing `done` state (not a UI heuristic) keeps them out of the
+    # progress %, out of the build (no-op), and reusable across games. Codec-free for Batocera.
+    for blk in blocks:
+        if _has_gaiji(blk.get("hex", "")):
+            blk["done"] = True
+    out = {"blocks": blocks, "total": len(blocks), "kind": kind, "parser": parser}
+
+    # Box-budget data (static, baked in at extract, NOT a separate endpoint): tag each block with
+    # its scene and ship the per-scene slack, so the UI can group blocks into scenes and meter the
+    # Catalan against each box's budget. Only the SCP/CMD format (nullsplit) has per-scene boxes.
+    if parser == "nullsplit":
+        import bisect
+        from packers import nullsplit as _nspack
+        b = _nspack.budget(data)
+        starts = b["starts"]
+        for blk in blocks:
+            o = blk.get("offset", 0)
+            o = int(o, 16) if isinstance(o, str) else o
+            blk["scene"] = max(0, bisect.bisect_right(starts, o) - 1)
+        out["scenes"] = b["scenes"]
+    print(json.dumps(out))
 
 
 if __name__ == "__main__":
