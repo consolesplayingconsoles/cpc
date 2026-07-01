@@ -143,9 +143,42 @@ cells are denser than single glyphs but only ever land isolated (menu slot, line
 punctuation), never mid-prose. **Overflow now ~50 KB / 42 over, ~78% of the original 232 KB
 recovered.**
 
-**Next**: per-scene condensing of the remaining ~50 KB (worst is scene 22, the farewell
-monologue, the emotional climax you cannot truncate). Long lines are the best ratio but only
-~4 KB total; the bulk is many shorter lines, a grind, not a jackpot.
+**Character faces + clean digraph pairs** (fon_codec.py, deployed): two hand-drawn 20x19 faces
+(`_FACES`, math-drawn rings/disks) mapped from `D` (Doraemon, 0 B, charm) and `Nobita` (−10 B
+each, kept whole in `Nobita Nobi`); only the two leads, the supporting cast keeps names so the
+player learns them. Plus the top-6 "clean" glyph pairs `qu ss ti it ix gu` (Catalan digraphs +
+narrow-letter pairs, `_CLEAN`/`_CLSLOT`, composed evenly, applied everywhere, lowercase only):
+−9.3 KB. All 35 free Greek slots are now used. Arbitrary frequent bigrams (`es ar en de`, ~53
+KB) were REJECTED as "weird/dirty"; digraphs + narrow pairs are the clean ceiling within Greek.
+
+### Glyph state (after the first Flycast playtest, 2026-06-30)
+
+**CONFIRMED on screen** (scene 41 played in full Catalan): accents, contractions (`d'`, `T'`),
+digraphs (`qu`, `gu`, `ss`, `ix`), both faces, the `A:sí B:no` menus all render and read. The
+end-to-end build (`build_patch.py` + `fon_codec.py` → GDIBuilder → boot) is proven.
+
+**NEEDS TWEAKING** (seen in-game): `T'` apostrophe hugs the T too tight, add a column of gap;
+`gu`/`qu` squeeze the `u` thin (`Enguany` reads near `Engany`), widen the 2nd letter; `ix` good,
+a hair wider helps; sentence-start capitals (`Qu`, `Ss`) stay unglyphed (lowercase-only,
+inconsistent); uneven inter-letter spacing accepted as fan-TL reality.
+
+**NOT TESTED**: only scene 41 was played. Most glyphs (Sí/No, `?!`, the enclitics, `M'`/`N'`,
+the faces in varied contexts) are not yet visually confirmed beyond it.
+
+**NEXT CANDIDATES** (ranked): more clean narrow pairs `tr ri ir rt lt li fi il` (+~7.5 KB, but
+out of Greek slots); **the unlock** = the kana reserve (~170 slots) frees once nothing renders
+kana on ANY surface (all 9 files translated), then digraph/narrow coverage can close most of
+the rest; capital pair variants (`Qu`, `Ss`) for consistency; refine the squeezed glyphs.
+Quality bar holds: digraphs + narrow pairs only, no dirtying the text for bytes.
+
+**Overflow now ~37 KB / 36 over, ~84% of the original 232 KB recovered.** Scene 41 (the whole
+first chapter) fits and is playtested in full Catalan.
+
+**Next (translation, not glyphs)**: per-scene condensing of the remaining ~37 KB (worst is
+scene 22, the farewell monologue, the emotional climax you cannot truncate). Modelled at
+~1,700 hand-edits @25% condense (longest-first); the clean glyphs shave ~400-700 of those.
+The reproducible pipeline (`scripts/compress.py`, GET→transform→PUT→measure via the Pluto API)
+owns the mechanical layer; the rest is choosing small sacrifices or smart rewordings.
 
 ROM extracts, patches, and the dub corpus are gitignored working data in `sandbox/`.
 

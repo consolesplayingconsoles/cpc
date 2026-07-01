@@ -12,6 +12,8 @@ import MetadataCard from './MetadataCard.vue'
 import type { GameMeta } from './MetadataCard.vue'
 import SpeakerLegend from './SpeakerLegend.vue'
 import PromptCopier from './PromptCopier.vue'
+import TranslationRow from './TranslationRow.vue'
+import { type Block, caBytes } from '../lib/translation'
 
 const route  = useRoute()
 const router = useRouter()
@@ -21,18 +23,6 @@ const disclaimerDismissed = ref(sessionStorage.getItem('cpc.translate.disclaimer
 function dismissDisclaimer() {
   disclaimerDismissed.value = true
   sessionStorage.setItem('cpc.translate.disclaimer', '1')
-}
-
-interface Block {
-  offset: string
-  speakerId: number
-  jp: string
-  jpBytes: number
-  ca: string
-  scene?: number       // which scenario (box) this line lives in — drives the box budget
-  order?: number       // translator's story order; floats this block up on save (API _order_key)
-  done?: boolean       // marked handled / keep-as-original (counts as done, no translation)
-  note?: string
 }
 
 const blocks = ref<Block[]>([
@@ -68,14 +58,6 @@ function speakerColor(id: number) {
   if (SPEAKER_COLORS[id]) return SPEAKER_COLORS[id]
   if (id === 0) return '#8a8a8a'                          // untagged / narration
   return `hsl(${(id * 67) % 360}, 42%, 58%)`              // stable, distinct-ish for the rest
-}
-
-// The game's font is FULL-WIDTH Shift-JIS: every character costs 2 bytes, and
-// accents fold to base Latin (à→a, the stock font has no accented glyphs). So the
-// real ROM cost is 2 * (folded char count) — NOT the UTF-8 length, which ran ~half.
-function caBytes(text: string) {
-  const folded = text.normalize('NFD').replace(/[̀-ͯ]/g, '')
-  return folded.length * 2
 }
 
 function byteStatus(block: Block): 'pending' | 'ok' | 'warn' | 'over' {
@@ -236,6 +218,7 @@ const LANGUAGES = [
 type Step = 'pick' | 'table'
 const step = ref<Step>('pick')
 
+let saveStateTimer: ReturnType<typeof setTimeout> | null = null
 async function saveState() {
   if (!curNs.value || !activeTab.value) return
   try {
@@ -247,6 +230,13 @@ async function saveState() {
     })
   } catch { /* offline — edits stay local */ }
 }
+function debouncedSaveState() {
+  if (saveStateTimer) clearTimeout(saveStateTimer)
+  saveStateTimer = setTimeout(saveState, 1200)
+}
+// Typing must do NOTHING heavy. The fit-meter + stats refresh only when you leave a field (blur),
+// not on each keystroke — so editing a line is as light as typing into a plain textbox.
+function onCaCommit() { bumpEdit(); debouncedSaveState() }
 
 // ── Propagate: make every block with the SAME Japanese share one Catalan ───────
 // A line recurs dozens of times as separate blocks; without this they drift (1,000+
@@ -265,6 +255,7 @@ function propagate(block: Block) {
   if (!block.jp) return
   const ca = block.ca
   for (const b of blocks.value) if (b.jp === block.jp) b.ca = ca
+  bumpEdit()
   saveState()
 }
 
@@ -465,10 +456,15 @@ function recomputeTabPct() {
   speakerPct.value = sp
 }
 
-watch(tabBlocks, () => {
+// An edit bumps this cheap counter; the heavy recompute debounces off IT. A `{ deep: true }`
+// watch over the whole blocks array re-traversed all ~7,600 blocks on every keystroke — that was
+// the typing lag. A shallow counter watch costs nothing per char.
+const editTick = ref(0)
+function bumpEdit() { editTick.value++ }
+watch(editTick, () => {
   clearTimeout(statsTimer)
   statsTimer = setTimeout(() => { recomputeStats(); recomputeTabPct(); measureScenes(); recomputeSceneInfo() }, 300)
-}, { deep: true })
+})
 watch(activeTab, recomputeTabPct, { immediate: true })
 
 
@@ -480,13 +476,31 @@ watch(activeTab, recomputeTabPct, { immediate: true })
 const scrollEl = ref<HTMLElement | null>(null)
 const expanded = ref<Set<number>>(new Set())     // which scenes are open (empty = all collapsed)
 function toggleScene(scene: number) {
-  const next = new Set(expanded.value)
-  if (next.has(scene)) next.delete(scene); else next.add(scene)
-  expanded.value = next
+  // Accordion: one box open at a time. displayRows emits every header but only the
+  // OPEN box's rows, so the rendered DOM is one scene's textareas, not the whole
+  // 7,600-line file. Keeps typing fast no matter how many boxes you've worked through.
+  expanded.value = expanded.value.has(scene) ? new Set() : new Set([scene])
+}
+// Sort toggle: float the over-budget boxes to the top so you can work through them. The offsets are
+// fixed (slack is per-box, never shared), so this only reorders the VIEW, never the disc. Snapshots
+// the overflow when you click (not live) so the box you're editing doesn't reshuffle under you; click
+// again to re-rank — a box you've just brought into budget drops to the green pile. Smallest overflow
+// sits on top, so you peel the closest-to-fitting boxes off first.
+const sortMode = ref<'story' | 'overflow'>('story')
+const overflowRank = ref<Record<number, number>>({})
+function toggleSortOverflow() {
+  if (sortMode.value === 'overflow') { sortMode.value = 'story'; return }
+  const r: Record<number, number> = {}
+  for (const k in sceneFill.value) {
+    const over = (sceneFill.value[+k] ?? 0) - (sceneSlack.value[+k] ?? 0)
+    if (over > 0) r[+k] = over
+  }
+  overflowRank.value = r
+  sortMode.value = 'overflow'
 }
 type Disp =
   | { kind: 'head'; scene: number; slack: number; offset: string }
-  | { kind: 'row'; block: Block; index: number; cum: number; slack: number }
+  | { kind: 'row'; block: Block; index: number; cum: number; slack: number; runStart: boolean }
 // Flat render list: each scene's header (carrying its start offset), then (only if expanded) its
 // rows. Reads scene/identity, not ca text, so editing a translation never rebuilds it.
 const displayRows = computed<Disp[]>(() => {
@@ -508,12 +522,23 @@ const displayRows = computed<Disp[]>(() => {
     if (g.order == null && b.order != null) g.order = b.order
     g.rows.push({ block: b, index: i })
   }
-  groups.sort((a, b) => {
-    if (a.order != null && b.order != null) return a.order - b.order
-    if (a.order != null) return -1
-    if (b.order != null) return 1
-    return a.scene - b.scene
-  })
+  if (sortMode.value === 'overflow') {
+    const rank = overflowRank.value
+    groups.sort((a, b) => {
+      const oa = rank[a.scene], ob = rank[b.scene]
+      if (oa !== undefined && ob !== undefined) return oa - ob   // over-budget first, smallest overflow on top
+      if (oa !== undefined) return -1
+      if (ob !== undefined) return 1
+      return a.scene - b.scene                                    // in-budget boxes after, in disc order
+    })
+  } else {
+    groups.sort((a, b) => {
+      if (a.order != null && b.order != null) return a.order - b.order
+      if (a.order != null) return -1
+      if (b.order != null) return 1
+      return a.scene - b.scene
+    })
+  }
   const out: Disp[] = []
   for (const g of groups) {
     out.push({ kind: 'head', scene: g.scene, slack: g.slack, offset: g.offset })
@@ -522,7 +547,7 @@ const displayRows = computed<Disp[]>(() => {
       // running box usage in disc order, so each row shows how full the box is up to (and incl.) it
       for (const r of g.rows) {
         cum += blockExp.value[r.block.offset] || 0
-        out.push({ kind: 'row', block: r.block, index: r.index, cum, slack: g.slack })
+        out.push({ kind: 'row', block: r.block, index: r.index, cum, slack: g.slack, runStart: isFirstInRun(r.index) })
       }
     }
   }
@@ -788,7 +813,7 @@ async function runBuild() {
       buildMsg.value = `Build failed: ${data.error}`.slice(0, 80)
     } else {
       const secs = Math.round((Date.now() - startedAt) / 1000)
-      unlock(`ROM Built — ${selGameName.value || 'game'}`, `${secs}s`)
+      unlock(`Released to Batocera — ${selGameName.value || 'game'}`, `${secs}s`)
     }
   } catch {
     buildFailed.value = true
@@ -1022,7 +1047,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
         <span class="tt-actions">
           <span v-if="buildMsg" class="tt-build-msg" :class="{ 'tt-build-msg--fail': buildFailed }">{{ buildMsg }}</span>
           <UiButton class="tt-action" :disabled="building || extracting" @click="saveDraft">{{ draftSaved ? 'Saved ✓' : 'Save draft' }}</UiButton>
-          <UiButton variant="primary" :loading="building" :disabled="extracting" loading-text="Building…" @click="confirmBuild">Build ROM</UiButton>
+          <UiButton variant="primary" :loading="building" :disabled="extracting" loading-text="Releasing…" @click="confirmBuild">Build &amp; release to Batocera</UiButton>
         </span>
       </div>
     </div>
@@ -1080,7 +1105,11 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
             <th v-if="showLegend" class="col-speaker">Speaker</th>
             <th class="col-jp">Japanese</th>
             <th class="col-ca">{{ langLabel || 'Catalan' }} <span class="col-ca-pct">{{ tabProg.done.toLocaleString() }}/{{ tabProg.total.toLocaleString() }} <strong>({{ tabProg.pct }}%)</strong></span></th>
-            <th class="col-bytes" title="Per-line bytes vs the original — informational">Bytes</th>
+            <th class="col-bytes" :class="{ 'col-bytes-sorted': sortMode === 'overflow' }"
+                title="Per-line bytes vs the original. Click to sort boxes by overflow (closest-to-fitting on top); click again for disc order."
+                @click="toggleSortOverflow">
+              Bytes <span class="col-bytes-sort">{{ sortMode === 'overflow' ? '▲ over' : '⇅' }}</span>
+            </th>
             <th class="col-done" title="Mark handled — kept as original Japanese">Done</th>
           </tr>
         </thead>
@@ -1125,60 +1154,12 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
               <td class="col-done"></td>
             </tr>
             <!-- A line within the scene -->
-            <tr v-else
-                :class="['tt-row', 'scene-body', { 'run-start': isFirstInRun(item.index), 'run-cont': !isFirstInRun(item.index) }]">
-              <td class="col-order"></td>
-              <td class="col-offset mono">{{ item.block.offset }}</td>
-
-              <td v-if="showLegend" class="col-speaker">
-                <template v-if="isFirstInRun(item.index)">
-                  <div class="speaker-cell">
-                    <span class="speaker-dot" :style="{ background: speakerColor(item.block.speakerId) }" />
-                    <span class="speaker-name">{{ speakerLabel(item.block.speakerId) }}</span>
-                  </div>
-                </template>
-                <div v-else class="speaker-cont">
-                  <span class="speaker-cont-line" :style="{ background: speakerColor(item.block.speakerId) }" />
-                </div>
-              </td>
-
-              <td class="col-jp">
-                <span class="jp-text">{{ item.block.jp }}</span>
-                <span v-if="item.block.note" class="block-note" :title="item.block.note">⚠</span>
-              </td>
-
-              <td class="col-ca">
-                <div class="ca-cell">
-                  <textarea class="ca-input" v-model="item.block.ca" rows="2" @change="saveState" />
-                  <button v-if="dupCount(item.block.jp) > 1" class="ca-prop" type="button"
-                          :title="`Copy this Catalan into all ${dupCount(item.block.jp)} identical lines`"
-                          @click="propagate(item.block)">propagate to {{ dupCount(item.block.jp) }}</button>
-                </div>
-              </td>
-
-              <td class="col-bytes">
-                <!-- the line's own size vs its Japanese (neutral reference) -->
-                <div class="bytes-cell">
-                  <span class="bytes-used">{{ caBytes(item.block.ca) }}</span>
-                  <span class="bytes-sep">/</span>
-                  <span class="bytes-budget">{{ item.block.jpBytes }}</span>
-                </div>
-                <!-- cumulative box fill to this line: bar + running aggregate; over where it exceeds slack -->
-                <div class="box-agg" :class="{ over: item.cum > item.slack }"
-                     :title="`box used to here: ${item.cum.toLocaleString()} / ${item.slack.toLocaleString()} B`">
-                  <span class="box-agg-label">Agg</span>
-                  <span class="box-progress">
-                    <span class="box-progress-fill"
-                          :style="{ width: Math.min(100, item.slack ? item.cum / item.slack * 100 : 0) + '%' }"></span>
-                  </span>
-                </div>
-              </td>
-
-              <td class="col-done">
-                <input type="checkbox" v-model="item.block.done" @change="saveState"
-                       title="Done — keep original Japanese" />
-              </td>
-            </tr>
+            <TranslationRow v-else
+                :block="item.block" :show-legend="showLegend" :run-start="item.runStart"
+                :cum="item.cum" :slack="item.slack" :dup-count="dupCount(item.block.jp)"
+                :speaker-color="speakerColor(item.block.speakerId)"
+                :speaker-label="speakerLabel(item.block.speakerId)"
+                @commit="onCaCommit" @propagate="propagate(item.block)" />
           </template>
         </tbody>
       </table>
@@ -1235,7 +1216,11 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   </div>
 </template>
 
-<style scoped>
+<!-- NOT scoped: the table's cell/row classes (tt-*, col-*, ca-*, bytes-*, box-*, speaker-*, .mono)
+     are unique to this workbench and are shared with the TranslationRow child, which renders its
+     own <tr>. Scoping would strip the child's styling. (.mono also exists in Robutek but its own
+     scoped rule wins there.) -->
+<style>
 .tt-root {
   display: flex;
   flex-direction: column;
@@ -1428,6 +1413,11 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .col-ca { width: 35%; }
 .col-ca-pct { font-weight: 400; color: var(--text-muted); font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
 .col-bytes { width: 84px; }
+.tt-table thead th.col-bytes { cursor: pointer; user-select: none; white-space: nowrap; }
+.tt-table thead th.col-bytes:hover { color: var(--text); }
+.col-bytes-sort { opacity: 0.55; font-weight: 400; }
+.tt-table thead th.col-bytes-sorted { color: var(--accent); }
+.tt-table thead th.col-bytes-sorted .col-bytes-sort { opacity: 1; color: var(--accent); }
 .col-done { width: 44px; text-align: center; }
 .col-done input { cursor: pointer; }
 

@@ -676,12 +676,21 @@ def _capture_dir():
     return os.path.join(_dist_dir(), "capture")
 
 
+def _translations_root():
+    """Root for translation STATE (each game's <game>/state.json + the project list).
+    Config-driven via TRANSLATIONS_DIR in pluto/.env so it can point at a private,
+    version-controlled backup repo instead of the gitignored dist/ drawer. Empty/unset
+    defaults to dist/translations, so unchanged behaviour out of the box. ONLY the state
+    relocates -- uploaded ROM binaries stay under dist/ (see _translate_upload_dir), never git."""
+    cfg = getattr(Handler, "config", None) or {}
+    return cfg.get("TRANSLATIONS_DIR", "").strip() or os.path.join(_dist_dir(), "translations")
+
 def _translate_state_path(game):
-    """dist/translations/<game>/state.json -- translation pipeline state for a game."""
-    return os.path.join(_dist_dir(), "translations", game, "state.json")
+    """<translations-root>/<game>/state.json -- translation pipeline state for a game."""
+    return os.path.join(_translations_root(), game, "state.json")
 
 def _translate_upload_dir(game):
-    """dist/translations/uploads/<game>/ -- raw ROM files for a game."""
+    """dist/translations/uploads/<game>/ -- raw ROM files for a game (stay in dist, never git)."""
     return os.path.join(_dist_dir(), "translations", "uploads", game)
 
 
@@ -2609,8 +2618,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_translate_projects(self):
         """GET /translate/projects -> saved translation projects. No DB: the dirs
-        under dist/translations/ that hold a state.json ARE the project list."""
-        root = os.path.join(_dist_dir(), "translations")
+        under the translations root that hold a state.json ARE the project list."""
+        root = _translations_root()
         projects = []
         if os.path.isdir(root):
             for name in sorted(os.listdir(root)):
