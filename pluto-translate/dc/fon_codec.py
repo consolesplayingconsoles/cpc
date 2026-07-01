@@ -17,6 +17,7 @@ glyphs, and `fw()` encodes each accented char as its Greek SJIS code.
 
     fon_codec.py <orig.FON> <patched.FON>     # write a patched font with accents
 """
+import math
 import sys
 
 STRIDE, BMP, W, BPR, ROWS = 106, 10, 20, 5, 19
@@ -88,17 +89,18 @@ def _squeeze(g, tw):
             seg = g[r][lo:hi]
             if seg: out[r][i] = max(seg)
     return out
-def _apos_r(g, sq):             # apostrophe (comma) hugging the RIGHT edge
-    if sq: g = _squeeze(g, 15); c0 = 16
-    else:  c0 = 17
-    for r, c in ((0,c0+1),(0,c0+2),(1,c0+1),(1,c0+2),(2,c0+2),(3,c0+1)):
-        if c < W: g[r][c] = 3
+def _apos_r(g, sq):             # BOLD apostrophe, RIGHT edge. ALWAYS squeeze the letter to 14 cols so
+    g = _squeeze(g, 14)         # a right-ascender letter (d, b) can't merge with the mark; 3px solid
+    for r, c in ((0,16),(0,17),(0,18),(1,16),(1,17),(1,18),   # (thin marks vanish in the game's blit).
+                 (2,16),(2,17),(2,18),(3,17),(4,16)):
+        if 0 <= c < W: g[r][c] = 3
     return g
-def _apos_l(g):                 # apostrophe hugging the LEFT edge
-    for r, c in ((0,0),(0,1),(1,0),(1,1),(2,1),(3,0)): g[r][c] = 3
+def _apos_l(g):                 # BOLD apostrophe hugging the LEFT edge
+    for r, c in ((0,0),(0,1),(0,2),(1,0),(1,1),(1,2),(2,0),(2,1),(2,2),(3,1),(4,0)): g[r][c] = 3
     return g
-def _dash_l(g):                 # dash bar hugging the LEFT edge, mid-row
-    for c in range(0,5): g[9][c] = 3; g[10][c] = 3
+def _dash_l(g):                 # BOLD dash bar hugging the LEFT edge, mid-row (3px tall so it survives)
+    for r in (8,9,10):
+        for c in range(0,6): g[r][c] = 3
     return g
 def _basejis(ch):
     up = ch.isupper(); o = ord(ch)
@@ -117,6 +119,9 @@ def _glyph(data, shi, slo):
     return decode(bytearray(data[jis_index(jhi, jlo) * STRIDE:][:STRIDE]))
 def _compose(lg, rg, lw=None, rw=None):
     lw = lw or _crop(lg)[1]; rw = rw or _crop(rg)[1]
+    if lw + rw + 4 > W:                       # won't fit with left/mid/right gaps -> scale to fit
+        sc = (W - 4) / (lw + rw)              # (else the 2nd letter overruns the cell and clips)
+        lw = max(1, round(lw * sc)); rw = max(1, round(rw * sc))
     L = _resize(lg, lw); R = _resize(rg, rw); gap = max(1, (W - lw - rw) // 3)
     out = [[0]*W for _ in range(ROWS)]
     for r in range(ROWS):
@@ -144,7 +149,7 @@ ACCENT_SPEC = {
 # (wide M/N), al=apos-left, dl=dash-left. Authored into the FREE Greek slots after accents.
 _CSPEC = [
  ("l'",'l','r'), ("L'",'L','r'), ("d'",'d','r'), ("D'",'D','r'),
- ("s'",'s','r'), ("S'",'S','r'), ("t'",'t','r'), ("T'",'T','r'),
+ ("s'",'s','r'), ("S'",'S','r'), ("t'",'t','r'), ("T'",'T','rq'),
  ("m'",'m','rq'),("M'",'M','rq'),("n'",'n','rq'),("N'",'N','rq'),
  ("-l",'l','dl'),("-m",'m','dl'),("-t",'t','dl'),("-s",'s','dl'),
  ("-n",'n','dl'),("-h",'h','dl'),("-v",'v','dl'),
@@ -165,6 +170,54 @@ _CSLOT["?!"] = _CSLOT["!?"] = _OSLOT["?!"]   # interrobang both orders -> the on
 # menu-only Sí/No: only ever in the A:sí / B:no button pattern, so prose sí/no stays normal
 _MENU = {"A:sí": (0x8260, 0x8146, _OSLOT["sí"]),
          "B:no": (0x8261, 0x8146, _OSLOT["no"])}
+
+# ── DORAEMON-FRANCHISE character glyphs (GAME-SPECIFIC, lift to a per-game module ──
+# if a non-Doraemon title ever reuses this codec). The two lead faces, drawn as 20x19
+# icons, mapped from `D` (Doraemon clip) and `Nobita` (kept whole in "Nobita Nobi").
+def _fsp(g, x, y, v):
+    x, y = int(round(x)), int(round(y))
+    if 0 <= x < W and 0 <= y < ROWS: g[y][x] = v
+def _fring(g, cx, cy, r, v):
+    for a in range(0, 360, 4):
+        _fsp(g, cx + r*math.cos(math.radians(a)), cy + r*math.sin(math.radians(a)), v)
+def _fdisk(g, cx, cy, r, v):
+    for y in range(ROWS):
+        for x in range(W):
+            if (x-cx)**2 + (y-cy)**2 <= r*r: g[y][x] = v
+def _fhl(g, y, x0, x1, v):
+    for x in range(int(x0), int(x1)+1): _fsp(g, x, y, v)
+def _fvl(g, x, y0, y1, v):
+    for y in range(int(y0), int(y1)+1): _fsp(g, x, y, v)
+def _face_doraemon():
+    g = [[0]*W for _ in range(ROWS)]
+    _fring(g, 10, 9.5, 8.6, 3)
+    _fring(g, 8, 5, 2, 3); _fring(g, 12, 5, 2, 3)
+    _fsp(g, 8.5, 6, 3); _fsp(g, 11.5, 6, 3)
+    _fdisk(g, 10, 8, 1.2, 3); _fvl(g, 10, 9, 11, 3)
+    for yy in (8, 10, 12): _fhl(g, yy, 2, 5, 3); _fhl(g, yy, 14, 17, 3)
+    for x, y in ((6,14),(7,15),(8,15.5),(10,16),(12,15.5),(13,15),(14,14)): _fsp(g, x, y, 3)
+    return g
+def _face_nobita():
+    g = [[0]*W for _ in range(ROWS)]
+    _fring(g, 10, 10, 8, 3)
+    for x in (6, 8, 10, 12, 14): _fsp(g, x, 2, 3); _fsp(g, x, 3, 3)
+    _fring(g, 6, 9, 3, 3); _fring(g, 14, 9, 3, 3); _fhl(g, 9, 9, 11, 3)
+    _fdisk(g, 6, 9, 0.7, 3); _fdisk(g, 14, 9, 0.7, 3)
+    _fsp(g, 10, 12, 3); _fsp(g, 10, 13, 3)
+    for x, y in ((7,15),(9,15.5),(11,15.5),(13,15)): _fsp(g, x, y, 3)
+    return g
+_FACES = {"D": _face_doraemon, "Nobita": _face_nobita}
+_FSLOT = {name: _FREE[len(_CSPEC) + len(_COMPOSE) + i] for i, name in enumerate(_FACES)}
+
+# top-6 "clean" glyph pairs (Catalan digraphs + narrow-letter pairs, read as one unit):
+# (sequence, left letter SJIS, right letter SJIS). Composed evenly like Sí/No, applied
+# everywhere at encode time. Fill the LAST free Greek slots (kana reserve unlocks more).
+_CLEAN = [
+ ("qu", 0x8291, 0x8295), ("ss", 0x8293, 0x8293), ("ti", 0x8294, 0x8289),
+ ("it", 0x8289, 0x8294), ("ix", 0x8289, 0x8298), ("gu", 0x8287, 0x8295),
+]
+_CLSLOT = {seq: _FREE[len(_CSPEC) + len(_COMPOSE) + len(_FACES) + i]
+           for i, (seq, _, _) in enumerate(_CLEAN)}
 
 def build_patched_font(src_bytes):
     """Return font bytes with the 20 Catalan accent glyphs authored into Greek slots."""
@@ -208,11 +261,27 @@ def build_patched_font(src_bytes):
         code = _OSLOT[name]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
         rec[0], rec[1] = jlo, jhi
         off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
+    # Doraemon-franchise faces (game-specific)
+    for name, draw in _FACES.items():
+        rec = bytearray(data[jis_index(0x23, 0x61)*STRIDE:][:STRIDE])   # borrow 'a' header
+        rec[BMP:BMP+ROWS*BPR] = encode(draw())
+        code = _FSLOT[name]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
+        rec[0], rec[1] = jlo, jhi
+        off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
+    # clean glyph pairs (digraphs + narrow pairs), composed from their two letters
+    for seq, lsj, rsj in _CLEAN:
+        g = _compose(_glyph(data, lsj >> 8, lsj & 0xFF), _glyph(data, rsj >> 8, rsj & 0xFF))
+        rec = bytearray(data[jis_index(0x23, 0x61)*STRIDE:][:STRIDE])
+        rec[BMP:BMP+ROWS*BPR] = encode(g)
+        code = _CLSLOT[seq]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
+        rec[0], rec[1] = jlo, jhi
+        off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
     return bytes(data)
 
 # ── text encoder: Catalan -> full-width / Greek-slot SJIS (codec-free) ──────────
 _PUNCT = {" ":0x8140, ".":0x8144, ",":0x8143, "!":0x8149, "?":0x8148,
          ":":0x8146, ";":0x8147, "(":0x8169, ")":0x816a, "'":0x8166, "’":0x8166,
+         "%":0x8193,   # ASCII % -> the full-width ％ the JP already uses (せいかいりつ１００％)
          "…":0x8163}   # full-width ellipsis the JP already uses: "..." (6B) -> "…" (2B)
 _ACCENTS = {ch: (shi<<8)|slo for ch,(_,_,_,_,shi,slo) in ACCENT_SPEC.items()}
 _ACCENTS["-"] = 0x83C9   # authored hyphen (enclitics: Ves-te'n, ajudar-lo)
@@ -227,9 +296,15 @@ def fw(s):
         if four in _MENU:       # menu A:sí / B:no -> A/B, colon, then the sí/no glyph
             for code in _MENU[four]: o += code.to_bytes(2,"big")
             i += 4; continue
+        if s[i:i+6] == "Nobita" and s[i+6:i+11] != " Nobi" and (i+6 >= n or not s[i+6].isalpha()):
+            o += _FSLOT["Nobita"].to_bytes(2,"big"); i += 6; continue   # GAME: Nobita face glyph
         two = s[i:i+2]
         if two in _CSLOT:       # contraction or ?! combo -> one glyph, 2B not 4B
             o += _CSLOT[two].to_bytes(2,"big"); i += 2; continue
+        if two in _CLSLOT:      # clean digraph / narrow pair (qu ss ti it ix gu) -> one glyph
+            o += _CLSLOT[two].to_bytes(2,"big"); i += 2; continue
+        if s[i] == "D" and (i+1 >= n or (not s[i+1].isalpha() and s[i+1] != "'")):
+            o += _FSLOT["D"].to_bytes(2,"big"); i += 1; continue        # GAME: Doraemon face glyph
         ch = s[i]; c = ord(ch)
         if ch in _ACCENTS:      o += _ACCENTS[ch].to_bytes(2,"big")
         elif 0x41 <= c <= 0x5a: o += (0x8260+c-0x41).to_bytes(2,"big")
@@ -246,4 +321,6 @@ if __name__ == "__main__":
         print("usage: fon_codec.py <orig.FON> <patched.FON>"); sys.exit(1)
     out = build_patched_font(open(sys.argv[1], "rb").read())
     open(sys.argv[2], "wb").write(out)
-    print("wrote %s (%d accent glyphs in Greek slots)" % (sys.argv[2], len(ACCENT_SPEC)))
+    extra = len(_CSPEC) + len(_COMPOSE) + len(_FACES) + len(_CLEAN)
+    print("wrote %s (%d accents + %d glyphs: contractions, Sí/No, ?!, faces, digraph pairs)"
+          % (sys.argv[2], len(ACCENT_SPEC), extra))
