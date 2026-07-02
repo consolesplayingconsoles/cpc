@@ -98,10 +98,17 @@ def _apos_r(g, sq):             # BOLD apostrophe, RIGHT edge. ALWAYS squeeze th
 def _apos_l(g):                 # BOLD apostrophe hugging the LEFT edge
     for r, c in ((0,0),(0,1),(0,2),(1,0),(1,1),(1,2),(2,0),(2,1),(2,2),(3,1),(4,0)): g[r][c] = 3
     return g
-def _dash_l(g):                 # BOLD dash bar hugging the LEFT edge, mid-row (3px tall so it survives)
-    for r in (8,9,10):
-        for c in range(0,6): g[r][c] = 3
-    return g
+def _dash_l(g):                 # hyphen on the LEFT + letter shifted RIGHT so they don't overlap
+    cols = [c for c in range(W) if any(g[r][c] for r in range(ROWS))]  # (old version stamped the bar
+    left = min(cols) if cols else 0                                    # ON the letter -> "blah-t" garbage)
+    shift = max(0, 5 - left)    # move the letter just enough to start at col 5; wide letters keep width
+    out = [[0]*W for _ in range(ROWS)]
+    for r in range(ROWS):
+        for c in range(W):
+            if g[r][c] and c + shift < W: out[r][c + shift] = g[r][c]
+    for r in (8, 9, 10):        # 3px-tall solid hyphen (survives the blit) in the cleared left gap
+        for c in range(0, 4): out[r][c] = 3
+    return out
 def _basejis(ch):
     up = ch.isupper(); o = ord(ch)
     return (0x23, (0x41 if up else 0x61) + o - (ord('A') if up else ord('a')))
@@ -112,23 +119,40 @@ def _crop(g):
     lo, hi = (min(cols), max(cols)) if cols else (0, 0)
     return [[g[r][c] for c in range(lo, hi + 1)] for r in range(ROWS)], hi - lo + 1
 def _resize(g, tw):
+    # MAX-POOL downscale, not subsample: a subsample (src[r][c*sw//tw]) drops whole columns, so a
+    # thin vertical stroke vanishes or leaves a stray dot, and the game's 2bpp blit then eats what's
+    # left. Max over each column's source span keeps every stroke present.
     src, sw = _crop(g)
-    return [[src[r][c * sw // tw] for c in range(tw)] for r in range(ROWS)]
+    out = [[0] * tw for _ in range(ROWS)]
+    for r in range(ROWS):
+        for c in range(tw):
+            lo = c * sw // tw; hi = max(lo + 1, (c + 1) * sw // tw)
+            seg = src[r][lo:hi]
+            if seg: out[r][c] = max(seg)
+    return out
 def _glyph(data, shi, slo):
     jhi, jlo = sjis2jis(shi, slo)
     return decode(bytearray(data[jis_index(jhi, jlo) * STRIDE:][:STRIDE]))
 def _compose(lg, rg, lw=None, rw=None):
     lw = lw or _crop(lg)[1]; rw = rw or _crop(rg)[1]
-    if lw + rw + 4 > W:                       # won't fit with left/mid/right gaps -> scale to fit
-        sc = (W - 4) / (lw + rw)              # (else the 2nd letter overruns the cell and clips)
+    scaled = lw + rw + 3 > W                   # two WIDE letters don't fit -> must shrink (ugly)
+    if scaled:
+        sc = (W - 3) / (lw + rw)
         lw = max(1, round(lw * sc)); rw = max(1, round(rw * sc))
-    L = _resize(lg, lw); R = _resize(rg, rw); gap = max(1, (W - lw - rw) // 3)
+    L = _resize(lg, lw); R = _resize(rg, rw)
+    slack = W - lw - rw
+    lpad = slack // 3                          # small left gap, the rest BETWEEN the letters so the
+    mid = slack - 2 * lpad                     # pair reads as two letters, not one blob
     out = [[0]*W for _ in range(ROWS)]
     for r in range(ROWS):
         for c in range(lw):
-            if gap + c < W: out[r][gap + c] = L[r][c]
+            if lpad + c < W: out[r][lpad + c] = L[r][c]
         for c in range(rw):
-            if gap + lw + gap + c < W: out[r][gap + lw + gap + c] = R[r][c]
+            if lpad + lw + mid + c < W: out[r][lpad + lw + mid + c] = R[r][c]
+    if scaled:                                 # only shrunk strokes go thin -> solidify to level-3 so
+        for r in range(ROWS):                  # the 2bpp blit keeps them. Natural-fit pairs (one narrow
+            for c in range(W):                 # letter) stay at full width + anti-aliased -> crisp.
+                if out[r][c]: out[r][c] = 3
     return out
 
 # accented char -> (base JIS hi, lo, accent fn, clear-i-dot rows, target SJIS hi, lo)
@@ -151,12 +175,15 @@ _CSPEC = [
  ("l'",'l','r'), ("L'",'L','r'), ("d'",'d','r'), ("D'",'D','r'),
  ("s'",'s','r'), ("S'",'S','r'), ("t'",'t','r'), ("T'",'T','rq'),
  ("m'",'m','rq'),("M'",'M','rq'),("n'",'n','rq'),("N'",'N','rq'),
- ("-l",'l','dl'),("-m",'m','dl'),("-t",'t','dl'),("-s",'s','dl'),
- ("-n",'n','dl'),("-h",'h','dl'),("-v",'v','dl'),
  ("'l",'l','al'),("'n",'n','al'),("'s",'s','al'),("'t",'t','al'),("'m",'m','al'),
+ # dropped the -l/-m/-t/-s/-n/-h/-v "dash combos": they put the hyphen at the wrong end + didn't
+ # read as a dash. "-" now renders as the clean STANDALONE hyphen (0x83C9) in its own cell.
 ]
 # free Greek codes (accents use 0x9F-0xA8 + 0xBF-0xC9); 0xA9-0xBE and 0xCA-0xD6 are spare
-_FREE  = [0x8300 | x for x in list(range(0xA9,0xBF)) + list(range(0xCA,0xD7))]
+_FREE  = ([0x8300 | x for x in list(range(0xA9,0xBF)) + list(range(0xCA,0xD7))]
+          # + cannibalised near-dead katakana slots (ヮ ヰ ヱ ヵ ヂ — archaic/unused in the remaining JP,
+          # verified 0 occurrences in the state's jp; safe to repurpose since the game is ~all Catalan now)
+          + [0x838e, 0x8390, 0x8391, 0x8395, 0x8361])
 _CSLOT = {seq: _FREE[i] for i, (seq, _, _) in enumerate(_CSPEC)}
 
 # two-letter composition glyphs: (name, left SJIS, right SJIS, left width, right width)
@@ -212,9 +239,15 @@ _FSLOT = {name: _FREE[len(_CSPEC) + len(_COMPOSE) + i] for i, name in enumerate(
 # top-6 "clean" glyph pairs (Catalan digraphs + narrow-letter pairs, read as one unit):
 # (sequence, left letter SJIS, right letter SJIS). Composed evenly like Sí/No, applied
 # everywhere at encode time. Fill the LAST free Greek slots (kana reserve unlocks more).
+# each pair has a NARROW letter (i=4px, l=2px) so it fits one cell WITHOUT scaling -> both letters
+# keep full width + anti-aliasing = crisp (the old qu/gu/ss shrank two WIDE letters -> illegible).
+# Operator-chosen set (i/l pairs that read cleanly): it ti ix ri ir li il.
 _CLEAN = [
- ("qu", 0x8291, 0x8295), ("ss", 0x8293, 0x8293), ("ti", 0x8294, 0x8289),
- ("it", 0x8289, 0x8294), ("ix", 0x8289, 0x8298), ("gu", 0x8287, 0x8295),
+ ("it", 0x8289, 0x8294), ("ti", 0x8294, 0x8289), ("ix", 0x8289, 0x8298),
+ ("li", 0x828c, 0x8289), ("il", 0x8289, 0x828c),   # dropped ri/ir (rendered like "´i")
+ # narrow letter + punctuation combos (i/l/t + ! or .), into the cannibalised kana slots
+ ("t!", 0x8294, 0x8149), ("i!", 0x8289, 0x8149), ("l!", 0x828c, 0x8149),
+ ("t.", 0x8294, 0x8144), ("i.", 0x8289, 0x8144), ("l.", 0x828c, 0x8144),
 ]
 _CLSLOT = {seq: _FREE[len(_CSPEC) + len(_COMPOSE) + len(_FACES) + i]
            for i, (seq, _, _) in enumerate(_CLEAN)}
@@ -276,11 +309,23 @@ def build_patched_font(src_bytes):
         code = _CLSLOT[seq]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
         rec[0], rec[1] = jlo, jhi
         off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
+    # baseline ellipsis into a cannibalised archaic-kana slot ヴ (0x8394). NOT reusing the JP ellipsis
+    # 0x8163 — that one is STILL used by the game for intertitle-style Japanese, so redrawing it broke
+    # those. `fw` encodes "..." -> 0x8394 (2B, 1 cell) with 3 solid dots at the BASELINE (a Latin
+    # ellipsis; the JP one centres its dots mid-height so they float too high).
+    ell = jis_index(*sjis2jis(0x83, 0x94)) * STRIDE
+    rec = bytearray(data[ell:ell + STRIDE])
+    g = [[0]*W for _ in range(ROWS)]
+    for cx in (2, 9, 16):
+        for r in (15, 16, 17):
+            for c in (cx, cx+1, cx+2): g[r][c] = 3
+    rec[BMP:BMP+ROWS*BPR] = encode(g)
+    data[ell:ell + STRIDE] = rec
     return bytes(data)
 
 # ── text encoder: Catalan -> full-width / Greek-slot SJIS (codec-free) ──────────
 _PUNCT = {" ":0x8140, ".":0x8144, ",":0x8143, "!":0x8149, "?":0x8148,
-         ":":0x8146, ";":0x8147, "(":0x8169, ")":0x816a, "'":0x8166, "’":0x8166,
+         ":":0x8146, ";":0x8147, "(":0x8169, ")":0x816a, "'":0x8166, "’":0x8166, "/":0x815e,
          "%":0x8193,   # ASCII % -> the full-width ％ the JP already uses (せいかいりつ１００％)
          "…":0x8163}   # full-width ellipsis the JP already uses: "..." (6B) -> "…" (2B)
 _ACCENTS = {ch: (shi<<8)|slo for ch,(_,_,_,_,shi,slo) in ACCENT_SPEC.items()}
@@ -298,11 +343,13 @@ def fw(s):
             i += 4; continue
         if s[i:i+6] == "Nobita" and s[i+6:i+11] != " Nobi" and (i+6 >= n or not s[i+6].isalpha()):
             o += _FSLOT["Nobita"].to_bytes(2,"big"); i += 6; continue   # GAME: Nobita face glyph
+        if s[i:i+3] == "...":   # ellipsis -> baseline-dots glyph in the ヴ slot (2B, 1 cell)
+            o += (0x8394).to_bytes(2,"big"); i += 3; continue
         two = s[i:i+2]
         if two in _CSLOT:       # contraction or ?! combo -> one glyph, 2B not 4B
             o += _CSLOT[two].to_bytes(2,"big"); i += 2; continue
-        if two in _CLSLOT:      # clean digraph / narrow pair (qu ss ti it ix gu) -> one glyph
-            o += _CLSLOT[two].to_bytes(2,"big"); i += 2; continue
+        if two in _CLSLOT and not (two[1] == "." and s[i+2:i+3] == "."):
+            o += _CLSLOT[two].to_bytes(2,"big"); i += 2; continue   # digraph/combo (but let "t..." be t+…)
         if s[i] == "D" and (i+1 >= n or (not s[i+1].isalpha() and s[i+1] != "'")):
             o += _FSLOT["D"].to_bytes(2,"big"); i += 1; continue        # GAME: Doraemon face glyph
         ch = s[i]; c = ord(ch)
@@ -311,7 +358,7 @@ def fw(s):
         elif 0x61 <= c <= 0x7a: o += (0x8281+c-0x61).to_bytes(2,"big")
         elif 0x30 <= c <= 0x39: o += (0x824f+c-0x30).to_bytes(2,"big")
         elif ch in _PUNCT:      o += _PUNCT[ch].to_bytes(2,"big")
-        else: raise ValueError("no full-width glyph for %r" % ch)
+        else: o += (0x8148).to_bytes(2,"big")   # ESCAPING: any glyph-less char -> full-width ？ (never crash the encoder / byte count)
         i += 1
     return bytes(o)
 

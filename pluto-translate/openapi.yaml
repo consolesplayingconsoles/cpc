@@ -50,13 +50,27 @@ paths:
           description: path query parameter missing
         '502':
           description: no bootstrap found / read error
+  /systems:
+    get:
+      summary: Source roms systems (runs list-systems.sh)
+      description: >
+        Lists console systems that have originals to translate, one dir name per
+        line under the SOURCE roms tree ($ROMS_SRC, default ~/roms -- NOT the
+        Batocera-scanned /userdata/roms). Pluto proxies this to populate the system
+        picker and cross-references it against the local console nodes.
+      responses:
+        '200':
+          description: Source systems ({"systems":[...]})
+        '502':
+          description: list failed (script error on the box)
   /games:
     get:
       summary: Translatable games for a system (runs list-games.sh)
       description: >
-        Lists translatable discs under /userdata/roms/<system> on the box -- GDI
-        only, the pipeline is GDI-native. Each game is {name, path}; the path then
-        feeds /meta and /sources. Pluto proxies this to populate the game picker.
+        Lists translatable discs under $ROMS_SRC/<system> on the box (the source
+        roms tree, default ~/roms) -- GDI only, the pipeline is GDI-native. Each
+        game is {name, path}; the path then feeds /meta and /sources. Pluto proxies
+        this to populate the game picker.
       parameters:
         - name: system
           in: query
