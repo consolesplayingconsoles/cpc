@@ -98,9 +98,6 @@ def _apos_r(g, sq):             # BOLD apostrophe, RIGHT edge. ALWAYS squeeze th
                  (2,16),(2,17),(2,18),(3,17),(4,16)):
         if 0 <= c < W: g[r][c] = 3
     return g
-def _apos_l(g):                 # BOLD apostrophe hugging the LEFT edge
-    for r, c in ((0,0),(0,1),(0,2),(1,0),(1,1),(1,2),(2,0),(2,1),(2,2),(3,1),(4,0)): g[r][c] = 3
-    return g
 def _dash_l(g):                 # hyphen on the LEFT + letter shifted RIGHT so they don't overlap
     cols = [c for c in range(W) if any(g[r][c] for r in range(ROWS))]  # (old version stamped the bar
     left = min(cols) if cols else 0                                    # ON the letter -> "blah-t" garbage)
@@ -178,9 +175,12 @@ _CSPEC = [
  ("l'",'l','r'), ("L'",'L','r'), ("d'",'d','r'), ("D'",'D','r'),
  ("s'",'s','r'), ("S'",'S','r'), ("t'",'t','r'), ("T'",'T','rq'),
  ("m'",'m','rq'),("M'",'M','rq'),("n'",'n','rq'),("N'",'N','rq'),
- ("'l",'l','al'),("'n",'n','al'),("'s",'s','al'),("'t",'t','al'),("'m",'m','al'),
- # dropped the -l/-m/-t/-s/-n/-h/-v "dash combos": they put the hyphen at the wrong end + didn't
- # read as a dash. "-" now renders as the clean STANDALONE hyphen (0x83C9) in its own cell.
+ # Enclitics are NOT their own glyph. This game renders a RIGHT-edge apostrophe (M'/S' work on the DC)
+ # but NOT a left one -- so an enclitic's apostrophe belongs to the PRECEDING vowel as a right-apostrophe:
+ # "canvia't" = canvi + a' + t. fw matches the 2-char "a'" via _CSLOT with no extra logic. Commonest
+ # vowels (a't/a'm, e'n) get the two valid Greek slots first; i'/o'/u' follow.
+ ("a'",'a','r'), ("e'",'e','r'), ("i'",'i','r'), ("o'",'o','r'), ("u'",'u','r'),
+ # dropped the -l/-m/-t/-s/-n dash combos: "-" renders as the standalone hyphen (0x83C9) in its own cell.
 ]
 # free Greek codes (accents use 0x9F-0xA8 + 0xBF-0xC9); 0xA9-0xBE and 0xCA-0xD6 are spare
 _FREE  = ([0x8300 | x for x in list(range(0xA9,0xBF)) + list(range(0xCA,0xD7))]
@@ -238,7 +238,6 @@ def build_patched_font(src_bytes):
         g = decode(bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE]))
         if   kind == 'r':  g = _apos_r(g, False)
         elif kind == 'rq': g = _apos_r(g, True)
-        elif kind == 'al': g = _apos_l(g)
         elif kind == 'dl': g = _dash_l(g)
         rec = bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE])   # borrow base header
         rec[BMP:BMP+ROWS*BPR] = encode(g)
@@ -269,7 +268,7 @@ def build_patched_font(src_bytes):
     ell = jis_index(*sjis2jis(0x83, 0x94)) * STRIDE
     rec = bytearray(data[ell:ell + STRIDE])
     g = [[0]*W for _ in range(ROWS)]
-    for cx in (3, 9, 15):        # nudged closer + off the left edge so the first dot doesn't clip
+    for cx in (6, 11, 16):       # nudged right 1px more so the first dot clears the left edge fully
         for r in (15, 16, 17):
             for c in (cx, cx+1, cx+2): g[r][c] = 3
     rec[BMP:BMP+ROWS*BPR] = encode(g)
