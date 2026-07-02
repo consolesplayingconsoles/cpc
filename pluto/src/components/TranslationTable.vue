@@ -1133,7 +1133,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
                 @click="toggleScene(item.scene)">
               <td class="col-order disk-story">
                 <span class="scene-caret">{{ expanded.has(item.scene) ? '▾' : '▸' }}</span>
-                <span class="scene-id mono">{{ item.scene + 1 }}/</span>
+                <span class="scene-id mono">{{ item.scene }}/</span>
                 <input class="order-input" type="number" min="1" placeholder="—"
                        :class="{ dup: sceneOrder(item.scene) != null && dupStoryOrders.has(sceneOrder(item.scene)!) }"
                        :value="sceneOrder(item.scene)" @change="setSceneOrder(item.scene, $event)" @click.stop
