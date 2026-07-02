@@ -18,7 +18,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 ARIAL = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
 LINES = [((10, 84, 245, 139), "PASTISSETS"),   # ドラやき band (gold)
-         ((5, 162, 250, 221), "CRUSPITS")]      # ゲット数 band (green)
+         ((5, 162, 250, 221), "GUANYATS")]      # ゲット数 band (green) -- shown as "pastissets guanyats"
+                                                 # when you WIN them after a minigame, so "obtained", not a synonym
 ICON_KEEP = 83                                  # rows above = dorayaki icon + gauge, untouched
 
 

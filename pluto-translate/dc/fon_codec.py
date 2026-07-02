@@ -17,7 +17,6 @@ glyphs, and `fw()` encodes each accented char as its Greek SJIS code.
 
     fon_codec.py <orig.FON> <patched.FON>     # write a patched font with accents
 """
-import math
 import sys
 
 STRIDE, BMP, W, BPR, ROWS = 106, 10, 20, 5, 19
@@ -91,6 +90,10 @@ def _squeeze(g, tw):
     return out
 def _apos_r(g, sq):             # BOLD apostrophe, RIGHT edge. ALWAYS squeeze the letter to 14 cols so
     g = _squeeze(g, 14)         # a right-ascender letter (d, b) can't merge with the mark; 3px solid
+    # M's base has a thin col-0 left serif set apart from its main stroke; the squeeze strands it as a
+    # floating "|" ghost. If col 0 is inked but cols 1-2 are empty, that's the orphan serif -> drop it.
+    if any(g[r][0] for r in range(ROWS)) and not any(g[r][1] or g[r][2] for r in range(ROWS)):
+        for r in range(ROWS): g[r][0] = 0
     for r, c in ((0,16),(0,17),(0,18),(1,16),(1,17),(1,18),   # (thin marks vanish in the game's blit).
                  (2,16),(2,17),(2,18),(3,17),(4,16)):
         if 0 <= c < W: g[r][c] = 3
@@ -188,53 +191,10 @@ _CSLOT = {seq: _FREE[i] for i, (seq, _, _) in enumerate(_CSPEC)}
 
 # two-letter composition glyphs: (name, left SJIS, right SJIS, left width, right width)
 _COMPOSE = [
- ("no", 0x828e, 0x828f, 8, 9),     # n + o, evenly set
- ("sí", 0x8293, 0x83C2, None, None),   # s + authored í, natural widths
  ("?!", 0x8148, 0x8149, None, None),   # ? + !, one glyph for both orders
 ]
 _OSLOT = {name: _FREE[len(_CSPEC) + i] for i, (name, *_) in enumerate(_COMPOSE)}
 _CSLOT["?!"] = _CSLOT["!?"] = _OSLOT["?!"]   # interrobang both orders -> the one glyph
-# menu-only Sí/No: only ever in the A:sí / B:no button pattern, so prose sí/no stays normal
-_MENU = {"A:sí": (0x8260, 0x8146, _OSLOT["sí"]),
-         "B:no": (0x8261, 0x8146, _OSLOT["no"])}
-
-# ── DORAEMON-FRANCHISE character glyphs (GAME-SPECIFIC, lift to a per-game module ──
-# if a non-Doraemon title ever reuses this codec). The two lead faces, drawn as 20x19
-# icons, mapped from `D` (Doraemon clip) and `Nobita` (kept whole in "Nobita Nobi").
-def _fsp(g, x, y, v):
-    x, y = int(round(x)), int(round(y))
-    if 0 <= x < W and 0 <= y < ROWS: g[y][x] = v
-def _fring(g, cx, cy, r, v):
-    for a in range(0, 360, 4):
-        _fsp(g, cx + r*math.cos(math.radians(a)), cy + r*math.sin(math.radians(a)), v)
-def _fdisk(g, cx, cy, r, v):
-    for y in range(ROWS):
-        for x in range(W):
-            if (x-cx)**2 + (y-cy)**2 <= r*r: g[y][x] = v
-def _fhl(g, y, x0, x1, v):
-    for x in range(int(x0), int(x1)+1): _fsp(g, x, y, v)
-def _fvl(g, x, y0, y1, v):
-    for y in range(int(y0), int(y1)+1): _fsp(g, x, y, v)
-def _face_doraemon():
-    g = [[0]*W for _ in range(ROWS)]
-    _fring(g, 10, 9.5, 8.6, 3)
-    _fring(g, 8, 5, 2, 3); _fring(g, 12, 5, 2, 3)
-    _fsp(g, 8.5, 6, 3); _fsp(g, 11.5, 6, 3)
-    _fdisk(g, 10, 8, 1.2, 3); _fvl(g, 10, 9, 11, 3)
-    for yy in (8, 10, 12): _fhl(g, yy, 2, 5, 3); _fhl(g, yy, 14, 17, 3)
-    for x, y in ((6,14),(7,15),(8,15.5),(10,16),(12,15.5),(13,15),(14,14)): _fsp(g, x, y, 3)
-    return g
-def _face_nobita():
-    g = [[0]*W for _ in range(ROWS)]
-    _fring(g, 10, 10, 8, 3)
-    for x in (6, 8, 10, 12, 14): _fsp(g, x, 2, 3); _fsp(g, x, 3, 3)
-    _fring(g, 6, 9, 3, 3); _fring(g, 14, 9, 3, 3); _fhl(g, 9, 9, 11, 3)
-    _fdisk(g, 6, 9, 0.7, 3); _fdisk(g, 14, 9, 0.7, 3)
-    _fsp(g, 10, 12, 3); _fsp(g, 10, 13, 3)
-    for x, y in ((7,15),(9,15.5),(11,15.5),(13,15)): _fsp(g, x, y, 3)
-    return g
-_FACES = {"D": _face_doraemon, "Nobita": _face_nobita}
-_FSLOT = {name: _FREE[len(_CSPEC) + len(_COMPOSE) + i] for i, name in enumerate(_FACES)}
 
 # top-6 "clean" glyph pairs (Catalan digraphs + narrow-letter pairs, read as one unit):
 # (sequence, left letter SJIS, right letter SJIS). Composed evenly like Sí/No, applied
@@ -249,7 +209,7 @@ _CLEAN = [
  ("t!", 0x8294, 0x8149), ("i!", 0x8289, 0x8149), ("l!", 0x828c, 0x8149),
  ("t.", 0x8294, 0x8144), ("i.", 0x8289, 0x8144), ("l.", 0x828c, 0x8144),
 ]
-_CLSLOT = {seq: _FREE[len(_CSPEC) + len(_COMPOSE) + len(_FACES) + i]
+_CLSLOT = {seq: _FREE[len(_CSPEC) + len(_COMPOSE) + i]
            for i, (seq, _, _) in enumerate(_CLEAN)}
 
 def build_patched_font(src_bytes):
@@ -294,13 +254,6 @@ def build_patched_font(src_bytes):
         code = _OSLOT[name]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
         rec[0], rec[1] = jlo, jhi
         off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
-    # Doraemon-franchise faces (game-specific)
-    for name, draw in _FACES.items():
-        rec = bytearray(data[jis_index(0x23, 0x61)*STRIDE:][:STRIDE])   # borrow 'a' header
-        rec[BMP:BMP+ROWS*BPR] = encode(draw())
-        code = _FSLOT[name]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
-        rec[0], rec[1] = jlo, jhi
-        off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
     # clean glyph pairs (digraphs + narrow pairs), composed from their two letters
     for seq, lsj, rsj in _CLEAN:
         g = _compose(_glyph(data, lsj >> 8, lsj & 0xFF), _glyph(data, rsj >> 8, rsj & 0xFF))
@@ -316,7 +269,7 @@ def build_patched_font(src_bytes):
     ell = jis_index(*sjis2jis(0x83, 0x94)) * STRIDE
     rec = bytearray(data[ell:ell + STRIDE])
     g = [[0]*W for _ in range(ROWS)]
-    for cx in (2, 9, 16):
+    for cx in (3, 9, 15):        # nudged closer + off the left edge so the first dot doesn't clip
         for r in (15, 16, 17):
             for c in (cx, cx+1, cx+2): g[r][c] = 3
     rec[BMP:BMP+ROWS*BPR] = encode(g)
@@ -337,12 +290,6 @@ def fw(s):
     s = s.replace("’", "'")                                     # curly apostrophe -> straight
     o = bytearray(); i = 0; n = len(s)
     while i < n:
-        four = s[i:i+4]
-        if four in _MENU:       # menu A:sí / B:no -> A/B, colon, then the sí/no glyph
-            for code in _MENU[four]: o += code.to_bytes(2,"big")
-            i += 4; continue
-        if s[i:i+6] == "Nobita" and s[i+6:i+11] != " Nobi" and (i+6 >= n or not s[i+6].isalpha()):
-            o += _FSLOT["Nobita"].to_bytes(2,"big"); i += 6; continue   # GAME: Nobita face glyph
         if s[i:i+3] == "...":   # ellipsis -> baseline-dots glyph in the ヴ slot (2B, 1 cell)
             o += (0x8394).to_bytes(2,"big"); i += 3; continue
         two = s[i:i+2]
@@ -350,8 +297,6 @@ def fw(s):
             o += _CSLOT[two].to_bytes(2,"big"); i += 2; continue
         if two in _CLSLOT and not (two[1] == "." and s[i+2:i+3] == "."):
             o += _CLSLOT[two].to_bytes(2,"big"); i += 2; continue   # digraph/combo (but let "t..." be t+…)
-        if s[i] == "D" and (i+1 >= n or (not s[i+1].isalpha() and s[i+1] != "'")):
-            o += _FSLOT["D"].to_bytes(2,"big"); i += 1; continue        # GAME: Doraemon face glyph
         ch = s[i]; c = ord(ch)
         if ch in _ACCENTS:      o += _ACCENTS[ch].to_bytes(2,"big")
         elif 0x41 <= c <= 0x5a: o += (0x8260+c-0x41).to_bytes(2,"big")
@@ -368,6 +313,6 @@ if __name__ == "__main__":
         print("usage: fon_codec.py <orig.FON> <patched.FON>"); sys.exit(1)
     out = build_patched_font(open(sys.argv[1], "rb").read())
     open(sys.argv[2], "wb").write(out)
-    extra = len(_CSPEC) + len(_COMPOSE) + len(_FACES) + len(_CLEAN)
-    print("wrote %s (%d accents + %d glyphs: contractions, Sí/No, ?!, faces, digraph pairs)"
+    extra = len(_CSPEC) + len(_COMPOSE) + len(_CLEAN)
+    print("wrote %s (%d accents + %d glyphs: contractions, ?!)"
           % (sys.argv[2], len(ACCENT_SPEC), extra))
