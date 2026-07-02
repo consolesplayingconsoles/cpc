@@ -1372,7 +1372,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/control/google/latest"),
         ("GET", "/translate/projects"), ("GET", "/translate/systems"), ("GET", "/translate/games"),
         ("GET", "/translate/extract"), ("GET", "/translate/sources"), ("GET", "/translate/meta"),
-        ("GET", "/translate/{game}"),
+        ("GET", "/translate/{game}/textures"), ("GET", "/translate/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
         ("POST", "/messages"), ("POST", "/dreame/login"), ("POST", "/dreame/logout"),
         ("POST", "/control/drive"), ("POST", "/control/signal"), ("POST", "/control/capture"),
@@ -1454,6 +1454,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parts[:2] == ["translate", "meta"]:
             qs = urllib.parse.parse_qs(parsed.query)
             self._handle_translate_meta((qs.get("path") or [""])[0])
+        elif len(parts) == 3 and parts[0] == "translate" and parts[2] == "textures":
+            self._handle_translate_textures(parts[1])
         elif len(parts) == 2 and parts[0] == "translate":
             self._handle_translate_get(parts[1])
 
@@ -2171,6 +2173,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except (ValueError, IOError) as exc:
             self._send(500, {"error": str(exc)})
 
+    def _handle_translate_textures(self, game):
+        """GET /translate/<game>/textures -> a tar of the game's COMMITTED translated textures
+        (<translations-root>/<game>/textures/*.PVR|PVM). The box's translate.sh fetches and splices
+        them at build time, so the version-controlled files are the source of truth: no manual ship,
+        and a deploy (which wipes the box) can't lose them."""
+        import io, tarfile
+        game = urllib.parse.unquote(game)
+        tdir = os.path.join(_translations_root(), game, "textures")
+        if not os.path.isdir(tdir):
+            self._send(404, {"error": "no textures for %s" % game})
+            return
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for f in sorted(os.listdir(tdir)):
+                if f.lower().endswith((".pvr", ".pvm")):
+                    tar.add(os.path.join(tdir, f), arcname=f)
+        data = buf.getvalue()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-tar")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def _handle_translate_put(self, game):
         """POST/PUT /translate/<game> -> write translator edits back to state.json.
         Merges the posted JSON over the existing state so partial updates are safe."""
@@ -2574,15 +2599,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return (1, str(exc))
 
     def _handle_translate_systems(self):
-        """GET /translate/systems -> local console nodes that map to a
-        /userdata/roms/<x> folder on batocera. Resolution: a node's dir name or
-        its NODE_NAME lowercased, matched against the live roms listing (no
-        static config -- we check what's actually there)."""
-        rc, out = self._node_ssh("batocera", ["ls", "/userdata/roms"])
-        if rc != 0:
-            self._send(502, {"error": "batocera unreachable", "detail": out.strip()})
+        """GET /translate/systems -> local console nodes that map to a source-roms
+        folder on batocera. Resolution: a node's dir name or its NODE_NAME lowercased,
+        matched against the live listing (no static config -- we check what's actually
+        there). Proxied to the box translate API (/systems -> list-systems.sh), same as
+        /games/sources/extract, so the roms-path policy lives in ONE place (the scripts)."""
+        base = self._box_base()
+        if not base:
+            self._send(502, {"error": "translate node (batocera) not reachable"})
             return
-        folders = {l.strip() for l in out.splitlines() if l.strip()}
+        try:
+            with urlopen(base + "/systems", timeout=30) as r:
+                folders = set(json.loads(r.read().decode()).get("systems", []))
+        except Exception as exc:
+            self._send(502, {"error": "systems via box failed: %s" % exc})
+            return
         systems = []
         for node_id, cfg in self.__class__.node_roster.items():
             if cfg.get("_kind") != "local" or node_id == "batocera":

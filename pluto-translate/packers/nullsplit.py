@@ -149,18 +149,17 @@ def _tail(run):
     return run[i:]
 
 
-def _newrun(ca, encode, width, run):
-    """Replacement bytes for one original text run, byte-minimal AND leak-free:
-    re-wrap the Catalan into the SAME number of pages the original used (add no extra page
-    breaks => only the text grows), join pages with the game's `01ff 04ff 01ff` grammar, and
-    re-append the run's own trailing control so the handoff to the next message is exact.
-    Only spills to extra pages if the Catalan genuinely needs >3 lines per box."""
+def _newrun(ca, encode, width, run, height=3):
+    """Replacement bytes for one original text run: wrap to the box WIDTH, paginate at HEIGHT lines
+    per box (the box holds 3; more overflows the screen), join boxes with the game's `01ff 04ff 01ff`
+    page-break grammar, and re-append the run's own trailing control so the handoff to the next
+    message is exact. The box COUNT is free to differ from the original -- an earlier version forced
+    it to match (to dodge a hang) and that crammed 4+ lines into a 3-line box; the hang turned out to
+    be the GDI rebuild, not pagination (see [[project_dc_translation_extraction]]), so pagination is
+    back to natural: never more than `height` lines per box."""
     tail = _tail(run)
-    core = run[:len(run) - len(tail)]
-    npages = max(1, core.count(PB) + 1)                 # original page count (04ff breaks + 1)
     lines = _wrap(ca, width)
-    per = min(3, max(1, -(-len(lines) // npages)))      # fit npages, but never >3 lines/box
-    pages = [lines[i:i + per] for i in range(0, len(lines), per)]
+    pages = [lines[i:i + height] for i in range(0, len(lines), height)] or [[]]
     return MID.join(LB.join(encode(l) for l in pg) for pg in pages) + tail
 
 
@@ -263,31 +262,41 @@ def pack(orig, blocks, encode, box=13, grow=False, prefer=None):
             # FIXED-POSITION: greedily fill the scenario's slack line-by-line (keep the
             # rest Japanese) instead of all-or-nothing. Maximises coverage, stays in-place.
             slack = e - (cmd_abs + len(cmd))
-            # SPEAKER-AWARE CONTIGUOUS fill: group lines into TURNS (consecutive same-speakerId
-            # lines), place each turn only WHOLE, and STOP at the first turn that doesn't fit so the
-            # run is unbroken (no holes, no mid-turn cut, no spill into the next speaker). `prefer`
-            # puts the play-first scene at the front, so the conversation the player sees is the
-            # clean Catalan run; the rest of the scenario stays Japanese.
-            sel, cum = {}, 0
-            rels = sorted(local_by)
-            if prefer is not None and cmd_abs <= prefer < cmd_abs + csz:
-                pr = prefer - cmd_abs                         # play-start, scenario-relative
-                rels = [r for r in rels if r >= pr] + [r for r in rels if r < pr]
-            i = 0
-            while i < len(rels):
-                spk = local_by[rels[i]].get("speakerId")
-                j = i
-                while j < len(rels) and local_by[rels[j]].get("speakerId") == spk:
-                    j += 1
-                turn = rels[i:j]
-                cost = sum(len(_newrun(local_by[r]["ca"], encode, box,
-                                       cmd[r:r + local_by[r]["jpBytes"]])) - local_by[r]["jpBytes"]
-                           for r in turn)
-                if cum + cost > slack:                  # whole turn doesn't fit -> STOP (clean run)
-                    break
-                for r in turn:
-                    sel[r] = local_by[r]
-                cum += cost; i = j
+
+            def _cost(r):
+                return (len(_newrun(local_by[r]["ca"], encode, box,
+                                    cmd[r:r + local_by[r]["jpBytes"]])) - local_by[r]["jpBytes"])
+
+            # WHOLE-SCENE FIRST: if every line's Catalan fits the slack, place them ALL. Earlier this
+            # was blamed for a hang and reverted to a greedy prefix; the hang was actually the GDI
+            # REBUILD (now delivered in-place, see [[project_dc_translation_extraction]]), so full
+            # coverage is safe. Some lines are SHORTER than the Japanese, so a scene whose TOTAL fits
+            # can be left partly Japanese by a prefix fill that quits before the cheap tail.
+            if sum(_cost(r) for r in local_by) <= slack:
+                sel = dict(local_by)
+            else:
+                # OVERFLOW ONLY: speaker-aware contiguous prefix -- group lines into TURNS (consecutive
+                # same-speakerId), place each whole, STOP at the first that doesn't fit (unbroken run,
+                # no holes). `prefer` puts the play-first scene at the front so the visible run is the
+                # clean Catalan one; the rest stays Japanese until the operator condenses it to fit.
+                sel, cum = {}, 0
+                rels = sorted(local_by)
+                if prefer is not None and cmd_abs <= prefer < cmd_abs + csz:
+                    pr = prefer - cmd_abs                     # play-start, scenario-relative
+                    rels = [r for r in rels if r >= pr] + [r for r in rels if r < pr]
+                i = 0
+                while i < len(rels):
+                    spk = local_by[rels[i]].get("speakerId")
+                    j = i
+                    while j < len(rels) and local_by[rels[j]].get("speakerId") == spk:
+                        j += 1
+                    turn = rels[i:j]
+                    cost = sum(_cost(r) for r in turn)
+                    if cum + cost > slack:              # whole turn doesn't fit -> STOP (clean run)
+                        break
+                    for r in turn:
+                        sel[r] = local_by[r]
+                    cum += cost; i = j
             nc, placed = _rebuild_cmd(cmd, cmd_abs, sel, encode, box)
             if len(nc) - len(cmd) > slack:                     # safety; should not happen
                 st["scn_overflow"] += 1; st["lines_overflow"] += len(local_by); continue

@@ -159,7 +159,7 @@ function sceneInfo(scene: number): SceneInfo {
 // Story order is per SCENE (you reorder whole scenes, not lines): read/write `order` on every
 // block in the scene so the save-sort groups them. Duplicate story numbers are flagged on screen.
 function sceneOrder(scene: number): number | undefined {
-  return blocks.value.find(x => (x.scene ?? 0) === scene && x.order != null)?.order
+  return sceneOrderMap.value[scene] ?? undefined   // O(1) lookup (was an O(n) find per header)
 }
 function setSceneOrder(scene: number, ev: Event) {
   const raw = (ev.target as HTMLInputElement).value
@@ -501,16 +501,15 @@ function toggleSortOverflow() {
 type Disp =
   | { kind: 'head'; scene: number; slack: number; offset: string }
   | { kind: 'row'; block: Block; index: number; cum: number; slack: number; runStart: boolean }
-// Flat render list: each scene's header (carrying its start offset), then (only if expanded) its
-// rows. Reads scene/identity, not ca text, so editing a translation never rebuilds it.
-const displayRows = computed<Disp[]>(() => {
+type SceneGroup = { scene: number; order: number | null; slack: number; offset: string
+                    rows: { block: Block; index: number; runStart: boolean }[] }
+// The heavy O(7,600) walk, run ONCE. Groups blocks into scenes and precomputes each row's
+// run-start. Depends only on block identity (scene/order/offset/speakerId) + slack — NOT on
+// expand/sort/measure/ca. So opening a box or re-sorting never re-walks the whole file again.
+const sceneGroups = computed<SceneGroup[]>(() => {
   const arr = blocks.value
-  // Group blocks into scenes (disc order within each), then order the SCENES by the Story # you
-  // assign: numbered scenes float to the top ascending, the rest stay in disc order. Reads
-  // `order`/`scene`, not ca text, so this re-sorts when you set a Story # but not while translating.
-  type G = { scene: number; order: number | null; slack: number; offset: string; rows: { block: Block; index: number }[] }
-  const byScene = new Map<number, G>()
-  const groups: G[] = []
+  const byScene = new Map<number, SceneGroup>()
+  const groups: SceneGroup[] = []
   for (let i = 0; i < arr.length; i++) {
     const b = arr[i]
     const sc = b.scene ?? 0
@@ -520,8 +519,20 @@ const displayRows = computed<Disp[]>(() => {
       byScene.set(sc, g); groups.push(g)
     }
     if (g.order == null && b.order != null) g.order = b.order
-    g.rows.push({ block: b, index: i })
+    g.rows.push({ block: b, index: i, runStart: isFirstInRun(i) })
   }
+  return groups
+})
+// scene -> Story #, memoized (was an O(n) find() called PER HEADER = O(n²) every render).
+const sceneOrderMap = computed<Record<number, number | null>>(() => {
+  const m: Record<number, number | null> = {}
+  for (const g of sceneGroups.value) m[g.scene] = g.order
+  return m
+})
+// Flat render list: sort the cached groups + emit headers, rows only when expanded. Cheap —
+// ~76 groups + one open box's rows, never the whole file. Reads scene/identity, not ca text.
+const displayRows = computed<Disp[]>(() => {
+  const groups = [...sceneGroups.value]
   if (sortMode.value === 'overflow') {
     const rank = overflowRank.value
     groups.sort((a, b) => {
@@ -547,7 +558,7 @@ const displayRows = computed<Disp[]>(() => {
       // running box usage in disc order, so each row shows how full the box is up to (and incl.) it
       for (const r of g.rows) {
         cum += blockExp.value[r.block.offset] || 0
-        out.push({ kind: 'row', block: r.block, index: r.index, cum, slack: g.slack, runStart: isFirstInRun(r.index) })
+        out.push({ kind: 'row', block: r.block, index: r.index, cum, slack: g.slack, runStart: r.runStart })
       }
     }
   }

@@ -20,11 +20,27 @@ widths, the `encode`/font) are injected.
 ## One-command build
 
 ```
-pluto-translate/dc/build_patch.py <state.json> <original-root> <patch-root>
+pluto-translate/build-local.sh <game-name> <original-root> <patch-root> [api_base]
 ```
 
-reads `sources.config.json`'s `kind` per source, picks the packer, writes every patched
-binary (mirroring subdir paths). Boku Doraemon result:
+builds every patched text binary **and** the patched font in one go, e.g.
+
+```
+./pluto-translate/build-local.sh "Boku Doraemon (Japan) [ca]" \
+    sandbox/boku-doraemon-japan/original sandbox/boku-doraemon-japan/patch
+```
+
+Under the hood it runs `dc/build_patch.py` (text) + `dc/fon_codec.py` (font).
+
+**The build reads the LIVE app state from the API — never a file.** `build_patch.py`'s first
+arg is a **game name**; it fetches the current state from `api_base` (default
+`http://localhost:7700`). Pass an explicit `*.json` path only to build a deliberate snapshot.
+Why: a `dist/translations/.../state.json` FILE silently drifted 245 blocks behind the app
+(2026-07-01); building it compiled the OLD longer text, so scenes overflowed and translated
+lines fell back to Japanese. The API is the single source of truth; the file can lie.
+
+`build_patch.py` reads `sources.config.json`'s `kind` per source, picks the packer, writes every
+patched binary (mirroring subdir paths). Boku Doraemon result:
 
 | source | packer | result |
 |---|---|---|
@@ -70,6 +86,28 @@ internal end-pointer — verified 0 others).
   100%), but it **CRASHES**: the game locates scenarios by **hardcoded offsets**, not by scanning
   `SCP\0`. Confirmed 2026-06-28 (New Game hangs / black screen). Do not ship it; the mode is kept
   in code only as the round-trip identity check.
+
+### The greedy fill stops early — and "place all" hung the game (2026-07-01)
+
+`grow=False` fills speaker-**turns** in play-order and **stops at the first turn that doesn't fit
+the remaining slack**, leaving the rest of the scenario Japanese for a clean unbroken run. Side
+effect: a scenario whose Catalan *totals* under slack can still be left partly Japanese, because
+some lines are **shorter** than the Japanese (negative expansion) and the prefix fill quits before
+reaching them. Scene 41 (the first scene) measures **1298/1388 = fits**, yet the greedy fill lands
+only ~46 of 116 turns; the visible Gegant line (block 86) drops to Japanese.
+
+A **"place every line when `sum(expansion) <= slack`"** variant was tried: scene 41 went fully
+Catalan (0 unplaced, total 6742→6856/7575) and stayed byte-fit — **but the game then HUNG at the
+Take-copter gadget reveal** (`はい タケコプター！`, scene-41 rel 11970). **Reverted to greedy-stop.**
+
+Open question, do not re-attempt place-all without resolving it: the operator had **never reached
+that reveal before** (the first-scene fix is what got them there), so it is **not known** whether
+the hang is caused by place-all rewriting the tail commands, or is **pre-existing** at that gadget
+event in the greedy/original build. Command *movement* (growing a command relocates later ones,
+table repointed) was assumed safe, but that rested on the wrong belief that greedy already plays
+through scene 41. **Decide it with a hardware/emulator test of the reverted build at the Take-copter
+reveal**: if greedy also hangs, the culprit is the gadget-event command around the `rel 11856–11996`
+gap (a flash/`道具`-get event the parser may mis-handle), not the fill strategy.
 
 Correctness gates that pass offline: `pack(orig, [], grow=False) == orig` (byte-identical
 round-trip); all 76 CMD pointer tables valid + ascending; size kept; greedy slack fill.

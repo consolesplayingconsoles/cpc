@@ -27,6 +27,7 @@ SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 ROUTES = {
     ("GET", "/health"):  "_r_health",
     ("GET", "/meta"):    "_r_meta",
+    ("GET", "/systems"): "_r_systems",
     ("GET", "/games"):   "_r_games",
     ("GET", "/sources"): "_r_sources",
     ("GET", "/extract"): "_r_extract",
@@ -74,6 +75,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _r_health(self, qs):
         self._send(200, {"ok": True, "service": "cpc-translate", "port": PORT})
+
+    def _r_systems(self, qs):
+        rc, out = _run(["sh", os.path.join(SCRIPTS, "list-systems.sh")])
+        if rc != 0:
+            self._send(502, {"error": "list failed", "detail": out[-500:]})
+            return
+        systems = [l.strip() for l in out.splitlines() if l.strip()]
+        self._send(200, {"systems": systems})
 
     def _r_games(self, qs):
         system = (qs.get("system") or [""])[0]

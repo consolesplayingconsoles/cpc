@@ -147,6 +147,12 @@ paths:
     post: { tags: [translate], summary: Delete a saved project, responses: { '200': { description: OK } } }
   /translate/upload:
     post: { tags: [translate], summary: Upload a ROM for a project, responses: { '200': { description: OK } } }
+  /translate/{game}/textures:
+    get:
+      tags: [translate]
+      summary: Tar of a project's committed translated textures (PVR/PVM), fetched + spliced at build time
+      parameters: [{ name: game, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: tar archive } }
   /translate/{game}:
     get:
       tags: [translate]
