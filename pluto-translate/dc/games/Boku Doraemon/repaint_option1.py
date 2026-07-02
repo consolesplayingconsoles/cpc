@@ -28,7 +28,7 @@ LABELS = [
     ((130, 65, 253, 87), "VEL.",        Y, ARIAL,  0.90),
     ((2, 87, 122, 109),  "PAG.",        Y, ARIAL,  0.85),
     ((130, 87, 254, 109),"VEUS",        Y, ARIAL,  0.90),
-    ((2, 110, 126, 135), "MÚSICA",      Y, ARIAL,  0.95),
+    ((2, 113, 126, 132), "MÚSICA",      Y, ARIAL,  0.95),   # smaller box -> smaller font so the Ú accent fits inside its cell (no overflow, no bottom cut)
     ((128, 110, 254, 135),"EFECTES",    Y, ARIAL,  0.95),
     # STEREO / MONO are TWO options at two fixed positions (like OFF/ON) -- drawn separately so the
     # game's selection frame lands on STEREO without clipping MONO, and both bigger than the old merge.
@@ -73,13 +73,7 @@ def main():
     arr[ky0:ky1, kx0:kx1, 3] = rgba[ky0:ky1, kx0:kx1, 3]
     im = Image.fromarray(arr, "RGBA")
     for box, text, col, font, fill in LABELS:
-        if text == "MÚSICA":                        # its Ú accent pokes ~3px above the box into the row
-            layer = Image.new("RGBA", im.size, (0, 0, 0, 0))   # above (bled onto VEUS on screen). Draw on a
-            draw_fit(layer, box, text, col, font, fill)        # separate layer and CUT everything above the
-            la = np.array(layer); la[:box[1], :, 3] = 0        # box top -> accent clipped, PAG. untouched.
-            im.alpha_composite(Image.fromarray(la, "RGBA"))
-        else:
-            draw_fit(im, box, text, col, font, fill)
+        draw_fit(im, box, text, col, font, fill)
     enc = pv.encode_argb4444(np.array(im))
     assert len(enc) == H * W * 2, (len(enc), H * W * 2)
     d[off:off + len(enc)] = enc

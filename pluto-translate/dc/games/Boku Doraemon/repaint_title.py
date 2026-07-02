@@ -91,13 +91,30 @@ def main():
     # so INTERNET (its JP box is wider) doesn't balloon vs COMENÇA / OPCIONS.
     menu_sz = min(fit_size(text, box, fill) for box, text, fill in LABELS)
     for box, text, fill in LABELS:
-        draw_at(im, box, text, sample_colour(orig, box), menu_sz)
+        pos = box
+        if text == "INTERNET":                      # its JP box is far wider than the others -> centre the
+            f = ImageFont.truetype(ARIAL, menu_sz)  # (narrower) Catalan word so it doesn't sit left-shifted
+            l, t, r, _ = f.getbbox(text); tw = r - l
+            x0, y0, x1, y1 = box
+            pos = (x0 + ((x1 - x0) - tw) // 2 - 8, y0, x1, y1)   # centred, then ~half a letter left (operator)
+        draw_at(im, pos, text, sample_colour(orig, box), menu_sz)
     # DP registration note (band y131..187) is left BLANK — the shipped title never showed it.
-    cbox = (18, 230, 238, 252)                                  # translation credit, small, in the blank strip
-    draw_at(im, cbox, "Traduït per CPC", (235, 235, 255), fit_size("Traduït per CPC", cbox))
     enc = pv.encode_argb4444(np.array(im))
     assert len(enc) == W * H * 2, (len(enc), W * H * 2)
     d[SUBOFF + 16: SUBOFF + 16 + len(enc)] = enc
+    # translation credit on the SKY sub (#0 @0xd0), in the clear right-mid band (the 14-15 marker spot),
+    # well away from the © line. The sky renders across the title screen, so this actually shows.
+    SKY = 0xd0
+    sky = Image.fromarray(pv.decode_argb4444(bytes(d), SKY + 16, 512, 512), "RGBA")
+    sd = ImageDraw.Draw(sky); sf = ImageFont.truetype(ARIAL, 20)
+    credit = "Traduït per CPC"
+    l, t, r, b = sf.getbbox(credit); cx = 420 - (r - l) // 2; cy = 212   # up + right, off COMENÇA
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            if dx or dy: sd.text((cx + dx, cy + dy), credit, font=sf, fill=(0, 0, 0, 255))
+    sd.text((cx, cy), credit, font=sf, fill=(255, 90, 90))
+    enc2 = pv.encode_argb4444(np.array(sky))
+    d[SKY + 16: SKY + 16 + len(enc2)] = enc2
     open(out, "wb").write(d)
     print("wrote %s (%d B)" % (out, len(d)))
 
