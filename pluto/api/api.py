@@ -2155,9 +2155,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_translate_textures(self, game):
         """GET /translate/<game>/textures -> a tar of the game's COMMITTED translated textures
-        (<translations-root>/<game>/textures/*.PVR|PVM). The box's translate.sh fetches and splices
-        them at build time, so the version-controlled files are the source of truth: no manual ship,
-        and a deploy (which wipes the box) can't lose them."""
+        (<translations-root>/<game>/textures/*.PVR|PVM|.bin). The box's translate.sh fetches and
+        splices them at build time, so the version-controlled files are the source of truth: no manual
+        ship, and a deploy (which wipes the box) can't lose them. `.bin` = a single patched PVR chunk
+        spliced into a big PAC in place (e.g. STORYGRA_c170.bin -> STORYGRA.PAC), so we never ship the
+        whole multi-hundred-MB PAC."""
         import io, tarfile
         game = urllib.parse.unquote(game)
         tdir = os.path.join(_translations_root(), game, "textures")
@@ -2167,7 +2169,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w") as tar:
             for f in sorted(os.listdir(tdir)):
-                if f.lower().endswith((".pvr", ".pvm")):
+                if f.lower().endswith((".pvr", ".pvm", ".bin")):
                     tar.add(os.path.join(tdir, f), arcname=f)
         data = buf.getvalue()
         self.send_response(200)
