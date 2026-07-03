@@ -1110,6 +1110,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
                 :cum="item.cum" :slack="item.slack" :dup-count="dupCount(item.block.jp)"
                 :speaker-color="speakerColor(item.block.speakerId)"
                 :speaker-label="speakerLabel(item.block.speakerId)"
+                :kind="activeTabObj?.kind || 'dialogue'"
                 @commit="onCaCommit" @propagate="propagate(item.block)" />
           </template>
         </tbody>

@@ -4,8 +4,9 @@
 // so the 76 scene headers and every other row stay put while you type. Presentational: it mutates
 // the block object it's handed (same reference the parent holds) and emits when the edit commits.
 import { type Block, caBytes } from '../lib/translation'
+import { computed } from 'vue'
 
-defineProps<{
+const props = defineProps<{
   block: Block
   showLegend: boolean
   runStart: boolean          // first line of a speaker run (draws the name + top border)
@@ -14,8 +15,30 @@ defineProps<{
   dupCount: number           // how many lines share this exact Japanese (propagate target count)
   speakerColor: string
   speakerLabel: string
+  kind: string               // source kind (dialogue/menu/items/ui) — items shows glyph-width, others show bytes
 }>()
 const emit = defineEmits<{ (e: 'commit'): void; (e: 'propagate'): void }>()
+
+// For items: color per-line based on glyph width. For dialogue: color based on cumulative box.
+const lineStatus = computed<'pending' | 'ok' | 'warn' | 'over'>(() => {
+  // Items: individual carousel width check
+  if (props.kind === 'items') {
+    const caText = props.block.ca
+    if (caText === '') return props.block.done ? 'ok' : 'pending'
+    const glyphs = Math.ceil(caBytes(caText) / 2)
+    const carousel = 20
+    if (glyphs <= carousel) return 'ok'
+    if (glyphs <= carousel * 1.3) return 'warn'
+    return 'over'
+  }
+
+  // Dialogue/menu/ui: color based on cumulative box fill at THIS line
+  // (not the individual line's bytes vs jpBytes)
+  if (props.slack <= 0) return 'pending'
+  if (props.cum <= props.slack) return 'ok'
+  if (props.cum <= props.slack * 1.3) return 'warn'
+  return 'over'
+})
 </script>
 
 <template>
@@ -48,12 +71,21 @@ const emit = defineEmits<{ (e: 'commit'): void; (e: 'propagate'): void }>()
     </td>
 
     <td class="col-bytes">
-      <div class="bytes-cell">
-        <span class="bytes-used">{{ caBytes(block.ca) }}</span>
-        <span class="bytes-sep">/</span>
-        <span class="bytes-budget">{{ block.jpBytes }}</span>
+      <div class="bytes-cell" :class="lineStatus">
+        <template v-if="kind === 'items'">
+          <!-- Items (gadget names): show glyph-width vs carousel width (~20 glyphs) -->
+          <span class="bytes-used">{{ Math.ceil(caBytes(block.ca) / 2) }}</span>
+          <span class="bytes-sep">/</span>
+          <span class="bytes-budget">20</span>
+        </template>
+        <template v-else>
+          <!-- Dialogue/menu/ui: show bytes vs jp bytes -->
+          <span class="bytes-used">{{ caBytes(block.ca) }}</span>
+          <span class="bytes-sep">/</span>
+          <span class="bytes-budget">{{ block.jpBytes }}</span>
+        </template>
       </div>
-      <div class="box-agg" :class="{ over: cum > slack }"
+      <div v-if="kind !== 'items'" class="box-agg" :class="{ over: cum > slack }"
            :title="`box used to here: ${cum.toLocaleString()} / ${slack.toLocaleString()} B`">
         <span class="box-agg-label">Agg</span>
         <span class="box-progress">
