@@ -14,6 +14,8 @@ import SpeakerLegend from './SpeakerLegend.vue'
 import PromptCopier from './PromptCopier.vue'
 import TranslationRow from './TranslationRow.vue'
 import { type Block, caBytes } from '../lib/translation'
+import { formatOffset, buildSourcesPayload, reconcileByOffset, mergePolledCa } from './TranslationTable.logic'
+import { translationApi } from '../api/translation'
 
 const route  = useRoute()
 const router = useRouter()
@@ -25,27 +27,9 @@ function dismissDisclaimer() {
   sessionStorage.setItem('cpc.translate.disclaimer', '1')
 }
 
-const blocks = ref<Block[]>([
-  { offset: '0x000A48', speakerId: 1, jp: 'なんか力が出ない…', jpBytes: 18, ca: 'No tinc forces…' },
-  { offset: '0x000A64', speakerId: 1, jp: 'はやっぱりねてよう…', jpBytes: 20, ca: 'Millor me\'n vaig a dormir…' },
-  { offset: '0x000A96', speakerId: 1, jp: 'ドラやきが　なくなってきたな…', jpBytes: 30, ca: 'Se m\'acaben els dorayakis…' },
-  { offset: '0x000ABA', speakerId: 1, jp: 'ママのお手伝いをして　ドラやきを', jpBytes: 32, ca: 'He d\'ajudar la mama per aconseguir dorayakis', note: 'Consecutive with next block — treat as one unit' },
-  { offset: '0x000ADC', speakerId: 1, jp: 'ふやさなきゃ！！', jpBytes: 16, ca: 'Vull més dorayakis!!' },
-  { offset: '0x000B32', speakerId: 1, jp: 'あ！　ドラやき！！', jpBytes: 18, ca: 'Ah! Un dorayaki!!' },
-  { offset: '0x000B62', speakerId: 1, jp: 'やったね♪', jpBytes: 10, ca: 'Genial♪' },
-  { offset: '0x000B6E', speakerId: 1, jp: 'もらっちゃおう〜', jpBytes: 16, ca: 'Me\'l quedo~' },
-  { offset: '0x000BC0', speakerId: 1, jp: 'あ！！　ドラやきが　なくなった！？', jpBytes: 34, ca: 'Ah!! S\'ha acabat el dorayaki!?' },
-  { offset: '0x000C3E', speakerId: 1, jp: 'ぼくは　ドラやきが　ないと', jpBytes: 26, ca: 'Sense dorayaki' },
-  { offset: '0x000C5C', speakerId: 1, jp: 'も　やる気が　おきないんだ！！！', jpBytes: 32, ca: 'no tinc cap motivació!!!' },
-  { offset: '0x000D08', speakerId: 9, jp: 'お兄ちゃん！　元気？', jpBytes: 20, ca: 'Germà! Com estàs?' },
-  { offset: '0x000D68', speakerId: 9, jp: 'セワシくんと　タイムテレビで', jpBytes: 28, ca: 'Estava parlant amb en Sewashi' },
-  { offset: '0x000D88', speakerId: 9, jp: 'ていたんだけど……', jpBytes: 18, ca: 'per la tele del temps……' },
-  { offset: '0x000E50', speakerId: 9, jp: 'お兄ちゃん　のび太さんに', jpBytes: 24, ca: 'El Nobita, germà,' },
-  { offset: '0x000E6A', speakerId: 9, jp: 'ぜんぜん　しんらいされていないわよ', jpBytes: 34, ca: 'no et té gens de confiança' },
-  { offset: '0x000E96', speakerId: 1, jp: 'えぇ！！　ホントかい！？', jpBytes: 24, ca: 'Ei!! De veritat!?' },
-  { offset: '0x000EB8', speakerId: 9, jp: 'のび太さんの　良いところを', jpBytes: 26, ca: 'Fes treure el millor del Nobita' },
-  { offset: '0x000ED4', speakerId: 9, jp: 'のばして　あげないと', jpBytes: 20, ca: 'i ajudar-lo a créixer' },
-])
+// Rows for the ACTIVE tab. Empty until a project/tab loads from the API — this generic workbench
+// carries no game content (the old hardcoded Boku Doraemon demo lines lived here; gone now).
+const blocks = ref<Block[]>([])
 
 const SPEAKER_COLORS: Record<number, string> = {
   1: '#5b8dd9',
@@ -85,11 +69,8 @@ async function measureScenes() {
   const path = curPath.value, tab = activeTab.value
   if (!path || !tab || !blocks.value.length) return
   try {
-    const res = await fetch(
-      `${API_BASE}/translate/measure?path=${encodeURIComponent(path)}&file=${encodeURIComponent(tab)}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ blocks: blocks.value.map(b => ({ offset: b.offset, ca: b.ca, jpBytes: b.jpBytes })) }) })
-    const data = await res.json()
+    const data = await translationApi.measure(path, tab,
+      blocks.value.map(b => ({ offset: b.offset, ca: b.ca, jpBytes: b.jpBytes })))
     if (data && data.used) {
       const f: Record<number, number> = {}
       for (const k in data.used as Record<string, number>) f[+k] = (data.used as Record<string, number>)[k]
@@ -165,7 +146,7 @@ function setSceneOrder(scene: number, ev: Event) {
   const raw = (ev.target as HTMLInputElement).value
   const n = raw === '' ? undefined : Number(raw)
   for (const b of blocks.value) if ((b.scene ?? 0) === scene) b.order = n
-  saveState()
+  bumpEdit()                              // local only — persist happens on Save draft
 }
 const dupStoryOrders = computed<Set<number>>(() => {
   const byScene = new Map<number, number>()
@@ -218,25 +199,23 @@ const LANGUAGES = [
 type Step = 'pick' | 'table'
 const step = ref<Step>('pick')
 
-let saveStateTimer: ReturnType<typeof setTimeout> | null = null
 async function saveState() {
-  if (!curNs.value || !activeTab.value) return
+  if (!curNs.value) return
+  // Flush EVERY loaded tab, not just the active one. Under the manual-save model, edits accumulate
+  // across tabs (each block is mutated in place inside tabBlocks) and only reach disk here. Saving
+  // just the active tab silently dropped edits made on other tabs — e.g. translate a menu, switch
+  // tabs, hit Save, and the menu never made it into the PUT, so it reverted to its old state value.
+  // Skip a tab that never loaded (empty array) so an aborted extract can't wipe a source. The API
+  // deep-merges by source key, so untouched/unloaded sources are preserved.
+  const sources = buildSourcesPayload(tabBlocks.value)
+  if (!Object.keys(sources).length) return
   try {
-    // Per-source: the API deep-merges, so saving the active tab keeps the others.
-    await fetch(`${API_BASE}/translate/${encodeURIComponent(curNs.value)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sources: { [activeTab.value]: blocks.value }, sceneBudget: sceneSlackByTab.value }),
-    })
+    await translationApi.putState(curNs.value, { sources, sceneBudget: sceneSlackByTab.value })
   } catch { /* offline — edits stay local */ }
-}
-function debouncedSaveState() {
-  if (saveStateTimer) clearTimeout(saveStateTimer)
-  saveStateTimer = setTimeout(saveState, 1200)
 }
 // Typing must do NOTHING heavy. The fit-meter + stats refresh only when you leave a field (blur),
 // not on each keystroke — so editing a line is as light as typing into a plain textbox.
-function onCaCommit() { bumpEdit(); debouncedSaveState() }
+function onCaCommit() { bumpEdit() }     // local only — persist happens on Save draft
 
 // ── Propagate: make every block with the SAME Japanese share one Catalan ───────
 // A line recurs dozens of times as separate blocks; without this they drift (1,000+
@@ -255,8 +234,7 @@ function propagate(block: Block) {
   if (!block.jp) return
   const ca = block.ca
   for (const b of blocks.value) if (b.jp === block.jp) b.ca = ca
-  bumpEdit()
-  saveState()
+  bumpEdit()                              // local only — persist happens on Save draft
 }
 
 // ── Batocera pick → translate flow ─────────────────────────────────────────
@@ -291,8 +269,7 @@ const projects = ref<Project[]>([])
 const curNs    = ref('')
 async function loadProjects() {
   try {
-    const res  = await fetch(`${API_BASE}/translate/projects`)
-    const data = await res.json()
+    const data = await translationApi.listProjects()
     projects.value = (data.projects as Project[]) || []
     // Projects saved before metadata existed have a path but no meta — backfill it
     // (instant IP.BIN read) so the whole list gets rich cards, and persist it once.
@@ -302,14 +279,10 @@ async function loadProjects() {
 
 async function backfillProjectMeta(ns: string, path: string) {
   try {
-    const res  = await fetch(`${API_BASE}/translate/meta?path=${encodeURIComponent(path)}`)
-    const data = await res.json()
+    const data = await translationApi.meta(path)
     if (!data.meta) return
     projects.value = projects.value.map(p => (p.ns === ns ? { ...p, meta: data.meta } : p))
-    fetch(`${API_BASE}/translate/${encodeURIComponent(ns)}`, {     // persist so it's a one-time cost
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ meta: data.meta }),
-    }).catch(() => {})
+    translationApi.putState(ns, { meta: data.meta }).catch(() => {})   // persist so it's a one-time cost
   } catch { /* keep the gameName fallback */ }
 }
 
@@ -378,14 +351,12 @@ async function createProject() {
     }
     // Persist the record + the primary source's blocks so resume is instant.
     const primarySafe = tabs.value[0].safe
-    await fetch(`${API_BASE}/translate/${encodeURIComponent(ns)}`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // NB: no `total` here on purpose — persistTotal() is the sole writer of the
-      // aggregate, so the create POST can't clobber it back to the primary count.
-      body:    JSON.stringify({ gameName, lang: selLang.value, system: selSystem.value,
-                                path: selGame.value, meta: meta.value,
-                                sources: { [primarySafe]: tabBlocks.value[primarySafe] || [] } }),
+    // NB: no `total` here on purpose — persistTotal() is the sole writer of the aggregate,
+    // so the create POST can't clobber it back to the primary count.
+    await translationApi.createState(ns, {
+      gameName, lang: selLang.value, system: selSystem.value,
+      path: selGame.value, meta: meta.value,
+      sources: { [primarySafe]: tabBlocks.value[primarySafe] || [] },
     })
     loadProjects()
   } catch {
@@ -399,8 +370,7 @@ async function createProject() {
 async function openNs(ns: string) {
   if (!ns) return
   try {
-    const res  = await fetch(`${API_BASE}/translate/${encodeURIComponent(ns)}`)
-    const data = await res.json()
+    const data = await translationApi.getState(ns)
     if (data && data.path) {
       selGameName.value = (data.gameName as string) || ns
       selLang.value     = (data.lang as string) || ''
@@ -460,7 +430,10 @@ function recomputeTabPct() {
 // watch over the whole blocks array re-traversed all ~7,600 blocks on every keystroke — that was
 // the typing lag. A shallow counter watch costs nothing per char.
 const editTick = ref(0)
-function bumpEdit() { editTick.value++ }
+const dirty = ref(false)                 // unsaved local edits; only "Save draft" persists to disk
+function bumpEdit() { editTick.value++; dirty.value = true }
+// Manual-save model: warn before leaving/reloading with unsaved edits (nothing hits disk until Save draft).
+window.addEventListener('beforeunload', (e) => { if (dirty.value) { e.preventDefault(); e.returnValue = '' } })
 watch(editTick, () => {
   clearTimeout(statsTimer)
   statsTimer = setTimeout(() => { recomputeStats(); recomputeTabPct(); measureScenes(); recomputeSceneInfo() }, 300)
@@ -570,6 +543,8 @@ watch(activeTab, () => {
   if (scrollEl.value) scrollEl.value.scrollTop = 0
   sceneFill.value = {}                   // clear -> meters show "…" until the new measure lands
   measureScenes()                        // real per-scene budget for the newly active tab
+  recomputeSceneInfo()                   // header first/last lines are per-tab -- recompute or the new
+  recomputeJpCounts()                    // tab shows the PREVIOUS tab's scene-0 line (the "tete" bug)
 })
 
 
@@ -578,8 +553,7 @@ const meta = ref<GameMeta | null>(null)
 async function fetchMeta(path: string) {
   meta.value = null
   try {
-    const res  = await fetch(`${API_BASE}/translate/meta?path=${encodeURIComponent(path)}`)
-    const data = await res.json()
+    const data = await translationApi.meta(path)
     meta.value = (data.meta as GameMeta) || null
   } catch { meta.value = null }
 }
@@ -629,17 +603,14 @@ function renameSpeaker(id: number, name: string) {
 async function saveSpeakers() {
   if (!curNs.value || !activeTab.value) return
   try {
-    await fetch(`${API_BASE}/translate/${encodeURIComponent(curNs.value)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ speakers: { [activeTab.value]: speakerNames.value[activeTab.value] || {} } }),
-    })
+    await translationApi.putState(curNs.value, { speakers: { [activeTab.value]: speakerNames.value[activeTab.value] || {} } })
   } catch { /* offline — names stay local */ }
 }
 
 const KIND_LABEL: Record<string, string> = {
   dialogue: 'Dialogue', menu: 'Menu', items: 'Items', ui: 'UI',
   chat: 'Chat', secret: 'Secret', readme: 'Readme', text: 'Text',
+  screen: 'Screen', system: 'System',
 }
 // Every tab is named by its FILENAME (unique) with the kind as a hint, e.g.
 // "S1_1_SCENE (TEXT)" -- any kind can have multiple files (per-chapter dialogue,
@@ -666,10 +637,7 @@ function onToneLinks(v: string) {
 async function saveToneLinks() {
   if (!curNs.value) return
   try {
-    await fetch(`${API_BASE}/translate/${encodeURIComponent(curNs.value)}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ toneLinks: toneLinks.value }),
-    })
+    await translationApi.putState(curNs.value, { toneLinks: toneLinks.value })
   } catch { /* offline — links stay local */ }
 }
 // The active source, named for the prompt (kind label + on-disc filename).
@@ -683,7 +651,7 @@ watch([railOpen, activeTab], () => {
 })
 function mapBlocks(raw: { offset: number; jpBytes: number; hex: string; speaker: number; scene?: number }[]): Block[] {
   return (raw || []).map(b => ({
-    offset:    '0x' + b.offset.toString(16).toUpperCase().padStart(6, '0'),
+    offset:    formatOffset(b.offset),
     speakerId: b.speaker ?? 0,
     jp:        decodeBlock(b.hex),
     jpBytes:   b.jpBytes,
@@ -703,8 +671,7 @@ async function loadSources(path: string) {
   discovering.value = true
   let srcs: SourceTab[] = []
   try {
-    const res = await fetch(`${API_BASE}/translate/sources?path=${encodeURIComponent(path)}`)
-    srcs = ((await res.json()).sources as SourceTab[]) || []
+    srcs = ((await translationApi.sources(path)).sources as SourceTab[]) || []
   } finally {
     discovering.value = false
   }
@@ -740,11 +707,7 @@ async function loadSources(path: string) {
 // the whole disc, not just the first tab. Self-heals older projects when opened.
 async function persistTotal() {
   try {
-    await fetch(`${API_BASE}/translate/${encodeURIComponent(curNs.value)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ total: stats.value.total }),
-    })
+    await translationApi.putState(curNs.value, { total: stats.value.total })
     loadProjects()   // refresh the list so the card reflects the new aggregate
   } catch { /* offline — list keeps the old count */ }
 }
@@ -755,19 +718,10 @@ async function loadTab(safe: string) {
   // mutation was arriving but not rendering until a refresh).
   tabState.value = { ...tabState.value, [safe]: 'loading' }
   try {
-    const res  = await fetch(`${API_BASE}/translate/extract?path=${encodeURIComponent(curPath.value)}&file=${encodeURIComponent(safe)}`)
-    const data = await res.json()
+    const data = await translationApi.extract(curPath.value, safe)
     // Reconcile: the fresh extract carries `scene` + jpBytes; overlay any saved draft's
     // ca/order/done onto it by offset, so re-extracting to gain scene tags never loses work.
-    const fresh = mapBlocks(data.blocks)
-    const prior = tabBlocks.value[safe]
-    if (prior && prior.length) {
-      const byOff = new Map(prior.map(b => [b.offset, b]))
-      for (const b of fresh) {
-        const s = byOff.get(b.offset)
-        if (s) { b.ca = s.ca || ''; b.order = s.order; b.done = s.done ?? b.done }   // keep extract's done (artifacts) if the draft has none
-      }
-    }
+    const fresh = reconcileByOffset(mapBlocks(data.blocks), tabBlocks.value[safe])
     tabBlocks.value = { ...tabBlocks.value, [safe]: fresh }
     // Bake the per-scene slack (from extraction) for this tab's box-budget meter. Only the
     // SCP/CMD source (nullsplit) ships scenes; others simply have no box meter.
@@ -799,6 +753,7 @@ const draftSaved = ref(false)
 async function saveDraft() {
   clearTimeout(speakerSaveTimer)                       // flush pending speaker edits now
   await Promise.all([saveState(), saveSpeakers()])     // blocks + speaker names
+  dirty.value = false
   draftSaved.value = true
   setTimeout(() => { draftSaved.value = false }, 1800)
 }
@@ -814,11 +769,7 @@ async function runBuild() {
   building.value = true; buildMsg.value = ''; buildFailed.value = false
   const startedAt = Date.now()
   try {
-    const res  = await fetch(`${API_BASE}/translate/run`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body:   JSON.stringify({ path: curPath.value }),
-    })
-    const data = await res.json()
+    const data = await translationApi.run(curPath.value)
     if (data.error) {
       buildFailed.value = true
       buildMsg.value = `Build failed: ${data.error}`.slice(0, 80)
@@ -861,11 +812,7 @@ watch(() => route.params.ns, (raw) => {
 }, { immediate: true })
 
 function openProjectDir(p: Project) {
-  fetch(`${API_BASE}/translate/open`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ ns: p.ns }),
-  })
+  translationApi.openDir(p.ns)
 }
 
 function langName(code: string) {
@@ -874,11 +821,7 @@ function langName(code: string) {
 
 function deleteProject(p: Project) {
   if (!confirm(`Delete the ${p.gameName} (${langName(p.lang)}) project? This removes its saved table.`)) return
-  fetch(`${API_BASE}/translate/delete`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ ns: p.ns }),
-  }).then(() => loadProjects())
+  translationApi.remove(p.ns).then(() => loadProjects())
 }
 
 function backToProjects() {
@@ -888,8 +831,7 @@ function backToProjects() {
 async function loadSystems() {
   pickError.value = ''
   try {
-    const res  = await fetch(`${API_BASE}/translate/systems`)
-    const data = await res.json()
+    const data = await translationApi.listSystems()
     systems.value = (data.systems as PickSystem[]) || []
   } catch {
     pickError.value = 'Could not reach the API.'
@@ -902,8 +844,7 @@ async function onSystemChange() {
   pickError.value     = ''
   if (!selSystem.value) return
   try {
-    const res  = await fetch(`${API_BASE}/translate/games?system=${encodeURIComponent(selSystem.value)}`)
-    const data = await res.json()
+    const data = await translationApi.listGames(selSystem.value)
     games.value = (data.games as PickGame[]) || []
   } catch {
     pickError.value = 'Could not list games.'
@@ -919,20 +860,19 @@ watch(selSystem, onSystemChange)   // refresh games when the system changes
 let pollTimer: ReturnType<typeof setInterval> | undefined
 async function pollSaved() {
   if (step.value !== 'table' || !curNs.value || stats.value.pending === 0) return
+  // Manual-save model: unsaved local edits are the source of truth. This poll only pulls in
+  // EXTERNAL (Claude) changes; while `dirty`, remote is stale by definition, so merging it would
+  // clobber the edits you haven't saved yet (index-merge below reverts them). Resume once you save.
+  if (dirty.value) return
   const ae = document.activeElement as HTMLElement | null
   if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return
   const ns = curNs.value
   try {
-    const res  = await fetch(`${API_BASE}/translate/${encodeURIComponent(ns)}`)
-    const data = await res.json()
+    const data = await translationApi.getState(ns)
     if (ns !== curNs.value || !data || !data.sources) return     // navigated away mid-fetch
     const src = data.sources as Record<string, Block[]>
     for (const safe of Object.keys(tabBlocks.value)) {
-      const local = tabBlocks.value[safe], remote = src[safe]
-      if (!remote || !local || remote.length !== local.length) continue
-      for (let i = 0; i < local.length; i++) {
-        if (local[i].ca !== remote[i].ca) local[i].ca = remote[i].ca
-      }
+      mergePolledCa(tabBlocks.value[safe], src[safe])
     }
   } catch { /* offline — try again next tick */ }
 }
@@ -1057,7 +997,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
         </template>
         <span class="tt-actions">
           <span v-if="buildMsg" class="tt-build-msg" :class="{ 'tt-build-msg--fail': buildFailed }">{{ buildMsg }}</span>
-          <UiButton class="tt-action" :disabled="building || extracting" @click="saveDraft">{{ draftSaved ? 'Saved ✓' : 'Save draft' }}</UiButton>
+          <UiButton class="tt-action" :class="{ 'tt-dirty': dirty && !draftSaved }" :disabled="building || extracting" @click="saveDraft">{{ draftSaved ? 'Saved ✓' : (dirty ? 'Save draft •' : 'Save draft') }}</UiButton>
           <UiButton variant="primary" :loading="building" :disabled="extracting" loading-text="Releasing…" @click="confirmBuild">Build &amp; release to Batocera</UiButton>
         </span>
       </div>
@@ -1275,6 +1215,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .tt-lang { color: var(--text-muted); }
 .tt-count { color: var(--text-faint); font-family: var(--font-mono); font-size: 12px; }
 .tt-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: 16px; }
+.tt-dirty { box-shadow: inset 0 0 0 2px var(--accent, #e0a000); }   /* unsaved local edits */
 .tt-build-msg { font-size: 12px; color: var(--text-faint); }
 .tt-build-msg--fail { color: var(--bad); font-weight: 600; }
 

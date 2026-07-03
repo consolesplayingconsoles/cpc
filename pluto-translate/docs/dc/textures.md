@@ -13,21 +13,33 @@ is 16×16 dialogue-border tiles (no text).
 
 **`MN1/2/3.PVM` = the timed mini-game HUD/tutorial** (same UI over 3 backgrounds). Inspected 2026-06-28.
 The dorayaki-counter chunk (256×256) is **byte-identical across all three** (md5 `1b8edd90`) → repaint once,
-stamp into each. Done: ドラやき/ゲット数 → **PASTISSETS / CRUSPITS** (gold/green, food icon kept). Note
-"cruspits" (gobbled) is a deliberate in-tone liberty over literal "recollits" (collected) — and it's
-*dub-attested* (cruspir = 12 eps), so register-faithful, not invented; fits Doraemon's gluttony. **PAUSE,
-POINT, Perfect!, 0123456789 are already Latin → leave untranslated.** Also done 2026-06-28: the ready/go/finish flashes 用意して〜/スタート!!/終了〜!! →
-**Preparats, llestos… / Ja!! / Fi!** (Catalan kids' race call, mapped to the JP punctuation: the 〜
-drawn-out build-up becomes the ellipsis, the !! burst becomes "Ja!!"; the energy lives in the Ja, so
-no "!" on llestos). These live in the per-file 512×512 ARGB4444 chunk (c4-ish, index NOT stable across
-the files — MN1 has 7 chunks, MN2/3 have 6). **Gotcha: identify the text chunk by content, not index,
-and restrict to TRANSPARENT ARGB4444** (mean alpha < 180) — the opaque RGB565 *background* chunks
-(sandy beach / grass) have gold-ish pixels that false-positive a "find the gold text" check and you'll
-paint onto the scenery. **COMPLETE 2026-06-28**: all three games' HUD text is baked (buttons, the three そうさ方法 tutorials =
-massage/weeding/tidying, ready/go/finish, all result + scold bubbles, timers, the かたづけ instruction).
-Full per-string inventory + how to reach each game in-game (help Mama) in `games/boku-doraemon-mn-hud.md`.
-Green-board text = fill (flat or board-gradient) + redraw, uniform font per bubble for even borders;
-portraits/icons/gauges/PAUSE/POINT/Perfect!/numbers kept.
+stamp into each. **Actually confirmed baked (verified on hardware 2026-07-03): only the dorayaki counter** —
+ドラやき/ゲット数 → **PASTISSETS / GUANYATS** (gold/green, food icon kept; "guanyats" = *obtained*, shown as
+"pastissets guanyats" when you win them after a game). **PAUSE, POINT, Perfect!, 0123456789 are already
+Latin → leave untranslated.**
+
+⚠️ **Correction.** An earlier note here claimed "COMPLETE 2026-06-28 — all HUD text baked (the three そうさ方法
+tutorials, ready/go/finish flashes, all result + scold bubbles, timers)". That was an **unverified overclaim**:
+a re-check on real hardware 2026-07-03 found the MN2 instruction box + timer, and MN1's instruction / result /
+scold / race-flash / timer chunks, were **all still Japanese**. Don't trust that claim — verify each chunk.
+Status now — **the whole MN1/2/3 HUD is Catalan** (done 2026-07-03, previews verified, not yet console-verified),
+via two scripts on the committed textures:
+- `repaint_mn_instr.py` — all three `〜そうさ方法〜` boxes → `~ Com es juga ~` + body (A red / B blue, MN3 also
+  Y green), the `残りじかん…秒` timers → `Temps…s`, and MN1's `Ａボタン/Ｂボタン` legend → **Botó A / Botó B**.
+  Board = per-row margin-median green refill; timer/legend on transparent bg = alpha erase. Chunk indices differ
+  per file (MN1 box=2 timer=5; MN2/MN3 box+timer=3).
+- `repaint_mn_dialog.py` — the 9 Mama speech bubbles (praise/scold, `ドラちゃん`→Doraemon, `ドラやき`→pastissets,
+  portraits kept, auto-fit), the gold race flashes `用意して〜/スタート!!/終了〜!!` → **Llestos… / Ja!! / Fi!!**
+  (yellow→orange gradient), and MN3's `この位置に/かたづけてね` → **Desa-ho / aquí** (gold, red → arrow kept).
+- Only PAUSE / POINT / Perfect! / ○✕ / the number atlas stay original (already Latin / symbols).
+
+The text lives in the per-file 512×512 ARGB4444 chunks; **index is NOT stable** (MN1 has 7 chunks, MN2/3 have 6),
+and each file's chunks differ (MN1's timer sits with its strength gauge, MN2's timer sits under the box).
+**Gotcha: identify the text chunk by content, not index, and restrict to TRANSPARENT ARGB4444** (mean alpha < 180)
+— the opaque RGB565 *background* chunks (grass/beach) have gold-ish pixels that false-positive a "find the gold
+text" check. Green-board text = fill (flat or board-gradient row-refill) + redraw; timer/flashes on transparent
+bg = alpha erase + redraw; portraits/icons/gauges/PAUSE/POINT/Perfect!/numbers kept. Inventory in
+`games/boku-doraemon-mn-hud.md` (which ALSO overclaims "complete" — read it as a text list, not a done-list).
 
 Dividing line: **editable text → patch the bytes** (see `extract.md`); **pixel
 text → this doc.** Reusable codec: [`pvr_codec.py`](../../dc/pvr_codec.py).

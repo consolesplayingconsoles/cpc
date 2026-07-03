@@ -20,7 +20,7 @@ import sys, os, json, urllib.request, urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # pluto-translate
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))                    # dc (fon_codec)
 import fon_codec
-from packers import ptrtable, nullsplit
+from packers import ptrtable, nullsplit, exemsg
 
 # source key -> (on-disc relative path, packer, kwargs). box=full-width wrap width.
 PLAN = {
@@ -29,6 +29,14 @@ PLAN = {
     "STORY.PAC":          ("STORY.PAC",          "nullsplit", dict(box=15, grow=False, prefer=0xce514)),
     "DOUGU_ITEMTBL.PAC":  ("DOUGU/ITEMTBL.PAC",  "ptrtable",  dict(box=20)),   # wrap long invention descriptions to 2 lines (short gadget NAMES <=20 stay on one line)
     "INFO_SECRET.TBL":    ("INFO/SECRET.TBL",    "ptrtable",  dict(box=12)),
+    # menu / map screens -- same ptrtable format (u32 table + 2df0/22f0 records). Single-line items.
+    "DEFMENU.SCP":        ("DEFMENU.SCP",        "ptrtable",  dict(box=None)),   # field/pause menu (4)
+    "MAINMENU.SCP":       ("MAINMENU.SCP",       "ptrtable",  dict(box=None)),   # main menu (7)
+    "MAP.SCP":            ("MAP.SCP",            "ptrtable",  dict(box=None)),   # map labels
+    "NOBIMAP.SCP":        ("NOBIMAP.SCP",        "ptrtable",  dict(box=None)),   # Nobita's-room map labels
+    # save / sleep confirmation prompts baked into the boot exe. exemsg = same-size in-place rewrite
+    # (the exe must not change length -- see packers/exemsg + dc/inplace).
+    "1ST_READ.BIN":       ("1ST_READ.BIN",       "exemsg",    dict()),
 }
 
 
@@ -64,6 +72,10 @@ def main():
             real = sum(1 for b in blocks if (b.get("ca") or "").strip())
             note = "%d/%d lines (%d%%), %d->%dB" % (
                 s["lines_placed"], real, 100 * s["lines_placed"] // max(1, real), len(orig), len(out))
+        elif kind == "exemsg":
+            out = exemsg.pack(orig, blocks, fon_codec.fw, **kw)
+            real = sum(1 for b in blocks if (b.get("ca") or "").strip())
+            note = "%d runs, %d->%dB (same-size)" % (real, len(orig), len(out))
         else:
             out = ptrtable.pack(orig, blocks, fon_codec.fw, **kw)
             real = sum(1 for b in blocks if (b.get("ca") or "").strip())
