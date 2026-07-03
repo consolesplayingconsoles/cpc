@@ -102,8 +102,12 @@ for f in "$TEX"/*.PVR "$TEX"/*.PVM; do
 done
 # SOD / week-transition banner: one glyph atlas lives as chunk #170 inside STORYGRA.PAC (~464 MB).
 # We ship only the 128 KB patched chunk and splice just that region in place (never load the PAC).
-if [ -f "$TEX/STORYGRA_c170.bin" ] && [ -f "$EXTRACT/STORYGRA.PAC" ]; then
-  python3 "$HERE/dc/splice_pac_chunk.py" "$DEST/track05.bin" "$EXTRACT/STORYGRA.PAC" "$TEX/STORYGRA_c170.bin" 170 || echo "  (skipped STORYGRA chunk)"
+if [ -f "$EXTRACT/STORYGRA.PAC" ]; then
+  if [ -f "$TEX/STORYGRA_c170.bin" ]; then
+    python3 "$HERE/dc/splice_pac_chunk.py" "$DEST/track05.bin" "$EXTRACT/STORYGRA.PAC" "$TEX/STORYGRA_c170.bin" 170 || echo "  (splice FAILED for STORYGRA chunk)"
+  else
+    echo "  (STORYGRA_c170.bin NOT fetched -- SOD banner NOT patched; is it committed + served?)"
+  fi
 fi
 
 echo "[5/5] name the .gdi + gamelist"
