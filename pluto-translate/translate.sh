@@ -76,7 +76,7 @@ done
 
 echo "[4/5] splice same-size files in place (into track05)"
 # only same-size files can be spliced in place; inplace.py refuses a mismatch (SECRET.TBL grows -> skip)
-for rel in STORY.PAC S18RM04.FON DOUGU/ITEMTBL.PAC; do
+for rel in STORY.PAC S18RM04.FON DOUGU/ITEMTBL.PAC DEFMENU.SCP MAINMENU.SCP MAP.SCP NOBIMAP.SCP 1ST_READ.BIN; do
   [ -f "$PATCH/$rel" ] && [ -f "$EXTRACT/$rel" ] || continue
   python3 "$HERE/dc/inplace.py" "$DEST/track05.bin" "$EXTRACT/$rel" "$PATCH/$rel" || echo "  (skipped $rel)"
 done

@@ -268,7 +268,7 @@ def build_patched_font(src_bytes):
     ell = jis_index(*sjis2jis(0x83, 0x94)) * STRIDE
     rec = bytearray(data[ell:ell + STRIDE])
     g = [[0]*W for _ in range(ROWS)]
-    for cx in (6, 11, 16):       # nudged right 1px more so the first dot clears the left edge fully
+    for cx in (7, 11, 15):       # first dot well clear of the left edge (was clipping ~1px); last stays at 15 (proven fine)
         for r in (15, 16, 17):
             for c in (cx, cx+1, cx+2): g[r][c] = 3
     rec[BMP:BMP+ROWS*BPR] = encode(g)

@@ -24,6 +24,12 @@ CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sources.
 _FALLBACK = {"minKana": 50, "minRatio": 0.45,
              "typology": [{"kind": "text", "view": 9, "match": ["*"]}]}
 
+# Never even read these -- graphics/audio/video blobs that can't be dialogue. Skipping them (+ the
+# size cap) is what keeps the scan seconds, not minutes: the disc is ~473 PVR/PVM + big SFD/AFS/MLT.
+_SKIP_EXT = {".pvr", ".pvm", ".sfd", ".afs", ".mlt", ".mpb", ".adx", ".pss", ".str", ".mpg", ".wav"}
+_MAX_SCAN = 16 * 1024 * 1024   # bytes; the biggest real text is STORY.PAC (~1.5 MB). STORYGRA.PAC
+                               # (487 MB) and other giant .PAC/.BIN blobs are graphics, not text.
+
 
 def _load_config():
     try:
@@ -47,8 +53,8 @@ def _classify(rel, typology):
             p = pat.upper()
             if p == "*" or (p.startswith("*.") and u.endswith(p[1:])) \
                     or (not p.startswith("*") and p in u):
-                return entry.get("kind", "text"), entry.get("view", 99)
-    return "text", 99
+                return entry.get("kind", "text"), entry.get("view", 99), entry.get("force", False)
+    return "text", 99, False
 
 
 def main(root, outdir, manifest):
@@ -60,20 +66,34 @@ def main(root, outdir, manifest):
     for dp, _dirs, fns in os.walk(root):
         for fn in fns:
             p = os.path.join(dp, fn)
+            rel = os.path.relpath(p, root)
+            kind, pri, force = _classify(rel, typology)
+            if not force:
+                # PERF: the disc is mostly graphics/audio/video (473 PVR/PVM, a 487 MB STORYGRA.PAC,
+                # 67 MB SFD videos, AFS/MLT audio). READING + density-scanning those was the multi-minute
+                # hang. Skip binaries by extension + a hard size cap BEFORE the read; the density gate
+                # still guards correctness on what's left (a few small text tables).
+                if os.path.splitext(fn)[1].lower() in _SKIP_EXT:
+                    continue
+                try:
+                    if os.path.getsize(p) > _MAX_SCAN:
+                        continue
+                except OSError:
+                    continue
             try:
                 with open(p, "rb") as fh:
                     data = fh.read()
             except Exception:
                 continue
             doubles, kana, _runs = scan(data)
-            if kana >= min_kana and doubles and kana / doubles >= min_ratio:
-                rel = os.path.relpath(p, root)
+            dense = kana >= min_kana and doubles and kana / doubles >= min_ratio
+            # `force` (config) surfaces a named short file (menus/maps) the density gate would skip.
+            if dense or force:
                 sn = _safe(rel)
-                kind, pri = _classify(rel, typology)
                 shutil.copyfile(p, os.path.join(outdir, sn))
                 rows.append({
                     "file": rel, "safe": sn, "kind": kind, "_pri": pri,
-                    "kanaPct": round(100 * kana / doubles), "size": len(data),
+                    "kanaPct": round(100 * kana / doubles) if doubles else 0, "size": len(data),
                 })
     # VIEW order (the tab order): by config priority, density as the tiebreak.
     rows.sort(key=lambda r: (r["_pri"], -r["kanaPct"]))
