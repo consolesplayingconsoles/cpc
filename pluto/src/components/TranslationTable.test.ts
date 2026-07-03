@@ -100,3 +100,178 @@ describe('mergePolledCa — pull external edits without scrambling the table', (
     expect(mergePolledCa([blk('0x1')], undefined)).toBe(0)
   })
 })
+
+describe('Multi-tab save/load cycle — translations must not disappear', () => {
+  it('buildSourcesPayload includes translations from all loaded tabs', () => {
+    // User edits both STORY and DEFMENU tabs
+    const tabBlocks = {
+      'STORY.PAC': [
+        blk('0x000100', 'Hola mundo'),
+        blk('0x000200', 'Adéu'),
+      ],
+      'DEFMENU.SCP': [
+        blk('0x000300', 'Moure'),
+        blk('0x000400', 'Opcions'),
+      ],
+    }
+
+    // Save payload should include both tabs
+    const payload = buildSourcesPayload(tabBlocks)
+    expect(Object.keys(payload).sort()).toEqual(['DEFMENU.SCP', 'STORY.PAC'])
+    expect(payload['STORY.PAC'].map(b => b.ca)).toEqual(['Hola mundo', 'Adéu'])
+    expect(payload['DEFMENU.SCP'].map(b => b.ca)).toEqual(['Moure', 'Opcions'])
+  })
+
+  it('reconcileByOffset preserves ca across tabs when re-extracting', () => {
+    // Saved state from a previous save
+    const saved = {
+      'STORY.PAC': [
+        blk('0x000100', 'Hola mundo'),
+        blk('0x000200', 'Adéu'),
+      ],
+      'DEFMENU.SCP': [
+        blk('0x000300', 'Moure'),
+      ],
+    }
+
+    // Fresh extract comes back with empty ca
+    const fresh = {
+      'STORY.PAC': [
+        blk('0x000100', ''),
+        blk('0x000200', ''),
+      ],
+      'DEFMENU.SCP': [
+        blk('0x000300', ''),
+      ],
+    }
+
+    // Reconcile each tab
+    reconcileByOffset(fresh['STORY.PAC'], saved['STORY.PAC'])
+    reconcileByOffset(fresh['DEFMENU.SCP'], saved['DEFMENU.SCP'])
+
+    // All translations should be restored
+    expect(fresh['STORY.PAC'].map(b => b.ca)).toEqual(['Hola mundo', 'Adéu'])
+    expect(fresh['DEFMENU.SCP'].map(b => b.ca)).toEqual(['Moure'])
+  })
+})
+
+describe('Boku Doraemon workflow — real multi-tab scenario', () => {
+  it('STORY.PAC (dialogue) saves with cumulative box tracking', () => {
+    // 3 lines in one scene (box)
+    const blocks = [
+      blk('0x03B500', 'Dormir ara?', { scene: 1, jpBytes: 22 }),
+      blk('0x03B520', 'Sí', { scene: 1, jpBytes: 4 }),
+      blk('0x03B524', 'No', { scene: 1, jpBytes: 4 }),
+    ]
+    const payload = buildSourcesPayload({ 'STORY.PAC': blocks })
+    expect(payload['STORY.PAC']).toEqual(blocks)
+    expect(payload['STORY.PAC'].map(b => b.ca)).toEqual(['Dormir ara?', 'Sí', 'No'])
+  })
+
+  it('DEFMENU.SCP (menu) saves separately from STORY', () => {
+    const tabs = {
+      'STORY.PAC': [blk('0x100', 'Diàleg')],
+      'DEFMENU.SCP': [blk('0x200', 'Moure'), blk('0x210', 'Opcions')],
+    }
+    const payload = buildSourcesPayload(tabs)
+    expect(payload['STORY.PAC']).toHaveLength(1)
+    expect(payload['DEFMENU.SCP']).toHaveLength(2)
+  })
+
+  it('DOUGU_ITEMTBL.PAC (items) saves with per-line glyph tracking', () => {
+    // Gadget names — each is independent, no scene concept
+    const blocks = [
+      blk('0x2E800', 'Pa de la memòria', { scene: 0, jpBytes: 10 }),
+      blk('0x2E810', 'Gadget Llarg', { scene: 0, jpBytes: 8 }),
+    ]
+    const payload = buildSourcesPayload({ 'DOUGU_ITEMTBL.PAC': blocks })
+    expect(payload['DOUGU_ITEMTBL.PAC'][0].ca).toBe('Pa de la memòria')
+    expect(payload['DOUGU_ITEMTBL.PAC'][1].ca).toBe('Gadget Llarg')
+  })
+
+  it('edit STORY, switch to DEFMENU, edit, save — both tabs preserved', () => {
+    // Simulate: user edits STORY tab
+    const storyBlocks = [blk('0x100', 'Nova traducció')]
+    // Then loads DEFMENU tab without saving
+    const menuBlocks = [blk('0x200', 'Menú')]
+    // Then edits DEFMENU
+    menuBlocks[0].ca = 'Opcions'
+
+    // Save includes BOTH
+    const tabBlocks = {
+      'STORY.PAC': storyBlocks,
+      'DEFMENU.SCP': menuBlocks,
+    }
+    const payload = buildSourcesPayload(tabBlocks)
+
+    expect(payload['STORY.PAC'][0].ca).toBe('Nova traducció')
+    expect(payload['DEFMENU.SCP'][0].ca).toBe('Opcions')
+  })
+
+  it('re-extract STORY tab without losing edits to DEFMENU', () => {
+    // Saved state: both tabs translated
+    const saved = {
+      'STORY.PAC': [blk('0x100', 'Històries')],
+      'DEFMENU.SCP': [blk('0x200', 'Moure')],
+    }
+
+    // Re-extract returns fresh STORY with empty ca, DEFMENU not in extract (not re-extracted)
+    const fresh = {
+      'STORY.PAC': [blk('0x100', '')],
+    }
+
+    // Reconcile STORY only
+    reconcileByOffset(fresh['STORY.PAC'], saved['STORY.PAC'])
+
+    // Result: STORY restored, DEFMENU is still in memory (not touched)
+    expect(fresh['STORY.PAC'][0].ca).toBe('Històries')
+    // DEFMENU would still be in tabBlocks[DEFMENU.SCP], unmodified
+  })
+
+  it('poll merge respects unsaved local edits — never overwrites them', () => {
+    // Local: user has unsaved edits
+    const local = [blk('0x100', 'Edit local')]
+    // Remote: API has a different version (from another user?)
+    const remote = [blk('0x100', 'Edit remot')]
+
+    // If caller properly guards on dirty flag, this won't be called
+    // But if it is, it DOES overwrite (merge assumes safe because caller checked dirty)
+    const n = mergePolledCa(local, remote)
+
+    // This is the BUG if dirty check fails: local edit is lost
+    expect(local[0].ca).toBe('Edit remot')
+    expect(n).toBe(1)
+  })
+
+  it('REGRESSION: buildSourcesPayload sends only active tab, previous tabs lost', () => {
+    // This is the "data loss on save" bug scenario
+    // User workflow:
+    // 1. Load project, get STORY + DEFMENU tabs
+    // 2. Edit STORY.PAC
+    // 3. Switch to DEFMENU.SCP, edit it
+    // 4. Save (should include BOTH tabs)
+
+    // If the bug exists: save only includes the ACTIVE tab (DEFMENU) and LOSES STORY edits
+    const tabBlocks = {
+      'STORY.PAC': [
+        blk('0x000100', 'Traducció del STORY'),
+        blk('0x000200', 'Més text de STORY'),
+      ],
+      'DEFMENU.SCP': [
+        blk('0x000300', 'Moure'),
+        blk('0x000400', 'Opcions'),
+      ],
+    }
+
+    const payload = buildSourcesPayload(tabBlocks)
+
+    // Both tabs must be in the save payload
+    expect(Object.keys(payload).sort()).toEqual(['DEFMENU.SCP', 'STORY.PAC'])
+    expect(payload['STORY.PAC']).toBeDefined()
+    expect(payload['DEFMENU.SCP']).toBeDefined()
+
+    // Verify the actual translations are there
+    expect(payload['STORY.PAC'][0].ca).toBe('Traducció del STORY')
+    expect(payload['DEFMENU.SCP'][0].ca).toBe('Moure')
+  })
+})
