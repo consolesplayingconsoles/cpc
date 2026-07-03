@@ -7,6 +7,7 @@ import ControlCapture from './ControlCapture.vue'
 import ControlKeyboard from './ControlKeyboard.vue'
 import UiClose from './ui/UiClose.vue'
 import UiIconButton from './ui/UiIconButton.vue'
+import { LANGUAGES } from '../lib/languages'
 
 const props = defineProps<{
   active:     boolean
@@ -70,20 +71,6 @@ const translateOverLimit = computed(() => translateUsage.value.count >= TRANSLAT
 
 // ── Language picker ───────────────────────────────────────────────────────
 const LANG_KEY = 'cpc.lens.lang'
-const LANGUAGES = [
-  { code: 'en', label: 'English' },
-  { code: 'ca', label: 'Catalan' },
-  { code: 'es', label: 'Spanish' },
-  { code: 'fr', label: 'French' },
-  { code: 'de', label: 'German' },
-  { code: 'it', label: 'Italian' },
-  { code: 'pt', label: 'Portuguese' },
-  { code: 'ja', label: 'Japanese' },
-  { code: 'ko', label: 'Korean' },
-  { code: 'zh', label: 'Chinese' },
-  { code: 'ru', label: 'Russian' },
-  { code: 'ar', label: 'Arabic' },
-]
 const translateLang = ref(localStorage.getItem(LANG_KEY) ?? 'en')
 watch(translateLang, (v) => { try { localStorage.setItem(LANG_KEY, v) } catch {} })
 
