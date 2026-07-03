@@ -20,7 +20,7 @@ import sys, os, json, urllib.request, urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # pluto-translate
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))                    # dc (fon_codec)
 import fon_codec
-from packers import ptrtable, nullsplit, exemsg
+from packers import ptrtable, nullsplit, exemsg, raw_strings
 
 # source key -> (on-disc relative path, packer, kwargs). box=full-width wrap width.
 PLAN = {
@@ -29,6 +29,7 @@ PLAN = {
     "STORY.PAC":          ("STORY.PAC",          "nullsplit", dict(box=15, grow=False, prefer=0xce514)),
     "DOUGU_ITEMTBL.PAC":  ("DOUGU/ITEMTBL.PAC",  "ptrtable",  dict(box=20)),   # wrap long invention descriptions to 2 lines (short gadget NAMES <=20 stay on one line)
     "INFO_SECRET.TBL":    ("INFO/SECRET.TBL",    "ptrtable",  dict(box=12)),
+    "INFO_DORADO.TBL":    ("INFO/DORADO.TBL",    "ptrtable",  dict(box=None)),   # Doraemon rank titles (same-size)
     # menu / map screens -- same ptrtable format (u32 table + 2df0/22f0 records). Single-line items.
     "DEFMENU.SCP":        ("DEFMENU.SCP",        "ptrtable",  dict(box=None)),   # field/pause menu (4)
     "MAINMENU.SCP":       ("MAINMENU.SCP",       "ptrtable",  dict(box=None)),   # main menu (7)
@@ -37,6 +38,8 @@ PLAN = {
     # save / sleep confirmation prompts baked into the boot exe. exemsg = same-size in-place rewrite
     # (the exe must not change length -- see packers/exemsg + dc/inplace).
     "1ST_READ.BIN":       ("1ST_READ.BIN",       "exemsg",    dict()),
+    # day-start week labels (月, 第X週) = raw null-terminated strings at fixed offsets in 1ST_READ.BIN
+    "1ST_READ.BIN_WEEKS": ("1ST_READ.BIN",       "raw_strings", dict()),
 }
 
 
@@ -59,31 +62,51 @@ def main():
     state_arg, orig_root, patch_root = sys.argv[1], sys.argv[2], sys.argv[3]
     api_base = sys.argv[4] if len(sys.argv) > 4 else "http://localhost:7700"
     st = load_state(state_arg, api_base)
+
+    # Group by output file to handle multiple sources patching the same file
+    by_output = {}
     for key, (rel, kind, kw) in PLAN.items():
         blocks = st["sources"].get(key)
         if blocks is None:
-            print("  skip %s (not in state)" % key); continue
+            continue
         src = os.path.join(orig_root, rel)
         if not os.path.isfile(src):
-            print("  skip %s (original not in extract: %s)" % (key, rel)); continue
+            continue
+        if rel not in by_output:
+            by_output[rel] = []
+        by_output[rel].append((key, kind, kw, blocks))
+
+    # Process each output file
+    for rel, patches in by_output.items():
+        src = os.path.join(orig_root, rel)
         orig = open(src, "rb").read()
-        if kind == "nullsplit":
-            out, s = nullsplit.pack(orig, blocks, fon_codec.fw, **kw)
-            real = sum(1 for b in blocks if (b.get("ca") or "").strip())
-            note = "%d/%d lines (%d%%), %d->%dB" % (
-                s["lines_placed"], real, 100 * s["lines_placed"] // max(1, real), len(orig), len(out))
-        elif kind == "exemsg":
-            out = exemsg.pack(orig, blocks, fon_codec.fw, **kw)
-            real = sum(1 for b in blocks if (b.get("ca") or "").strip())
-            note = "%d runs, %d->%dB (same-size)" % (real, len(orig), len(out))
-        else:
-            out = ptrtable.pack(orig, blocks, fon_codec.fw, **kw)
-            real = sum(1 for b in blocks if (b.get("ca") or "").strip())
-            note = "%d records, %d->%dB" % (real, len(orig), len(out))
+        out = orig
+
+        # Apply patches in order
+        for key, kind, kw, blocks in patches:
+            if kind == "nullsplit":
+                out, s = nullsplit.pack(out, blocks, fon_codec.fw, **kw)
+                real = sum(1 for b in blocks if (b.get("ca") or "").strip())
+                note = "%d/%d lines (%d%%), %d->%dB" % (
+                    s["lines_placed"], real, 100 * s["lines_placed"] // max(1, real), len(orig), len(out))
+            elif kind == "exemsg":
+                out = exemsg.pack(out, blocks, fon_codec.fw, **kw)
+                real = sum(1 for b in blocks if (b.get("ca") or "").strip())
+                note = "%d runs, %d->%dB (same-size)" % (real, len(orig), len(out))
+            elif kind == "raw_strings":
+                out = raw_strings.pack(out, blocks, fon_codec.fw, **kw)
+                real = sum(1 for b in blocks if (b.get("ca") or "").strip())
+                note = "%d strings, %d->%dB (same-size)" % (real, len(orig), len(out))
+            else:
+                out = ptrtable.pack(out, blocks, fon_codec.fw, **kw)
+                real = sum(1 for b in blocks if (b.get("ca") or "").strip())
+                note = "%d records, %d->%dB" % (real, len(orig), len(out))
+            print("  %-20s [%s] -> %s  (%s)" % (key, kind, rel, note))
+
+        # Write the final patched file
         dst = os.path.join(patch_root, rel)
         os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
         open(dst, "wb").write(out)
-        print("  %-20s [%s] -> %s  (%s)" % (key, kind, rel, note))
 
 
 if __name__ == "__main__":

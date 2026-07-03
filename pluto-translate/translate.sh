@@ -76,7 +76,7 @@ done
 
 echo "[4/5] splice same-size files in place (into track05)"
 # only same-size files can be spliced in place; inplace.py refuses a mismatch (SECRET.TBL grows -> skip)
-for rel in STORY.PAC S18RM04.FON DOUGU/ITEMTBL.PAC DEFMENU.SCP MAINMENU.SCP MAP.SCP NOBIMAP.SCP 1ST_READ.BIN; do
+for rel in STORY.PAC S18RM04.FON DOUGU/ITEMTBL.PAC DEFMENU.SCP MAINMENU.SCP MAP.SCP NOBIMAP.SCP 1ST_READ.BIN INFO/DORADO.TBL; do
   [ -f "$PATCH/$rel" ] && [ -f "$EXTRACT/$rel" ] || continue
   python3 "$HERE/dc/inplace.py" "$DEST/track05.bin" "$EXTRACT/$rel" "$PATCH/$rel" || echo "  (skipped $rel)"
 done
@@ -94,9 +94,17 @@ with urllib.request.urlopen(url, timeout=120) as r:
 print("  textures fetched from %s" % url)
 PY
 for f in "$TEX"/*.PVR "$TEX"/*.PVM; do
-  [ -f "$f" ] || continue; b=$(basename "$f"); [ -f "$EXTRACT/$b" ] || continue
-  python3 "$HERE/dc/inplace.py" "$DEST/track05.bin" "$EXTRACT/$b" "$f" || echo "  (skipped tex $b)"
+  [ -f "$f" ] || continue; b=$(basename "$f")
+  # a texture may live in a subdir in the extract (e.g. INFO/JYOU_00.PVR) -> match by basename
+  orig=$(find "$EXTRACT" -name "$b" -print -quit 2>/dev/null)
+  [ -n "$orig" ] || continue
+  python3 "$HERE/dc/inplace.py" "$DEST/track05.bin" "$orig" "$f" || echo "  (skipped tex $b)"
 done
+# SOD / week-transition banner: one glyph atlas lives as chunk #170 inside STORYGRA.PAC (~464 MB).
+# We ship only the 128 KB patched chunk and splice just that region in place (never load the PAC).
+if [ -f "$TEX/STORYGRA_c170.bin" ] && [ -f "$EXTRACT/STORYGRA.PAC" ]; then
+  python3 "$HERE/dc/splice_pac_chunk.py" "$DEST/track05.bin" "$EXTRACT/STORYGRA.PAC" "$TEX/STORYGRA_c170.bin" 170 || echo "  (skipped STORYGRA chunk)"
+fi
 
 echo "[5/5] name the .gdi + gamelist"
 # rename disc.gdi -> "<full name>.gdi" so Batocera lists the game, not "disc"

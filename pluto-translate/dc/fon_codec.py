@@ -98,17 +98,6 @@ def _apos_r(g, sq):             # BOLD apostrophe, RIGHT edge. ALWAYS squeeze th
                  (2,16),(2,17),(2,18),(3,17),(4,16)):
         if 0 <= c < W: g[r][c] = 3
     return g
-def _dash_l(g):                 # hyphen on the LEFT + letter shifted RIGHT so they don't overlap
-    cols = [c for c in range(W) if any(g[r][c] for r in range(ROWS))]  # (old version stamped the bar
-    left = min(cols) if cols else 0                                    # ON the letter -> "blah-t" garbage)
-    shift = max(0, 5 - left)    # move the letter just enough to start at col 5; wide letters keep width
-    out = [[0]*W for _ in range(ROWS)]
-    for r in range(ROWS):
-        for c in range(W):
-            if g[r][c] and c + shift < W: out[r][c + shift] = g[r][c]
-    for r in (8, 9, 10):        # 3px-tall solid hyphen (survives the blit) in the cleared left gap
-        for c in range(0, 4): out[r][c] = 3
-    return out
 def _basejis(ch):
     up = ch.isupper(); o = ord(ch)
     return (0x23, (0x41 if up else 0x61) + o - (ord('A') if up else ord('a')))
@@ -169,8 +158,9 @@ ACCENT_SPEC = {
  "Ü":(0x23,0x55,_dieresis,0,0x83,0xA7), "Ç":(0x23,0x43,_cedilla,0,0x83,0xA8),
 }
 
-# contraction sequence -> (base letter, kind). kind: r=apos-right, rq=apos-right-squeezed
-# (wide M/N), al=apos-left, dl=dash-left. Authored into the FREE Greek slots after accents.
+# contraction sequence -> (base letter, kind). kind: r=apos-right, rq=apos-right-squeezed (wide
+# M/N). There is NO left-edge mark: a leading apostrophe is the PRECEDING letter's right-apostrophe
+# (see below). Authored into the FREE Greek slots after accents.
 _CSPEC = [
  ("l'",'l','r'), ("L'",'L','r'), ("d'",'d','r'), ("D'",'D','r'),
  ("s'",'s','r'), ("S'",'S','r'), ("t'",'t','r'), ("T'",'T','rq'),
@@ -232,13 +222,20 @@ def build_patched_font(src_bytes):
     rec[BMP:BMP+ROWS*BPR] = encode(g)
     jhi, jlo = sjis2jis(0x83, 0xC9); rec[0], rec[1] = jlo, jhi
     hoff = jis_index(jhi,jlo)*STRIDE; data[hoff:hoff+STRIDE] = rec
+    # middot glyph (for l·l geminate) -> Greek slot 0x83CA, centered mid-height dot
+    rec = bytearray(data[jis_index(0x23,0x61)*STRIDE:][:STRIDE])   # borrow 'a' header
+    g = [[0]*W for _ in range(ROWS)]
+    for r in (8, 9, 10):
+        for c in (9, 10): g[r][c] = 3
+    rec[BMP:BMP+ROWS*BPR] = encode(g)
+    jhi, jlo = sjis2jis(0x83, 0xCA); rec[0], rec[1] = jlo, jhi
+    doff = jis_index(jhi,jlo)*STRIDE; data[doff:doff+STRIDE] = rec
     # contraction combo-glyphs into the free Greek slots
     for seq, ch, kind in _CSPEC:
         bhi, blo = _basejis(ch)
         g = decode(bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE]))
         if   kind == 'r':  g = _apos_r(g, False)
         elif kind == 'rq': g = _apos_r(g, True)
-        elif kind == 'dl': g = _dash_l(g)
         rec = bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE])   # borrow base header
         rec[BMP:BMP+ROWS*BPR] = encode(g)
         code = _CSLOT[seq]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
@@ -282,11 +279,11 @@ _PUNCT = {" ":0x8140, ".":0x8144, ",":0x8143, "!":0x8149, "?":0x8148,
          "…":0x8163}   # full-width ellipsis the JP already uses: "..." (6B) -> "…" (2B)
 _ACCENTS = {ch: (shi<<8)|slo for ch,(_,_,_,_,shi,slo) in ACCENT_SPEC.items()}
 _ACCENTS["-"] = 0x83C9   # authored hyphen (enclitics: Ves-te'n, ajudar-lo)
+_ACCENTS["·"] = 0x83CA  # authored middot (geminates: l·l → col·lecció)
 
 def fw(s):
     """Catalan text -> Shift-JIS bytes the patched font renders (accents + contractions)."""
-    s = s.replace("l·l","ll").replace("L·L","LL").replace("·","")   # no middot glyph yet
-    s = s.replace("’", "'")                                     # curly apostrophe -> straight
+    s = s.replace("’", "’")                                     # curly apostrophe -> straight
     o = bytearray(); i = 0; n = len(s)
     while i < n:
         if s[i:i+3] == "...":   # ellipsis -> baseline-dots glyph in the ヴ slot (2B, 1 cell)

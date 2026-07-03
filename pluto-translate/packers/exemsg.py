@@ -44,9 +44,16 @@ def pack(orig, blocks, encode, box=None):
             j = k
             while j < te and not _is_ctrl(orig, j) and orig[j] != 0xff:
                 j += 1
+            run_len = j - k
             blk = bymap.get(k)
             ca = blk.get("ca") if blk else None
-            new += encode(ca) if ca else orig[k:j]      # untranslated run -> keep original JP
+            encoded = encode(ca) if ca else orig[k:j]
+            new += encoded
+            # Pad this run to match original length
+            if len(encoded) < run_len:
+                new += FWSPACE * ((run_len - len(encoded)) // 2)
+                if (run_len - len(encoded)) % 2:
+                    new += b"\x00"
             k = j
 
         region = te - ts
