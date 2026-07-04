@@ -50,3 +50,34 @@ export function mergePolledCa(local: Block[] | undefined, remote: Block[] | unde
   }
   return n
 }
+
+// Run a background poll: fetch saved state, then merge external `ca` changes into the open tabs.
+// The fetch is ASYNC, so anything that makes the snapshot stale can happen while it's in flight — and
+// a boolean `dirty` is NOT enough to detect it. The nastiest case: a SAVE that completes during the
+// fetch writes newer bytes to disk AND clears `dirty`, so the poll (which read disk BEFORE the save)
+// comes back stale with `dirty` false and reverts the just-saved edit. So the caller passes a
+// monotonic revision bumped on every edit AND every save; if it advanced during the fetch, the
+// snapshot is stale -> bail. Plus focus (mid-type, uncommitted) and ns (project switch). Returns # changed.
+export interface PollGuards {
+  curNs: () => string       // the project namespace NOW
+  startNs: string           // the namespace when the poll began
+  changed: () => boolean    // local state (an edit OR a save) advanced since the poll began
+  focused: () => boolean    // an input/textarea is focused NOW (mid-type, uncommitted)
+}
+export async function applyPoll(
+  fetchState: () => Promise<{ sources: Record<string, Block[]> } | null | undefined>,
+  tabBlocks: Record<string, Block[]>,
+  guards: PollGuards,
+): Promise<number> {
+  const data = await fetchState()
+  if (!data || !data.sources) return 0
+  // Re-check AFTER the await — merging a stale snapshot silently reverts the operator's work.
+  if (guards.curNs() !== guards.startNs) return 0
+  if (guards.changed()) return 0
+  if (guards.focused()) return 0
+  let n = 0
+  for (const safe of Object.keys(tabBlocks)) {
+    n += mergePolledCa(tabBlocks[safe], data.sources[safe])
+  }
+  return n
+}

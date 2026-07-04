@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { type Block, caBytes } from '../lib/translation'
 import {
-  formatOffset, buildSourcesPayload, reconcileByOffset, mergePolledCa,
+  formatOffset, buildSourcesPayload, reconcileByOffset, mergePolledCa, applyPoll,
 } from './TranslationTable.logic'
 
 // Minimal Block factory so tests read as data, not boilerplate.
@@ -273,5 +273,90 @@ describe('Boku Doraemon workflow — real multi-tab scenario', () => {
     // Verify the actual translations are there
     expect(payload['STORY.PAC'][0].ca).toBe('Traducció del STORY')
     expect(payload['DEFMENU.SCP'][0].ca).toBe('Moure')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGRESSION: the poll-during-edit race that silently reverts a just-made edit.
+// The real bug ("I edited some lines, saved, and they returned right away"): pollSaved() checks
+// `dirty`/focus BEFORE `await getState`, but applies the merge AFTER the await without re-checking
+// them. An edit made WHILE the fetch is in flight is overwritten by the now-stale remote snapshot.
+// `applyPoll` (TranslationTable.logic) is the extracted, testable core; these tests drive its fix.
+describe('applyPoll — must not clobber edits made while the fetch was in flight', () => {
+  // `rev` = a monotonic counter bumped on every edit AND every save. The poll captures it at start and
+  // `changed()` compares to now; any advance means the fetched snapshot is stale.
+  const guards = (o: Partial<{ curNs: string; startNs: string; changed: boolean; focused: boolean }>) => ({
+    curNs: () => o.curNs ?? 'ns', startNs: o.startNs ?? 'ns',
+    changed: () => o.changed ?? false, focused: () => o.focused ?? false,
+  })
+
+  it('edit during the fetch (rev advances): the fresh edit SURVIVES', async () => {
+    const local = { 'STORY.PAC': [blk('0x100', 'text original')] }
+    let rev = 0
+    const start = rev
+    const stale = { sources: { 'STORY.PAC': [blk('0x100', 'text original')] } }
+    const fetchState = async () => { local['STORY.PAC'][0].ca = 'curt'; rev++ /* bumpEdit */; return stale }
+    const n = await applyPoll(fetchState, local, {
+      curNs: () => 'ns', startNs: 'ns', changed: () => rev !== start, focused: () => false,
+    })
+    expect(local['STORY.PAC'][0].ca).toBe('curt')
+    expect(n).toBe(0)
+  })
+
+  it('SAVE completes during the fetch (rev advances, dirty already cleared): edit SURVIVES', async () => {
+    // The case a boolean `dirty` cannot catch: the operator saved, `dirty` is false, but the poll read
+    // disk BEFORE that save landed. Only the rev bump (saves bump it too) flags the staleness.
+    const local = { 'STORY.PAC': [blk('0x100', 'the cut version')] }
+    let rev = 0
+    const start = rev
+    // remote = disk as the poll read it, BEFORE the save wrote the cut
+    const stale = { sources: { 'STORY.PAC': [blk('0x100', 'the OLD long version')] } }
+    const fetchState = async () => {
+      // a save lands mid-fetch: it writes the cut to disk and bumps rev; dirty is now false
+      rev++
+      return stale
+    }
+    const n = await applyPoll(fetchState, local, {
+      curNs: () => 'ns', startNs: 'ns',
+      changed: () => rev !== start,   // detects the save even though "dirty" would be false here
+      focused: () => false,
+    })
+    expect(local['STORY.PAC'][0].ca).toBe('the cut version')   // NOT reverted to the long version
+    expect(n).toBe(0)
+  })
+
+  it('focus acquired during the fetch (mid-type, uncommitted): no overwrite', async () => {
+    const local = { 'STORY.PAC': [blk('0x100', 'original')] }
+    let focused = false
+    const stale = { sources: { 'STORY.PAC': [blk('0x100', 'original')] } }
+    const fetchState = async () => { local['STORY.PAC'][0].ca = 'typing…'; focused = true; return stale }
+    const n = await applyPoll(fetchState, local, {
+      curNs: () => 'ns', startNs: 'ns', changed: () => false, focused: () => focused,
+    })
+    expect(local['STORY.PAC'][0].ca).toBe('typing…')
+    expect(n).toBe(0)
+  })
+
+  it('navigated to another project during the fetch: does not touch the new tab', async () => {
+    const local = { 'STORY.PAC': [blk('0x100', 'new project text')] }
+    const stale = { sources: { 'STORY.PAC': [blk('0x100', 'old project text')] } }
+    const n = await applyPoll(async () => stale, local, guards({ curNs: 'nsB', startNs: 'nsA' }))
+    expect(local['STORY.PAC'][0].ca).toBe('new project text')
+    expect(n).toBe(0)
+  })
+
+  it('clean poll (nothing changed during the fetch): external ca IS merged in', async () => {
+    const local = { 'STORY.PAC': [blk('0x100', 'old')] }
+    const remote = { sources: { 'STORY.PAC': [blk('0x100', 'edited by Claude')] } }
+    const n = await applyPoll(async () => remote, local, guards({}))
+    expect(local['STORY.PAC'][0].ca).toBe('edited by Claude')
+    expect(n).toBe(1)
+  })
+
+  it('fetch returns nothing (offline): no throw, no change', async () => {
+    const local = { 'STORY.PAC': [blk('0x100', 'keep')] }
+    const n = await applyPoll(async () => null, local, guards({}))
+    expect(local['STORY.PAC'][0].ca).toBe('keep')
+    expect(n).toBe(0)
   })
 })
