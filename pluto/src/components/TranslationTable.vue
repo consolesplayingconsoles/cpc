@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { API_BASE } from '../composables/useNodes'
 import { useAchievement } from '../composables/useAchievement'
@@ -14,7 +14,7 @@ import SpeakerLegend from './SpeakerLegend.vue'
 import PromptCopier from './PromptCopier.vue'
 import TranslationRow from './TranslationRow.vue'
 import { type Block, caBytes } from '../lib/translation'
-import { formatOffset, buildSourcesPayload, reconcileByOffset, mergePolledCa } from './TranslationTable.logic'
+import { formatOffset, buildSourcesPayload, reconcileByOffset, applyPoll } from './TranslationTable.logic'
 import { translationApi } from '../api/translation'
 import { LANGUAGES } from '../lib/languages'
 
@@ -200,6 +200,9 @@ async function saveState() {
   // deep-merges by source key, so untouched/unloaded sources are preserved.
   const sources = buildSourcesPayload(tabBlocks.value)
   if (!Object.keys(sources).length) return
+  // Bump BEFORE the write: a poll fetch already in flight read disk pre-write, so its snapshot is now
+  // stale — the rev advance makes applyPoll discard it instead of reverting what we're about to save.
+  stateRev.value++
   // THROWS if the API rejects/unreachable — callers must surface it. Swallowing here is the bug that
   // ate drafts: "Saved ✓" showed and `dirty` cleared while nothing reached disk (API was down).
   await translationApi.putState(curNs.value, { sources, sceneBudget: sceneSlackByTab.value })
@@ -422,7 +425,11 @@ function recomputeTabPct() {
 // the typing lag. A shallow counter watch costs nothing per char.
 const editTick = ref(0)
 const dirty = ref(false)                 // unsaved local edits; only "Save draft" persists to disk
-function bumpEdit() { editTick.value++; dirty.value = true; saveError.value = false }
+// Monotonic revision bumped on every edit AND every save-write. A background poll captures it before
+// its async fetch; if it advanced by the time the fetch resolves, that snapshot is stale (an edit or
+// a save landed mid-fetch) and applyPoll discards it — otherwise the stale read reverts fresh work.
+const stateRev = ref(0)
+function bumpEdit() { editTick.value++; stateRev.value++; dirty.value = true; saveError.value = false }
 // Manual-save model: warn before leaving/reloading with unsaved edits (nothing hits disk until Save draft).
 window.addEventListener('beforeunload', (e) => { if (dirty.value) { e.preventDefault(); e.returnValue = '' } })
 watch(editTick, () => {
@@ -853,36 +860,46 @@ async function onSystemChange() {
 
 watch(selSystem, onSystemChange)   // refresh games when the system changes
 
-// External translators (Claude via cpc) write straight to state.json, so the open
-// table won't see them without a poll. Pull the saved state and merge changed `ca`
-// IN PLACE (mutate, don't replace) so only the changed rows re-render — never the
-// whole 7k-row table. Paused while an input is focused, so it can't clobber typing.
-let pollTimer: ReturnType<typeof setInterval> | undefined
-async function pollSaved() {
-  if (step.value !== 'table' || !curNs.value || stats.value.pending === 0) return
-  // Manual-save model: unsaved local edits are the source of truth. This poll only pulls in
-  // EXTERNAL (Claude) changes; while `dirty`, remote is stale by definition, so merging it would
-  // clobber the edits you haven't saved yet (index-merge below reverts them). Resume once you save.
-  if (dirty.value) return
+// External translators (Claude via cpc) write straight to state.json. We pull those in ONLY when the
+// operator clicks Refresh — never on a background timer. An auto-poll that merges disk over the open
+// table can silently revert fresh edits (a poll's async read racing an edit/save), so it's gone: the
+// operator's in-memory work is the source of truth, and refreshing is an explicit, deliberate act.
+function inputFocused(): boolean {
   const ae = document.activeElement as HTMLElement | null
-  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return
-  const ns = curNs.value
+  return !!ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')
+}
+const refreshing = ref(false)
+const refreshMsg = ref('')
+async function refreshFromDisk() {
+  if (step.value !== 'table' || !curNs.value || refreshing.value) return
+  // Refresh merges the saved state's `ca` over the open table. If there are unsaved edits, a line the
+  // operator changed AND that also changed on disk would be overwritten — so confirm first.
+  if (dirty.value && !confirm('You have unsaved edits. Refresh may overwrite lines you changed here. Save first, or continue?')) return
+  const startNs = curNs.value
+  const revAtStart = stateRev.value
+  refreshing.value = true
+  refreshMsg.value = ''
   try {
-    const data = await translationApi.getState(ns)
-    if (ns !== curNs.value || !data || !data.sources) return     // navigated away mid-fetch
-    const src = data.sources as Record<string, Block[]>
-    for (const safe of Object.keys(tabBlocks.value)) {
-      mergePolledCa(tabBlocks.value[safe], src[safe])
-    }
-  } catch { /* offline — try again next tick */ }
+    const n = await applyPoll(() => translationApi.getState(startNs), tabBlocks.value, {
+      curNs: () => curNs.value, startNs,
+      changed: () => stateRev.value !== revAtStart,   // bail if an edit/save landed during the fetch
+      focused: inputFocused,
+    })
+    if (n > 0) { recomputeStats(); recomputeTabPct(); measureScenes() }
+    refreshMsg.value = n > 0 ? `Pulled ${n} updated line${n === 1 ? '' : 's'}` : 'Already up to date'
+    setTimeout(() => { refreshMsg.value = '' }, 2500)
+  } catch {
+    refreshMsg.value = 'Refresh failed (offline?)'
+    setTimeout(() => { refreshMsg.value = '' }, 2500)
+  } finally {
+    refreshing.value = false
+  }
 }
 
 onMounted(() => {
   loadSystems()
   loadProjects()
-  pollTimer = setInterval(pollSaved, 5000)
 })
-onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
 
 <template>
@@ -996,7 +1013,10 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
           <span class="tt-total">{{ stats.total.toLocaleString() }} blocks</span>
         </template>
         <span class="tt-actions">
+          <span v-if="refreshMsg" class="tt-build-msg">{{ refreshMsg }}</span>
           <span v-if="buildMsg" class="tt-build-msg" :class="{ 'tt-build-msg--fail': buildFailed }">{{ buildMsg }}</span>
+          <UiButton class="tt-action" :loading="refreshing" loading-text="Refreshing…" :disabled="building || extracting"
+                    title="Pull external edits (e.g. from Claude) saved to disk into the table" @click="refreshFromDisk">Refresh</UiButton>
           <UiButton class="tt-action" :class="{ 'tt-dirty': dirty && !draftSaved && !saveError, 'tt-save-fail': saveError }" :disabled="building || extracting" @click="saveDraft">{{ saveError ? '⚠ Save failed — retry' : draftSaved ? 'Saved ✓' : (dirty ? 'Save draft •' : 'Save draft') }}</UiButton>
           <UiButton variant="primary" :loading="building" :disabled="extracting" loading-text="Releasing…" @click="confirmBuild">Build &amp; release to Batocera</UiButton>
         </span>
