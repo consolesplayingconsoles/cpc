@@ -139,7 +139,10 @@ def build(d, cfg):
                 arr[y, x0:x1, 3] = 255
             for wb, _xl, _cy, _sz, _sg in cfg.get("labels", []):   # legend labels: alpha-erase (transparent bg)
                 wx0, wy0, wx1, wy1 = wb
-                arr[wy0:wy1, wx0:wx1, 3] = 0
+                sub = arr[wy0:wy1, wx0:wx1]
+                r, g, b = sub[..., 0].astype(int), sub[..., 1].astype(int), sub[..., 2].astype(int)
+                keep = (r > 170) & (g > 150) & (b < 120)           # the yellow timing-bar CURSOR sits at
+                sub[..., 3] = np.where(keep, sub[..., 3], 0)       # the tail of Ｂボタン -> preserve it
         if "timer" in kinds:
             tx0, ty0, tx1, ty1 = cfg["timer_wipe"]   # timer on transparent bg -> alpha erase
             arr[ty0:ty1, tx0:tx1, 3] = 0

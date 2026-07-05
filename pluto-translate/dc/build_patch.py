@@ -20,7 +20,7 @@ import sys, os, json, urllib.request, urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # pluto-translate
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))                    # dc (fon_codec)
 import fon_codec
-from packers import ptrtable, nullsplit, exemsg, raw_strings
+from packers import ptrtable, nullsplit, exemsg, raw_strings, lines
 
 # source key -> (on-disc relative path, packer, kwargs). box=full-width wrap width.
 PLAN = {
@@ -30,6 +30,9 @@ PLAN = {
     "DOUGU_ITEMTBL.PAC":  ("DOUGU/ITEMTBL.PAC",  "ptrtable",  dict(box=20)),   # wrap long invention descriptions to 2 lines (short gadget NAMES <=20 stay on one line)
     "INFO_SECRET.TBL":    ("INFO/SECRET.TBL",    "ptrtable",  dict(box=12)),
     "INFO_DORADO.TBL":    ("INFO/DORADO.TBL",    "ptrtable",  dict(box=None)),   # Doraemon rank titles (same-size)
+    # Dream Passport memory-card save/load dialogs -- newline INI, rewritten same-size in place
+    # (rendered by the DP font, NOT S18RM04.FON, so ASCII-safe Shift-JIS; see packers/lines).
+    "DPETC_MESSAGE.INI":  ("DPETC/MESSAGE.INI",  "lines",     dict()),
     # menu / map screens -- same ptrtable format (u32 table + 2df0/22f0 records). Single-line items.
     "DEFMENU.SCP":        ("DEFMENU.SCP",        "ptrtable",  dict(box=None)),   # field/pause menu (4)
     "MAINMENU.SCP":       ("MAINMENU.SCP",       "ptrtable",  dict(box=None)),   # main menu (7)
@@ -97,6 +100,12 @@ def main():
                 out = raw_strings.pack(out, blocks, fon_codec.fw, **kw)
                 real = sum(1 for b in blocks if (b.get("ca") or "").strip())
                 note = "%d strings, %d->%dB (same-size)" % (real, len(orig), len(out))
+            elif kind == "lines":
+                out, s = lines.pack(out, blocks, fon_codec.fw, **kw)
+                note = "%d lines placed, %d skipped (over-budget), %d->%dB (same-size)" % (
+                    s["placed"], s["skipped"], len(orig), len(out))
+                for off, got, bud, ca in s["over_budget"]:
+                    print("    OVER @%s: %dB > %dB  %s" % (off, got, bud, ca[:40]))
             else:
                 out = ptrtable.pack(out, blocks, fon_codec.fw, **kw)
                 real = sum(1 for b in blocks if (b.get("ca") or "").strip())

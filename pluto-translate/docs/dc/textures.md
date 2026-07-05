@@ -27,7 +27,9 @@ via two scripts on the committed textures:
 - `repaint_mn_instr.py` — all three `〜そうさ方法〜` boxes → `~ Com es juga ~` + body (A red / B blue, MN3 also
   Y green), the `残りじかん…秒` timers → `Temps…s`, and MN1's `Ａボタン/Ｂボタン` legend → **Botó A / Botó B**.
   Board = per-row margin-median green refill; timer/legend on transparent bg = alpha erase. Chunk indices differ
-  per file (MN1 box=2 timer=5; MN2/MN3 box+timer=3).
+  per file (MN1 box=2 timer=5; MN2/MN3 box+timer=3). **GOTCHA: MN1's Ｂボタン legend erase-rect overlaps the
+  yellow timing-bar CURSOR (x[213,218], sits at the tail of ボタン) — the alpha-erase must PRESERVE yellow
+  pixels (r>170,g>150,b<120) or it wipes the cursor (regression seen + fixed 2026-07-05).**
 - `repaint_mn_dialog.py` — the 9 Mama speech bubbles (praise/scold, `ドラちゃん`→Doraemon, `ドラやき`→pastissets,
   portraits kept, auto-fit), the gold race flashes `用意して〜/スタート!!/終了〜!!` → **Llestos… / Ja!! / Fi!!**
   (yellow→orange gradient), and MN3's `この位置に/かたづけてね` → **Desa-ho / aquí** (gold, red → arrow kept).
