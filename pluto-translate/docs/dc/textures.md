@@ -41,6 +41,21 @@ text" check. Green-board text = fill (flat or board-gradient row-refill) + redra
 bg = alpha erase + redraw; portraits/icons/gauges/PAUSE/POINT/Perfect!/numbers kept. Inventory in
 `games/boku-doraemon-mn-hud.md` (which ALSO overclaims "complete" — read it as a text list, not a done-list).
 
+**`INFO/HIDORA_*` = the "four-dimensional pocket" body-part info page** (256×256, **ARGB1555 TWIDDLED**,
+NOT ARGB4444 — so it does **not** round-trip; re-encode ONLY the changed pixels back into the original
+16-bit buffer or you re-quantise the whole atlas). `HIDORA_00` = Doraemon's body cutaway (no text).
+`HIDORA_02` = the eight part-name labels in a 2×4 grid of white rounded boxes (blue border, magenta text):
+赤外線アイ/強力ハナ/レーダーひげ/ネコ集め鈴/ペタリハンド/四次元ポケット/しっぽ/あし → **Ulls infrarojos / Supernas /
+Bigotis radar / Campaneta gatera / Mans ventosa / Butxaca màgica / Cua interruptor / Peus flotants**
+(done 2026-07-05 via `games/Boku Doraemon/repaint_hidora.py`, preview-verified, NOT yet console-verified):
+erase only the magenta glyphs → white (keeps border + rounded corners byte-exact), redraw same magenta,
+2 lines for the long two-word names. **Note `CONT_0.PVR` (already done) is only the pocket screen's
+control LEGEND (Moure/Tria/Enrere), not these labels — an earlier session conflated the two.**
+`HIDORA_01` (**ARGB4444**, round-trips exactly, so full re-encode is fine) is a SPRITE SHEET: 8 empty
+cyan name-slot frames + red magnifier icons (no text, kept) and two cyan labels `タケコプター`/`どこでもドア`
+→ **Casquet volador / Porta màgica** (done 2026-07-05 via `repaint_hidora01.py`; each label kept within
+its own sampled sub-rect x[3,130] or the engine quad clips it, same as JYOU_00).
+
 Dividing line: **editable text → patch the bytes** (see `extract.md`); **pixel
 text → this doc.** Reusable codec: [`pvr_codec.py`](../../dc/pvr_codec.py).
 
