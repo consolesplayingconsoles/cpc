@@ -75,8 +75,10 @@ for f in "$GAMEDIR"/*; do
 done
 
 echo "[4/5] splice same-size files in place (into track05)"
-# only same-size files can be spliced in place; inplace.py refuses a mismatch (SECRET.TBL grows -> skip)
-for rel in STORY.PAC S18RM04.FON DOUGU/ITEMTBL.PAC DEFMENU.SCP MAINMENU.SCP MAP.SCP NOBIMAP.SCP 1ST_READ.BIN INFO/DORADO.TBL; do
+# only same-size files can be spliced in place; inplace.py refuses a mismatch (skips it, prints a note).
+# SECRET.TBL now packs same-size (632 B) since the hints were condensed, so it's back in -- if a future
+# edit makes it grow again, inplace.py just skips it rather than silently omitting it.
+for rel in STORY.PAC S18RM04.FON DOUGU/ITEMTBL.PAC DEFMENU.SCP MAINMENU.SCP MAP.SCP NOBIMAP.SCP 1ST_READ.BIN INFO/DORADO.TBL INFO/SECRET.TBL; do
   [ -f "$PATCH/$rel" ] && [ -f "$EXTRACT/$rel" ] || continue
   python3 "$HERE/dc/inplace.py" "$DEST/track05.bin" "$EXTRACT/$rel" "$PATCH/$rel" || echo "  (skipped $rel)"
 done

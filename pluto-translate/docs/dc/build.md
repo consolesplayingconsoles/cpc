@@ -46,7 +46,7 @@ patched binary (mirroring subdir paths). Boku Doraemon result:
 |---|---|---|
 | `STORY.PAC` | nullsplit (`grow=False`, box=15) | **3040/7575 lines (≈40%), size kept** — slack ceiling; rest stay JP |
 | `DOUGU/ITEMTBL.PAC` | ptrtable | 156 gadget names, size kept |
-| `INFO/SECRET.TBL` | ptrtable | 8 body-spec hints, grows |
+| `INFO/SECRET.TBL` | ptrtable (box=12) | 8 body-spec hints, size kept (632 B) — spliced in place |
 
 > Confirmed on screen 2026-06-28 (Flycast): the safe build loads and renders Catalan
 > dialogue with accents and correct placement. `grow=True` is abandoned (see below).
