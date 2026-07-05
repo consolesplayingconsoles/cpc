@@ -68,10 +68,16 @@ def fit_lines(lines, maxw, maxh, hi=30, lo=9):
     return lo
 
 
+# px kept clear of the box edge on each side so the on-screen quad doesn't clip the glyphs
+MARGIN_X = 12
+MARGIN_Y = 6
+
+
 def draw_label(im, box, lines):
     x0, y0, x1, y1 = box
     cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-    sz = fit_lines(lines, (x1 - x0), (y1 - y0), hi=30 if len(lines) == 1 else 26)
+    sz = fit_lines(lines, (x1 - x0) - 2 * MARGIN_X, (y1 - y0) - 2 * MARGIN_Y,
+                   hi=26 if len(lines) == 1 else 22)
     f = ImageFont.truetype(ARIAL, sz)
     lh = (f.getbbox("Àgjy")[3] - f.getbbox("Àgjy")[1]) + 2
     total = lh * len(lines)

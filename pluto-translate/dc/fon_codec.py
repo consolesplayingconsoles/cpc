@@ -222,13 +222,15 @@ def build_patched_font(src_bytes):
     rec[BMP:BMP+ROWS*BPR] = encode(g)
     jhi, jlo = sjis2jis(0x83, 0xC9); rec[0], rec[1] = jlo, jhi
     hoff = jis_index(jhi,jlo)*STRIDE; data[hoff:hoff+STRIDE] = rec
-    # middot glyph (for l·l geminate) -> Greek slot 0x83CA, centered mid-height dot
+    # middot glyph (for l·l geminate) -> Greek slot 0x83D1 (NOT 0x83CA: that slot is the 'il' digraph
+    # in _CLSLOT, which was overwriting the dot -> l·l rendered as an 'il' ligature, no dot). Bold 4x4
+    # block: a 2px dot gets eaten by the game's 2bpp blit.
     rec = bytearray(data[jis_index(0x23,0x61)*STRIDE:][:STRIDE])   # borrow 'a' header
     g = [[0]*W for _ in range(ROWS)]
-    for r in (8, 9, 10):
-        for c in (9, 10): g[r][c] = 3
+    for r in (7, 8, 9, 10):
+        for c in (8, 9, 10, 11): g[r][c] = 3
     rec[BMP:BMP+ROWS*BPR] = encode(g)
-    jhi, jlo = sjis2jis(0x83, 0xCA); rec[0], rec[1] = jlo, jhi
+    jhi, jlo = sjis2jis(0x83, 0xD1); rec[0], rec[1] = jlo, jhi
     doff = jis_index(jhi,jlo)*STRIDE; data[doff:doff+STRIDE] = rec
     # contraction combo-glyphs into the free Greek slots
     for seq, ch, kind in _CSPEC:
@@ -279,7 +281,7 @@ _PUNCT = {" ":0x8140, ".":0x8144, ",":0x8143, "!":0x8149, "?":0x8148,
          "…":0x8163}   # full-width ellipsis the JP already uses: "..." (6B) -> "…" (2B)
 _ACCENTS = {ch: (shi<<8)|slo for ch,(_,_,_,_,shi,slo) in ACCENT_SPEC.items()}
 _ACCENTS["-"] = 0x83C9   # authored hyphen (enclitics: Ves-te'n, ajudar-lo)
-_ACCENTS["·"] = 0x83CA  # authored middot (geminates: l·l → col·lecció)
+_ACCENTS["·"] = 0x83D1  # authored middot (geminates: l·l → col·lecció). 0x83CA is taken by 'il' digraph.
 
 def fw(s):
     """Catalan text -> Shift-JIS bytes the patched font renders (accents + contractions)."""
