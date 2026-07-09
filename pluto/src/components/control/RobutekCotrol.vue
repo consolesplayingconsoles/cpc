@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import PetIcon from './PetIcon.vue'
 import CopyButton from './CopyButton.vue'
 import ControlKeyboard from './ControlKeyboard.vue'
+import QuadrantLayout from './QuadrantLayout.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 import type { NodeMap } from '../composables/useNodes'
@@ -479,8 +480,10 @@ async function signIn() {
 
 <template>
   <div class="rb">
+    <QuadrantLayout>
 
-    <!-- ── top bar: live tile (cache-first; needs session) + actions ── -->
+    <!-- ── header: live tile (cache-first; needs session) + actions ── -->
+    <template #header>
     <header class="rb-bar">
       <div class="rb-id">
         <span class="rb-dot" :class="status" :title="dev?.online ? 'online' : 'offline'"/>
@@ -507,30 +510,11 @@ async function signIn() {
         </button>
       </div>
     </header>
+    </template>
 
-    <!-- ── login (compact, only when connecting) ── -->
-    <div v-if="showLogin" class="rb-login-scrim" @click.self="showLogin = false">
-      <form class="rb-login" @submit.prevent="signIn" autocomplete="on">
-        <div class="rb-login-title">Connect to DreameHome</div>
-        <label class="rb-field"><span>Region</span>
-          <select v-model="region" autocomplete="off" :disabled="submitting">
-            <option value="us">United States</option><option value="eu">Europe</option>
-            <option value="cn">China</option><option value="ru">Russia</option><option value="sg">Asia / Pacific</option>
-          </select>
-        </label>
-        <label class="rb-field"><span>Email</span>
-          <input v-model="email" name="username" type="email" autocomplete="username" placeholder="you@example.com" :disabled="submitting" required />
-        </label>
-        <label class="rb-field"><span>Password</span>
-          <input v-model="password" name="password" type="password" autocomplete="current-password" placeholder="••••••••" :disabled="submitting" required />
-        </label>
-        <UiButton variant="primary" class="rb-primary" type="submit" :loading="submitting" loading-text="Signing in…" :disabled="!email || !password">Sign in</UiButton>
-        <p v-if="loginError" class="rb-login-err">{{ loginError }}</p>
-      </form>
-    </div>
-
-    <!-- ── main: table | stage ── -->
-    <div class="rb-main">
+    <!-- ── NW: Past Cleans list (slides) + route map ── -->
+    <template #nw>
+    <div class="rb-nw">
 
       <!-- collapsible session table -->
       <aside class="rb-table" :class="{ collapsed }">
@@ -571,9 +555,8 @@ async function signIn() {
         {{ collapsed ? '›' : '‹' }}
       </button>
 
-      <!-- stage: map | side column (controller on top, robot clip below if present) -->
-      <section class="rb-stage">
-        <div class="rb-map">
+      <!-- route map -->
+      <div class="rb-map">
           <!-- the pet "encounter" is now a placed paw pin inside the route SVG
                (below), appearing as playback reaches the representative midpoint -->
 
@@ -645,24 +628,28 @@ async function signIn() {
             </div>
           </template>
         </div>
-
-        <aside class="rb-side">
-          <div class="rb-ctrl">
-            <ControlKeyboard :active="active" :map-source="source" :target="target" :mapping="mapping"
-                             :target-dev="targetDev" compact heading="Manual Assistance"
-                             @drive-error="emit('drive-error', $event)" />
-          </div>
-          <div v-if="hasVideo" class="rb-video">
-            <video ref="videoEl" :src="videoUrl || undefined" muted playsinline preload="auto"
-                   @loadedmetadata="syncVideo"></video>
-            <button class="rb-video-x" @click="clearVideo" title="Remove clip" aria-label="Remove clip">×</button>
-            <p class="rb-video-note"><strong>Actual footage:</strong> The game moves at the map's speed, which is constant because the robot stores the route but not the pace.</p>
-          </div>
-        </aside>
-      </section>
     </div>
+    </template>
 
-    <!-- ── transport / playback bar ── -->
+    <!-- ── NE: 3rd-person robot clip, only when a clip is loaded ── -->
+    <template #ne v-if="hasVideo">
+      <div class="rb-video">
+        <video ref="videoEl" :src="videoUrl || undefined" muted playsinline preload="auto"
+               @loadedmetadata="syncVideo"></video>
+        <button class="rb-video-x" @click="clearVideo" title="Remove clip" aria-label="Remove clip">×</button>
+        <p class="rb-video-note"><strong>Actual footage:</strong> The game moves at the map's speed, which is constant because the robot stores the route but not the pace.</p>
+      </div>
+    </template>
+
+    <!-- ── SE: controller (as usual) ── -->
+    <template #se>
+      <ControlKeyboard :active="active" :map-source="source" :target="target" :mapping="mapping"
+                       :target-dev="targetDev" heading="Manual Assistance"
+                       @drive-error="emit('drive-error', $event)" />
+    </template>
+
+    <!-- ── footer: transport / playback bar ── -->
+    <template #footer>
     <footer class="rb-transport" :class="{ disabled: !sel?.route?.length }">
       <button class="rb-play" :disabled="!sel?.route?.length" @click="togglePlay" :title="playing ? 'Pause (Space)' : 'Play (Space)'">
         {{ playing ? '❚❚' : '▶' }}
@@ -685,12 +672,37 @@ async function signIn() {
         <input type="number" v-model.number="videoOffset" step="0.1" /><span class="mono">s</span>
       </label>
     </footer>
+    </template>
+    </QuadrantLayout>
+
+    <!-- ── login (compact, only when connecting) — overlay, outside the layout ── -->
+    <div v-if="showLogin" class="rb-login-scrim" @click.self="showLogin = false">
+      <form class="rb-login" @submit.prevent="signIn" autocomplete="on">
+        <div class="rb-login-title">Connect to DreameHome</div>
+        <label class="rb-field"><span>Region</span>
+          <select v-model="region" autocomplete="off" :disabled="submitting">
+            <option value="us">United States</option><option value="eu">Europe</option>
+            <option value="cn">China</option><option value="ru">Russia</option><option value="sg">Asia / Pacific</option>
+          </select>
+        </label>
+        <label class="rb-field"><span>Email</span>
+          <input v-model="email" name="username" type="email" autocomplete="username" placeholder="you@example.com" :disabled="submitting" required />
+        </label>
+        <label class="rb-field"><span>Password</span>
+          <input v-model="password" name="password" type="password" autocomplete="current-password" placeholder="••••••••" :disabled="submitting" required />
+        </label>
+        <UiButton variant="primary" class="rb-primary" type="submit" :loading="submitting" loading-text="Signing in…" :disabled="!email || !password">Sign in</UiButton>
+        <p v-if="loginError" class="rb-login-err">{{ loginError }}</p>
+      </form>
+    </div>
   </div>
 </template>
 
 <style scoped>
+/* QuadrantLayout owns the header/grid/footer column now; .rb is just the positioning
+   context that fills the stage and anchors the login overlay. */
 .rb {
-  display: flex; flex-direction: column; height: 100%;
+  position: relative; height: 100%;
   font-family: var(--font-sans); color: var(--text); background: var(--surface-2);
 }
 .mono { font-family: var(--font-mono); }
@@ -769,8 +781,8 @@ async function signIn() {
 .rb-primary { margin-top: 4px; }
 .rb-login-err { font-size: 13px; color: var(--bad); margin: 0; }
 
-/* ── main ── */
-.rb-main { position: relative; flex: 1; display: flex; min-height: 0; }
+/* ── NW: the sliding session list + the map, side by side (fills the quad) ── */
+.rb-nw { position: relative; display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 
 /* table */
 .rb-table {
@@ -815,8 +827,7 @@ async function signIn() {
 }
 .rb-collapse:hover { color: var(--accent); border-color: var(--accent); }
 
-/* stage */
-.rb-stage { flex: 1; display: flex; min-width: 0; background: var(--surface-2); }
+/* map */
 .rb-map { flex: 1; position: relative; display: grid; place-items: center; min-width: 0; min-height: 0; background: var(--surface); }
 .rb-svg { width: 100%; height: 100%; }
 .rb-map-empty { display: flex; flex-direction: column; gap: 4px; align-items: center; color: var(--text-muted); font-size: 14px; }
@@ -828,12 +839,8 @@ async function signIn() {
   padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); cursor: pointer;
 }
 .rb-chip.off { opacity: 0.7; }
-/* right column: the unified on-screen controller on top, the robot clip below if
-   loaded. No clip -> the controller takes the whole column (dynamic). */
-.rb-side { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); }
-.rb-ctrl { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; background: var(--surface-2); }
-.rb-ctrl > * { flex: 1 1 auto; min-width: 0; min-height: 0; }
-.rb-video { flex: 0 0 42%; min-height: 0; position: relative; display: flex; flex-direction: column; gap: var(--sp-2); border-top: 1px solid var(--line); background: #000; padding: var(--sp-3); }
+/* NE: the robot clip fills its quad (only mounted when a clip is loaded) */
+.rb-video { position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-2); background: #000; padding: var(--sp-3); }
 .rb-video video { flex: 1; min-height: 0; width: 100%; object-fit: contain; display: block; }
 .rb-video-note {
   flex-shrink: 0; margin: 0; padding-top: var(--sp-2);
@@ -865,14 +872,6 @@ async function signIn() {
 .rb-speed { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
 .rb-speed-val { font-size: 12px; min-width: 30px; text-align: center; color: var(--text); }
 /* the speed steppers are now UiIconButton bordered */
-
-/* Tall/narrow window (e.g. Pluto docked beside an emulator): stack the map over the
-   side column so each keeps usable width; the side then runs controller | clip. */
-@media (max-aspect-ratio: 1 / 1) {
-  .rb-stage { flex-direction: column; }
-  .rb-side { flex-direction: row; flex: 0 0 auto; min-height: 220px; border-left: 0; border-top: 1px solid var(--line); }
-  .rb-video { flex: 1 1 0; border-top: 0; border-left: 1px solid var(--line); }
-}
 
 /* ── transport ── */
 .rb-transport {

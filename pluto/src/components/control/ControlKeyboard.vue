@@ -326,7 +326,7 @@ function capStyle(it: LayoutKey) {
           @pointerleave="onCapUp($event, it.btn)"
         >
           <span class="cap-key">{{ keyGlyph(it.key) }}</span>
-          <span class="cap-btn">{{ isDirButton(it.btn) ? (analogKeys ? 'A-' : 'D-') + it.label : it.label }}</span>
+          <span class="cap-btn">{{ it.label }}</span>
         </button>
       </div>
 

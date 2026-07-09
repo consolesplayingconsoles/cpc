@@ -181,10 +181,6 @@ payload_client() {
   # run.sh / sibling_env resolve ../${NODE_DIR}/.env.
   $SSH "mkdir -p ${REMOTE_ROOT}/${NODE_DIR} && cat > ${REMOTE_ROOT}/${NODE_DIR}/.env" < "$ENV_FILE"
 
-  # Suppress locale warnings in shell output (Pi has no en_US.utf-8 locale installed)
-  $SSH "grep -q 'export LC_ALL=C' ~/.bashrc 2>/dev/null || echo 'export LC_ALL=C' >> ~/.bashrc"
-  echo "sync ok"
-
   if grep -qvE '^[[:space:]]*(#|$)' pluto-python-tui/requirements-linux.txt; then
     echo "##STEP:deps"
     RL="${REMOTE_ROOT}/pluto-python-tui/requirements-linux.txt"

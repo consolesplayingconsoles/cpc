@@ -5,8 +5,8 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import ControlCapture from './ControlCapture.vue'
 import ControlKeyboard from './ControlKeyboard.vue'
+import QuadrantLayout from './QuadrantLayout.vue'
 import UiClose from './ui/UiClose.vue'
-import UiIconButton from './ui/UiIconButton.vue'
 import { LANGUAGES } from '../lib/languages'
 
 const props = defineProps<{
@@ -18,14 +18,6 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ 'drive-error': [string] }>()
 
-const rumble = ref(false)
-let _rumbleTimer = 0
-function onRumble() {
-  rumble.value = true
-  if (_rumbleTimer) clearTimeout(_rumbleTimer)
-  _rumbleTimer = window.setTimeout(() => { rumble.value = false }, 400)
-}
-
 const API = `http://${window.location.hostname}:7700`
 const captureRef     = ref<InstanceType<typeof ControlCapture> | null>(null)
 const captureRunning = computed(() => captureRef.value?.capture.running ?? false)
@@ -33,9 +25,6 @@ const captureRunning = computed(() => captureRef.value?.capture.running ?? false
 watch(captureRunning, (running) => { if (running) clearImage() })
 
 const canScan = computed(() => captureRunning.value || !!imageUrl.value)
-
-// subtitle mode: user-toggled — full-width output, bigger font, right panel hidden
-const subtitleMode = ref(false)
 
 // ── Vision usage counter (scans, 900 / 1000 safety cap) ──────────────────
 const USAGE_KEY   = 'cpc.lens.usage'
@@ -264,10 +253,10 @@ function fmtTime(ts: number) {
 </script>
 
 <template>
-  <div class="gl" :class="{ 'gl--rumble': rumble }">
-    <div class="gl-body" :class="{ 'gl-body--subtitle': subtitleMode }">
+  <QuadrantLayout>
 
-      <!-- LEFT: compact drop strip + Vision output -->
+    <!-- NW: output side — drop strip (top) + Vision output (scrolling) -->
+    <template #nw>
       <div class="gl-left">
 
         <!-- drop strip -->
@@ -299,14 +288,6 @@ function fmtTime(ts: number) {
         <div class="gl-output-head">
           <div class="gl-output-head-row">
             <span class="gl-output-title">Vision Output</span>
-            <UiIconButton variant="bordered" :active="subtitleMode"
-                          @click="subtitleMode = !subtitleMode"
-                          :title="subtitleMode ? 'Exit subtitle mode' : 'Subtitle mode: full-width, larger text'">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <rect x="1" y="4" width="14" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
-                <path d="M4 8h4M4 10.5h2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-              </svg>
-            </UiIconButton>
             <UiClose v-if="results.length" @click="clearResults" title="Clear results" />
           </div>
           <div v-if="usage.count || translateUsage.count" class="gl-quota-block mono">
@@ -332,70 +313,56 @@ function fmtTime(ts: number) {
           </div>
         </div>
       </div>
+    </template>
 
-      <!-- RIGHT: capture (top) + keyboard (bottom, full width) -->
-      <div class="gl-right">
+    <!-- NE: live capture + scan/translate buttons -->
+    <template #ne>
+      <ControlCapture ref="captureRef"
+        :active="active" :show-game-actions="false"
+        :map-source="mapSource" :target="target" :mapping="mapping" :target-dev="targetDev"
+        @drive-error="emit('drive-error', $event)">
+        <template #extra-actions>
+          <div class="cap-divider" />
+          <button class="cap-btn cap-btn--scan" :disabled="!canScan || scanning || overLimit" @click="scan"
+                  :title="overLimit ? 'Monthly cap reached' : !canScan ? 'Start capture or drop an image first' : 'Scan'">
+            <svg :class="{ 'gl-scan-spin': scanning }" viewBox="0 0 22 16" width="22" height="16" fill="none">
+              <path d="M1 8 C5 2 17 2 21 8 C17 14 5 14 1 8 Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+              <circle cx="11" cy="8" r="3.8" fill="currentColor"/>
+              <circle cx="11" cy="8" r="1.6" fill="var(--surface-3)" class="gl-scan-pupil"/>
+            </svg>
+          </button>
+          <select v-model="translateLang" class="cap-btn cap-lang"
+                  :title="`Translate to: ${LANGUAGES.find(l => l.code === translateLang)?.label}`">
+            <option v-for="l in LANGUAGES" :key="l.code" :value="l.code">{{ l.code }}</option>
+          </select>
+          <button class="cap-btn cap-btn--xlat" :disabled="!canTranslate" @click="translate"
+                  :title="translateOverLimit ? 'Monthly translate cap reached' : !canTranslate ? 'No text to translate' : `Translate to ${LANGUAGES.find(l => l.code === translateLang)?.label}`">
+            <svg :class="{ 'gl-scan-spin': translating }" viewBox="0 0 26 18" width="26" height="18">
+              <text x="1" y="14" font-size="14" font-weight="800" fill="currentColor" font-family="sans-serif">A</text>
+              <text x="13" y="15" font-size="12" font-weight="700" fill="currentColor" font-family="sans-serif">文</text>
+            </svg>
+          </button>
+        </template>
+      </ControlCapture>
+    </template>
 
-        <ControlCapture ref="captureRef"
-          :active="active" :show-game-actions="false"
-          :map-source="mapSource" :target="target" :mapping="mapping" :target-dev="targetDev"
-          @drive-error="emit('drive-error', $event)"
-          @rumble="onRumble">
-          <template #extra-actions>
-            <div class="cap-divider" />
-            <button class="cap-btn cap-btn--scan" :disabled="!canScan || scanning || overLimit" @click="scan"
-                    :title="overLimit ? 'Monthly cap reached' : !canScan ? 'Start capture or drop an image first' : 'Scan'">
-              <svg :class="{ 'gl-scan-spin': scanning }" viewBox="0 0 22 16" width="22" height="16" fill="none">
-                <path d="M1 8 C5 2 17 2 21 8 C17 14 5 14 1 8 Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-                <circle cx="11" cy="8" r="3.8" fill="currentColor"/>
-                <circle cx="11" cy="8" r="1.6" fill="var(--surface-3)" class="gl-scan-pupil"/>
-              </svg>
-            </button>
-            <select v-model="translateLang" class="cap-btn cap-lang"
-                    :title="`Translate to: ${LANGUAGES.find(l => l.code === translateLang)?.label}`">
-              <option v-for="l in LANGUAGES" :key="l.code" :value="l.code">{{ l.code }}</option>
-            </select>
-            <button class="cap-btn cap-btn--xlat" :disabled="!canTranslate" @click="translate"
-                    :title="translateOverLimit ? 'Monthly translate cap reached' : !canTranslate ? 'No text to translate' : `Translate to ${LANGUAGES.find(l => l.code === translateLang)?.label}`">
-              <svg :class="{ 'gl-scan-spin': translating }" viewBox="0 0 26 18" width="26" height="18">
-                <text x="1" y="14" font-size="14" font-weight="800" fill="currentColor" font-family="sans-serif">A</text>
-                <text x="13" y="15" font-size="12" font-weight="700" fill="currentColor" font-family="sans-serif">文</text>
-              </svg>
-            </button>
-          </template>
-        </ControlCapture>
+    <!-- SE: controller (as usual) -->
+    <template #se>
+      <ControlKeyboard :active="active"
+        map-source="google"
+        :target="target" :mapping="mapping" :target-dev="targetDev"
+        @drive-error="emit('drive-error', $event)" />
+    </template>
 
-        <div class="gl-controller">
-          <ControlKeyboard :active="active"
-            map-source="google"
-            :target="target" :mapping="mapping" :target-dev="targetDev"
-            @drive-error="emit('drive-error', $event)" />
-        </div>
-
-      </div>
-
-    </div>
-  </div>
+  </QuadrantLayout>
 </template>
 
 <style scoped>
-.gl {
-  display: flex; flex-direction: column; height: 100%; min-height: 0;
-  overflow: hidden; background: var(--surface-2); position: relative;
-}
-.gl--rumble::after {
-  content: ''; position: absolute; inset: 0; background: rgba(220,40,40,0.40);
-  pointer-events: none; z-index: 20; animation: gl-rumble 0.4s ease-out forwards;
-}
-@keyframes gl-rumble { 0% { opacity: 1; } 100% { opacity: 0; } }
-
-.gl-body  { display: flex; flex: 1 1 0; min-height: 0; overflow: hidden; }
-
-/* ── LEFT: drop strip + output ────────────────────────────────────────── */
+/* ── NW: drop strip + output (fills the quad) ─────────────────────────── */
 .gl-left {
-  flex: 0 0 50%; min-width: 0; min-height: 0;
+  width: 100%; height: 100%; min-width: 0; min-height: 0;
   display: flex; flex-direction: column;
-  background: var(--surface); border-right: 1px solid var(--line);
+  background: var(--surface);
 }
 
 /* compact horizontal strip at top of left panel */
@@ -452,16 +419,6 @@ function fmtTime(ts: number) {
 }
 .gl-result-xlat--pending { color: var(--text-faint); background: none; padding: 0; }
 
-/* ── RIGHT: capture + keyboard ────────────────────────────────────────── */
-.gl-right {
-  flex: 0 0 50%; min-width: 0; min-height: 0;
-  display: flex; flex-direction: column;
-}
-.gl-controller {
-  flex: 1 1 0; min-height: 0; min-width: 0;
-  background: var(--surface); border-top: 1px solid var(--line); overflow: hidden;
-}
-
 /* ── slot controls (must replicate cap-btn base — scoped styles don't cross slots) */
 :deep(.cap-btn--scan),
 :deep(.cap-btn--xlat) {
@@ -491,14 +448,4 @@ function fmtTime(ts: number) {
 .gl-scan-spin .gl-scan-pupil { opacity: 0; }
 
 .gl-drop-input { display: none; }
-
-/* ── subtitle mode: full-width output, right panel hidden ─────────────── */
-.gl-body--subtitle .gl-right  { display: none; }
-.gl-body--subtitle .gl-left   { flex: 1 1 100%; border-right: none; }
-.gl-body--subtitle .gl-strip  { display: none; }
-
-.gl-body--subtitle .gl-output-title { font-size: 10px; }
-.gl-body--subtitle .gl-result-line  { font-size: 17px; line-height: 1.6; }
-.gl-body--subtitle .gl-result-xlat  { font-size: 17px; line-height: 1.6; padding: 6px 12px; margin-top: 6px; }
-.gl-body--subtitle .gl-output-empty { font-size: 15px; }
 </style>

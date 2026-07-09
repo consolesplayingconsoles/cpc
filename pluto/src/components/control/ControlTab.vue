@@ -10,6 +10,8 @@ import Robutek from './Robutek.vue'
 import ControlKeyboard from './ControlKeyboard.vue'
 import ClaudeControl from './ClaudeControl.vue'
 import GoogleLensControl from './GoogleLensControl.vue'
+import KinectControl from './KinectControl.vue'
+import QuadrantLayout from './QuadrantLayout.vue'
 
 const props = defineProps<{ active: boolean; nodes?: NodeMap; name?: string; showOffline?: boolean }>()
 const route  = useRoute()
@@ -28,6 +30,8 @@ const sourceList = computed(() => {
   if (isLab) out.push({ id: 'google', label: 'Google' })             // Lab only: requires local capture device
   const d = props.nodes?.['dreame']
   if (d && (d.status !== 'unconfigured' || props.showOffline)) out.push({ id: 'dreame', label: 'Dreame Cloud' })
+  const pi = props.nodes?.['pi']
+  if (pi && (pi.status !== 'unconfigured' || props.showOffline)) out.push({ id: 'kinect', label: 'Kinect' })
   return out
 })
 const source = computed(() => (route.params.source as string) || '')
@@ -192,16 +196,24 @@ function openMappingDir() {
           :source="source" :target="effTarget" :mapping="effMapping" :target-dev="effTarget === 'pi' ? picoDev : ''"
           :active="active" :nodes="nodes" :name="name || 'dreame'"
           @drive-error="setError" />
-        <ControlKeyboard v-else-if="source === 'keyboard'"
-          :active="active" :map-source="source" :target="effTarget" :mapping="effMapping"
-          :target-dev="effTarget === 'pi' ? picoDev : ''"
-          @drive-error="setError" />
+        <QuadrantLayout v-else-if="source === 'keyboard'">
+          <template #se>
+            <ControlKeyboard
+              :active="active" :map-source="source" :target="effTarget" :mapping="effMapping"
+              :target-dev="effTarget === 'pi' ? picoDev : ''"
+              @drive-error="setError" />
+          </template>
+        </QuadrantLayout>
         <ClaudeControl v-else-if="source === 'claude'"
           :active="active" :nodes="nodes" :map-source="source" :target="effTarget" :mapping="effMapping"
           :target-dev="effTarget === 'pi' ? picoDev : ''"
           @drive-error="setError" />
         <GoogleLensControl v-else-if="source === 'google'"
           :active="active" :map-source="source" :target="effTarget" :mapping="effMapping"
+          :target-dev="effTarget === 'pi' ? picoDev : ''"
+          @drive-error="setError" />
+        <KinectControl v-else-if="source === 'kinect'"
+          :active="active" :nodes="nodes" :target="effTarget" :mapping="effMapping"
           :target-dev="effTarget === 'pi' ? picoDev : ''"
           @drive-error="setError" />
       </div>

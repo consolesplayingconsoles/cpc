@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { type Block, caBytes } from '../lib/translation'
+import { type Block, caBytes } from '../../lib/translation'
 import {
   formatOffset, buildSourcesPayload, reconcileByOffset, mergePolledCa, applyPoll,
 } from './TranslationTable.logic'
