@@ -4,7 +4,7 @@
 // (Vision scan results). The caller owns the data; the component owns the scroll
 // and the layout.
 import { ref, watch, nextTick } from 'vue'
-import UiButton from './ui/UiButton.vue'
+import UiButton from '../ui/UiButton.vue'
 
 export interface FeedLine {
   role?:  string

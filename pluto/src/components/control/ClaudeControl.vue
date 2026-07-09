@@ -3,12 +3,12 @@
 // RIGHT = ControlCapture (live frame + session/game controls) + manual keyboard.
 // Portrait-first: Pluto shares the monitor with Claude Code for the video.
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import type { NodeMap } from '../composables/useNodes'
+import type { NodeMap } from '../../composables/useNodes'
 import type { FeedLine } from './ControlFeed.vue'
 import ControlFeed from './ControlFeed.vue'
 import ControlCapture from './ControlCapture.vue'
 import ControlKeyboard from './ControlKeyboard.vue'
-import QuadrantLayout from './QuadrantLayout.vue'
+import QuadrantLayout from '../QuadrantLayout.vue'
 
 const props = defineProps<{
   active:     boolean

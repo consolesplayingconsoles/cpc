@@ -5,13 +5,13 @@
 // (ClaudeControl). The on-screen keyboard is the one unified controller across all three.
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { NodeMap } from '../composables/useNodes'
-import Robutek from './Robutek.vue'
+import type { NodeMap } from '../../composables/useNodes'
+import RobutekControl from './RobutekControl.vue'
 import ControlKeyboard from './ControlKeyboard.vue'
 import ClaudeControl from './ClaudeControl.vue'
-import GoogleLensControl from './GoogleLensControl.vue'
+import GoogleControl from './GoogleControl.vue'
 import KinectControl from './KinectControl.vue'
-import QuadrantLayout from './QuadrantLayout.vue'
+import QuadrantLayout from '../QuadrantLayout.vue'
 
 const props = defineProps<{ active: boolean; nodes?: NodeMap; name?: string; showOffline?: boolean }>()
 const route  = useRoute()
@@ -192,7 +192,7 @@ function openMappingDir() {
 
     <div class="control-body">
       <div class="control-stage">
-        <Robutek v-if="source === 'dreame'"
+        <RobutekControl v-if="source === 'dreame'"
           :source="source" :target="effTarget" :mapping="effMapping" :target-dev="effTarget === 'pi' ? picoDev : ''"
           :active="active" :nodes="nodes" :name="name || 'dreame'"
           @drive-error="setError" />
@@ -208,7 +208,7 @@ function openMappingDir() {
           :active="active" :nodes="nodes" :map-source="source" :target="effTarget" :mapping="effMapping"
           :target-dev="effTarget === 'pi' ? picoDev : ''"
           @drive-error="setError" />
-        <GoogleLensControl v-else-if="source === 'google'"
+        <GoogleControl v-else-if="source === 'google'"
           :active="active" :map-source="source" :target="effTarget" :mapping="effMapping"
           :target-dev="effTarget === 'pi' ? picoDev : ''"
           @drive-error="setError" />

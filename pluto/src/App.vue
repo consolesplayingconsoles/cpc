@@ -5,10 +5,10 @@ import { useNodes } from './composables/useNodes'
 import { useConnections } from './composables/useConnections'
 import { useMessages } from './composables/useMessages'
 import { useIdentity } from './composables/useIdentity'
-import NetworkDiagram from './components/NetworkDiagram.vue'
+import NetworkDiagram from './components/network/NetworkDiagram.vue'
 import GroupChat from './components/GroupChat.vue'
-import Control from './components/Control.vue'
-import TranslationTable from './components/TranslationTable.vue'
+import ControlTab from './components/control/ControlTab.vue'
+import TranslationTable from './components/translation/TranslationTable.vue'
 import AchievementToast from './components/AchievementToast.vue'
 import { useAchievement } from './composables/useAchievement'
 import plutoLabMark from './assets/avatars/pluto-lab.svg'
@@ -264,7 +264,7 @@ const displayNodes = computed(() => {
           :show-offline="showOffline"
         />
 
-        <Control v-show="activeTab === 'control'" :active="activeTab === 'control'" :nodes="nodes" :show-offline="showOffline" />
+        <ControlTab v-show="activeTab === 'control'" :active="activeTab === 'control'" :nodes="nodes" :show-offline="showOffline" />
 
         <TranslationTable v-show="activeTab === 'translation'" />
       </div>

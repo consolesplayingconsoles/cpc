@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import UiButton from './ui/UiButton.vue'
-import UiActionRow from './ui/UiActionRow.vue'
-import UiSelect from './ui/UiSelect.vue'
+import UiButton from '../ui/UiButton.vue'
+import UiActionRow from '../ui/UiActionRow.vue'
+import UiSelect from '../ui/UiSelect.vue'
 
 // A node command is just a chat message: "@handle verb [arg]". The shapes are
 // finite, so one component renders the right input and emits the assembled line;

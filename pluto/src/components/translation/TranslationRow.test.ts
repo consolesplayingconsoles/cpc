@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { Block } from '../lib/translation'
+import type { Block } from '../../lib/translation'
 
 // Mock the lineStatus computation logic
 function lineStatus(

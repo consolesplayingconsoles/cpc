@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { NodeData, NodeMap } from '../composables/useNodes'
-import { API_BASE } from '../composables/useNodes'
+import type { NodeData, NodeMap } from '../../composables/useNodes'
+import { API_BASE } from '../../composables/useNodes'
 import NodeBubble from './NodeBubble.vue'
 import NodeCommand from './NodeCommand.vue'
-import CopyButton from './CopyButton.vue'
-import UiClose from './ui/UiClose.vue'
-import UiActionRow from './ui/UiActionRow.vue'
-import UiIconButton from './ui/UiIconButton.vue'
-import chatConfig from '../../config/chat.json'
+import CopyButton from '../ui/UiCopyButton.vue'
+import UiClose from '../ui/UiClose.vue'
+import UiActionRow from '../ui/UiActionRow.vue'
+import UiIconButton from '../ui/UiIconButton.vue'
+import chatConfig from '../../../config/chat.json'
 
 interface Cmd  { verb: string; desc?: string; target?: string; multiline?: boolean; url?: string; script?: string; credit?: string }
 const NODE_ACTIONS = (chatConfig.nodeActions ?? {}) as Record<string, Cmd[]>
