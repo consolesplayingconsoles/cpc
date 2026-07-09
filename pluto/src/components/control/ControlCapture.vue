@@ -73,9 +73,13 @@ const frameAge  = computed(() => {
 })
 
 // ── rumble detection — emits up so the parent can flash the full surface ─
+// The first poll after activation only establishes the baseline: pre-existing rumble
+// lines in the log must NOT flash on load, only rumbles that arrive while watching.
 let _lastRumbleCount = 0
+let _rumblePrimed = false
 function _checkRumble(lines: { state: string }[]) {
   const n = lines.filter(l => l.state === 'rumble').length
+  if (!_rumblePrimed) { _lastRumbleCount = n; _rumblePrimed = true; return }
   if (n > _lastRumbleCount) emit('rumble')
   _lastRumbleCount = n
 }
@@ -117,6 +121,7 @@ function stopLoops() {
 
 function activate() {
   signal.value = 'wait'; localStorage.setItem(SIGNAL_KEY, 'wait')
+  _rumblePrimed = false          // re-baseline rumbles so a reload never flashes on old lines
   refreshCapture(); startLoops()
 }
 onMounted(() => { if (props.active) activate() })

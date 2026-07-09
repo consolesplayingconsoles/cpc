@@ -412,6 +412,19 @@ def serve(cfg):
     else:
         print("  lens trigger disabled (no PLUTO_IP in .env)")
 
+    # Kinect: Xbox NUI sensor stream. Raw depth/RGB/skeleton, no control mappings yet.
+    kinect_port = (cfg.get("KINECT_DEPTH_PORT") or "").strip()
+    kinect = None
+    if kinect_port:
+        from bridges.kinect import KinectBridge
+        kinect = KinectBridge(int(kinect_port))
+        if kinect.start():
+            print("  kinect stream up -- :%s" % kinect_port)
+        else:
+            print("  kinect not available (check device/drivers)")
+    else:
+        print("  kinect disabled (no KINECT_DEPTH_PORT in .env)")
+
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)   # quick restart, no TIME_WAIT stall
     srv.bind(("0.0.0.0", port))

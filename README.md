@@ -107,6 +107,7 @@ This is built on a lot of other people's work. A few that earned a specific ment
 - **[DreamPicoPort](https://github.com/OrangeFox86/DreamPicoPort)**: the Raspberry Pi Pico firmware that exposes a Dreamcast controller port (and VMU) over USB, presenting the VMU as a standard FAT16 mass storage device. The VMU node is built on top of it.
 - **[FUSE-VMU](https://github.com/RossMeikleham/FUSE-VMU)**: FUSE filesystem implementation for the Dreamcast VMU — the reference for the VMU block format and filesystem layout.
 - **Dreamcast ROM tooling**: Extraction and patching workflows built on [AFSPacker](https://github.com/MaikelChan/AFSPacker), [QuickBMS](https://aluigi.altervista.org/quickbms.html), [gditools](https://github.com/einsteinx2/gditools), [UniversalDreamcastPatcher](https://github.com/DerekPascarella/UniversalDreamcastPatcher), and [sega2asm](https://github.com/hansbonini/sega2asm).
+- **[libfreenect](https://github.com/OpenKinect/libfreenect)**: open-source driver for Xbox Kinect v1 (depth, RGB, audio, skeletal tracking).
 
 Built on these, not instead of them.
 
