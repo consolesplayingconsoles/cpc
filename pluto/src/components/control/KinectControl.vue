@@ -27,9 +27,9 @@
 
 <script setup lang="ts">
 import { ref, onUnmounted, withDefaults } from 'vue'
-import CapScreen from './CapScreen.vue'
+import CapScreen from '../CapScreen.vue'
 import ControlKeyboard from './ControlKeyboard.vue'
-import QuadrantLayout from './QuadrantLayout.vue'
+import QuadrantLayout from '../QuadrantLayout.vue'
 
 interface Props {
   active: boolean

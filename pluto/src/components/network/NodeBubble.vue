@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { NodeData } from '../composables/useNodes'
-import { BUBBLE_R, BUBBLE_HOV } from '../composables/bubbleConstants'
-import tuxImg from '../assets/tux.png'
+import type { NodeData } from '../../composables/useNodes'
+import { BUBBLE_R, BUBBLE_HOV } from '../../composables/bubbleConstants'
+import tuxImg from '../../assets/tux.png'
 
 // The whole bubble is one button: click to open its drawer (emits 'toggle'); it
 // just grows on hover. Actions live in the drawer now, not on the bubble.

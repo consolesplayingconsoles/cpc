@@ -5,9 +5,9 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import ControlCapture from './ControlCapture.vue'
 import ControlKeyboard from './ControlKeyboard.vue'
-import QuadrantLayout from './QuadrantLayout.vue'
-import UiClose from './ui/UiClose.vue'
-import { LANGUAGES } from '../lib/languages'
+import QuadrantLayout from '../QuadrantLayout.vue'
+import UiClose from '../ui/UiClose.vue'
+import { LANGUAGES } from '../../lib/languages'
 
 const props = defineProps<{
   active:     boolean

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import PetIcon from './PetIcon.vue'
-import CopyButton from './CopyButton.vue'
+import PetIcon from '../PetIcon.vue'
+import CopyButton from '../ui/UiCopyButton.vue'
 import ControlKeyboard from './ControlKeyboard.vue'
-import QuadrantLayout from './QuadrantLayout.vue'
-import UiButton from './ui/UiButton.vue'
-import UiIconButton from './ui/UiIconButton.vue'
-import type { NodeMap } from '../composables/useNodes'
+import QuadrantLayout from '../QuadrantLayout.vue'
+import UiButton from '../ui/UiButton.vue'
+import UiIconButton from '../ui/UiIconButton.vue'
+import type { NodeMap } from '../../composables/useNodes'
 
 interface Point { x: number; y: number }
 

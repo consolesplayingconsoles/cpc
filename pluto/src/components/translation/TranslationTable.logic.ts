@@ -3,7 +3,7 @@
 // regress, so they live as pure functions guarded by tests instead of buried inline in the SFC.
 // A red test here means a translation-eating regression; change the tests only when the behaviour
 // change is deliberate.
-import type { Block } from '../lib/translation'
+import type { Block } from '../../lib/translation'
 
 // Absolute file offset -> the canonical on-disk state key. MUST stay `0x` + UPPERCASE, 6 hex digits:
 // the extract returns an int, the state stores this string, and reconcile matches BY THIS STRING.

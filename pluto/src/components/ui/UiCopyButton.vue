@@ -3,7 +3,7 @@
 // thing to copy, so this is the one affordance for all of them. @click.stop so it
 // never triggers a row/card selection it sits inside.
 import { ref } from 'vue'
-import UiIconButton from './ui/UiIconButton.vue'
+import UiIconButton from '../ui/UiIconButton.vue'
 
 const props = defineProps<{ text: string; title?: string }>()
 const copied = ref(false)

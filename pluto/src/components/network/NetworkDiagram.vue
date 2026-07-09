@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import type { NodeMap } from '../composables/useNodes'
-import type { Connection } from '../composables/useConnections'
-import { useDeploy } from '../composables/useDeploy'
-import { API_BASE } from '../composables/useNodes'
-import { BUBBLE_R } from '../composables/bubbleConstants'
+import type { NodeMap } from '../../composables/useNodes'
+import type { Connection } from '../../composables/useConnections'
+import { useDeploy } from '../../composables/useDeploy'
+import { API_BASE } from '../../composables/useNodes'
+import { BUBBLE_R } from '../../composables/bubbleConstants'
 import NodeBubble from './NodeBubble.vue'
 import NodeDrawer from './NodeDrawer.vue'
-import DeployTerminal from './DeployTerminal.vue'
-import RecentActivity from './RecentActivity.vue'
+import DeployTerminal from '../DeployTerminal.vue'
+import RecentActivity from '../RecentActivity.vue'
 
-import { useMessages } from '../composables/useMessages'
-import { ICONS } from '../composables/useIcons'
-import layout from '../../config/layout.json'
+import { useMessages } from '../../composables/useMessages'
+import { ICONS } from '../../composables/useIcons'
+import layout from '../../../config/layout.json'
 
 const props = defineProps<{ nodes: NodeMap; connections: Connection[] }>()
 const emit = defineEmits<{ 'open-tab': [tab: string] }>()

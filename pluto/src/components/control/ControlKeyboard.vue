@@ -11,7 +11,7 @@
 // is the human's collaboration surface on the Claude screen.
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Joystick from 'vue-joystick-component'
-import { joystickToAxis, keysToAxis, isDirButton, AXIS_CENTER } from '../lib/analog'
+import { joystickToAxis, keysToAxis, isDirButton, AXIS_CENTER } from '../../lib/analog'
 
 interface LayoutKey { key: string; btn: string; label: string; col: number; row: number }
 interface Mapping { controller?: string; layout?: LayoutKey[]; colors?: Record<string, string> }

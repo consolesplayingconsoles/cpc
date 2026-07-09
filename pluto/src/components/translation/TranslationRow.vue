@@ -3,7 +3,7 @@
 // textarea only re-renders THIS row — the parent's render function no longer reads any block.ca,
 // so the 76 scene headers and every other row stay put while you type. Presentational: it mutates
 // the block object it's handed (same reference the parent holds) and emits when the edit commits.
-import { type Block, caBytes } from '../lib/translation'
+import { type Block, caBytes } from '../../lib/translation'
 import { computed } from 'vue'
 
 const props = defineProps<{
