@@ -1,6 +1,6 @@
 {
   "default": ["client"],
-  "pluto": ["server"],
+  "pluto": ["server", "hub"],
   "pi": ["client", "hub"],
   "batocera": ["translate"]
 }

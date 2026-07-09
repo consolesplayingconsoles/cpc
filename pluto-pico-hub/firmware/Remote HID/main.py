@@ -1,5 +1,5 @@
 # main.py -- CPC Pico HID EMULATOR firmware (MicroPython). Lives in the HUB
-# (pluto-pi-hub/firmware/hid/), because flashing Picos is the hub's job, not the
+# (pluto-pico-hub/firmware/hid/), because flashing Picos is the hub's job, not the
 # deploy engine's: Pluto ships the hub, the hub propagates this to the board.
 #
 # Role: a USB-HID device emulator. Receives input ops from the Pi over UART and

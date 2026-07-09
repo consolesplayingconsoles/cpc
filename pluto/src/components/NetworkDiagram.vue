@@ -26,7 +26,7 @@ const { messages } = useMessages()
 // gateway is the origin everything hangs off — only its spot on the canvas is fixed
 // here (assumed 0,0 from the config's side). The cloud hub sits directly below it
 // (same x) at layout.cloudDy; every other node is an [dx, dy] offset from its anchor.
-const ORIGIN = { x: 500, y: 270 }
+const ORIGIN = { x: 450, y: 270 }
 const CLOUD  = { x: ORIGIN.x, y: ORIGIN.y + layout.cloudDy }
 
 function buildLayout(): Record<string, { x: number; y: number }> {

@@ -411,7 +411,7 @@ def discover_nodes(base_dir):
 def parse_pico(value):
     """A PICO_<chipid> .env value -> a fields dict. Accepts the structured form
     'role=hid,conn=usb,managed=python' or the bare role shorthand 'hid'. (Mirrors
-    pluto-pi-hub/propagate.py; the two packages can't share code.)"""
+    pluto-pico-hub/propagate.py; the two packages can't share code.)"""
     value = (value or "").strip()
     if len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]:
         value = value[1:-1].strip()        # tolerate a quoted .env value
@@ -1079,7 +1079,7 @@ def _drive_play(controller, events, mapping, sink, t0, speed):
 OPENAPI_SPECS = [
     ("pluto",     "Pluto API",     "pluto/api/openapi.yaml"),
     ("translate", "Translate API", "pluto-translate/openapi.yaml"),
-    ("pi-hub",    "Pi-Hub API",    "pluto-pi-hub/openapi.yaml"),
+    ("pico-hub",  "Pico Hub API",  "pluto-pico-hub/openapi.yaml"),
 ]
 
 _DOCS_HTML = """<!DOCTYPE html>
@@ -2832,7 +2832,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # Firmware tree (the deploy engine's checkout) -- present on the dev/Lab host,
         # absent on a deployed box. Used to DERIVE each Pico's pluto-vs-local deploy
         # ownership from whether its role has firmware. None => we can't tell.
-        fw_root = os.path.join(os.path.dirname(base_dir), "pluto-pi-hub", "firmware")
+        fw_root = os.path.join(os.path.dirname(base_dir), "pluto-pico-hub", "firmware")
         if not os.path.isdir(fw_root):
             fw_root = None
 

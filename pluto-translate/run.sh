@@ -1,6 +1,6 @@
 #!/bin/sh
 # Entry point for the CPC translation API payload (pluto-translate), mirroring
-# pluto-pi-hub/run.sh. The batocera-service / systemd unit calls `run.sh serve`.
+# pluto-pico-hub/run.sh. The batocera-service / systemd unit calls `run.sh serve`.
 #   run.sh serve   -> start the HTTP API (cpc_translate_api.py)
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 case "${1:-}" in

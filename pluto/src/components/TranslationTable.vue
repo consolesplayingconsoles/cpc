@@ -275,7 +275,7 @@ async function backfillProjectMeta(ns: string, path: string) {
   try {
     const data = await translationApi.meta(path)
     if (!data.meta) return
-    projects.value = projects.value.map(p => (p.ns === ns ? { ...p, meta: data.meta } : p))
+    projects.value = projects.value.map(p => (p.ns === ns ? { ...p, meta: data.meta as GameMeta } : p))
     translationApi.putState(ns, { meta: data.meta }).catch(() => {})   // persist so it's a one-time cost
   } catch { /* keep the gameName fallback */ }
 }
@@ -720,7 +720,7 @@ async function loadTab(safe: string) {
     const data = await translationApi.extract(curPath.value, safe)
     // Reconcile: the fresh extract carries `scene` + jpBytes; overlay any saved draft's
     // ca/order/done onto it by offset, so re-extracting to gain scene tags never loses work.
-    const fresh = reconcileByOffset(mapBlocks(data.blocks), tabBlocks.value[safe])
+    const fresh = reconcileByOffset(mapBlocks((data.blocks as any) ?? []), tabBlocks.value[safe] ?? [])
     tabBlocks.value = { ...tabBlocks.value, [safe]: fresh }
     // Bake the per-scene slack (from extraction) for this tab's box-budget meter. Only the
     // SCP/CMD source (nullsplit) ships scenes; others simply have no box meter.
@@ -880,7 +880,10 @@ async function refreshFromDisk() {
   refreshing.value = true
   refreshMsg.value = ''
   try {
-    const n = await applyPoll(() => translationApi.getState(startNs), tabBlocks.value, {
+    const n = await applyPoll(async () => {
+      const state = await translationApi.getState(startNs)
+      return { sources: (state.sources ?? {}) as Record<string, Block[]> }
+    }, tabBlocks.value, {
       curNs: () => curNs.value, startNs,
       changed: () => stateRev.value !== revAtStart,   // bail if an edit/save landed during the fetch
       focused: inputFocused,
