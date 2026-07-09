@@ -45,7 +45,7 @@ Pluto is a single app you run one of two ways:
 | [pluto/](./pluto/)                                                 | CPC Pluto: the server, dashboard and control plane (runs as Lab or C2)                         |
 | [pluto-translate/](./pluto-translate/) | Game text extraction/translation engine (parsers, patchers, font/PVR codecs); knowledge docs in `pluto-translate/docs/`   |
 | [pluto-python-tui/](./pluto-python-tui/)                           | The on-console client/TUI that Pluto deploys to Linux nodes                                    |
-| [pluto-pi-hub/](./pluto-pi-hub/)                                   | The Pi-side hub: native-protocol bridges for non-IP consoles, and the Pico firmware it flashes |
+| [pluto-pico-hub/](./pluto-pico-hub/)                                   | The Pico hub: native-protocol bridges for non-IP consoles, and the Pico firmware it flashes |
 
 The [./nodes](./nodes) dir defines every node in the network. Any dir with a valid `.env` is picked up at startup. Devices on the LAN are checked live; cloud services are declared. Consoles too old to speak TCP/IP join through a Raspberry Pi that talks their native protocols on their behalf.
 
@@ -106,6 +106,7 @@ This is built on a lot of other people's work. A few that earned a specific ment
 - **[libretro/retroarch-assets](https://github.com/libretro/retroarch-assets)**: the console icons on the network map (CC BY 4.0; see `pluto/src/assets/avatars/NOTICES`).
 - **[DreamPicoPort](https://github.com/OrangeFox86/DreamPicoPort)**: the Raspberry Pi Pico firmware that exposes a Dreamcast controller port (and VMU) over USB, presenting the VMU as a standard FAT16 mass storage device. The VMU node is built on top of it.
 - **[FUSE-VMU](https://github.com/RossMeikleham/FUSE-VMU)**: FUSE filesystem implementation for the Dreamcast VMU — the reference for the VMU block format and filesystem layout.
+- **Dreamcast ROM tooling**: Extraction and patching workflows built on [AFSPacker](https://github.com/MaikelChan/AFSPacker), [QuickBMS](https://aluigi.altervista.org/quickbms.html), [gditools](https://github.com/einsteinx2/gditools), [UniversalDreamcastPatcher](https://github.com/DerekPascarella/UniversalDreamcastPatcher), and [sega2asm](https://github.com/hansbonini/sega2asm).
 
 Built on these, not instead of them.
 

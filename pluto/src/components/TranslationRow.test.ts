@@ -47,18 +47,18 @@ describe('TranslationRow lineStatus (scene aggregation vs per-line)', () => {
     const slackSmall = 50
     const cumLarge = 60 // exceeds slack but within 1.3x
     const status = lineStatus(block, 'dialogue', caBytes, cumLarge, slackSmall)
-    expect(status).toBe('warn', 'should warn when cumulative exceeds slack')
+    expect(status).toBe('warn')
 
     // Scene 2: large slack, cumulative fill should be ok
     const slackLarge = 200
     const cumSmall = 100
     const status2 = lineStatus(block, 'dialogue', caBytes, cumSmall, slackLarge)
-    expect(status2).toBe('ok', 'should be ok when cumulative is within slack')
+    expect(status2).toBe('ok')
 
     // Scene 3: zero slack (no room)
     const cumAny = 50
     const status3 = lineStatus(block, 'dialogue', caBytes, cumAny, 0)
-    expect(status3).toBe('pending', 'should be pending when slack is 0')
+    expect(status3).toBe('pending')
   })
 
   it('ITEMS: should color based on PER-LINE glyph width, not cumulative', () => {
@@ -85,7 +85,7 @@ describe('TranslationRow lineStatus (scene aggregation vs per-line)', () => {
 
     // With our test text, glyphs = 16, which is <= 20, so should be ok
     expect(glyphs).toBe(16)
-    expect(status).toBe('ok', 'should check glyphs vs carousel, not cumulative')
+    expect(status).toBe('ok')
   })
 
   it('ITEMS: should warn when glyph count exceeds carousel width', () => {
@@ -104,7 +104,7 @@ describe('TranslationRow lineStatus (scene aggregation vs per-line)', () => {
 
     // longName is 37 chars * 2 = 74 bytes = 37 glyphs, which exceeds 20*1.3=26
     expect(glyphs).toBe(37)
-    expect(status).toBe('over', 'should be over when glyphs exceed 130% of carousel')
+    expect(status).toBe('over')
   })
 
   it('ITEMS: should warn when glyphs are 21-26 (within 130%)', () => {
@@ -123,7 +123,7 @@ describe('TranslationRow lineStatus (scene aggregation vs per-line)', () => {
 
     // mediumName is 21 chars * 2 = 42 bytes = 21 glyphs (within 130% of 20)
     expect(glyphs).toBe(21)
-    expect(status).toBe('warn', 'should warn when glyphs are 20-26')
+    expect(status).toBe('warn')
   })
 
   it('MENU/UI: should color based on cumulative, not per-line bytes', () => {

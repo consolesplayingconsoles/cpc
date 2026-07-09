@@ -27,7 +27,7 @@ HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options"}
 # (label, source file, route-constant name, openapi file) -- relative to repo root.
 APIS = [
     ("translate", "pluto-translate/cpc_translate_api.py", "ROUTES",      "pluto-translate/openapi.yaml"),
-    ("pi-hub",    "pluto-pi-hub/hub.py",                   "SYNC_ROUTES", "pluto-pi-hub/openapi.yaml"),
+    ("pico-hub",  "pluto-pico-hub/hub.py",                 "SYNC_ROUTES", "pluto-pico-hub/openapi.yaml"),
     ("pluto",     "pluto/api/api.py",                      "API_ROUTES",  "pluto/api/openapi.yaml"),
 ]
 

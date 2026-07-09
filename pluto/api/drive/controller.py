@@ -304,7 +304,7 @@ class KeyboardSink(Sink):
 
 class NetworkSink(Sink):
     """Stream ops to the Pi-Hub op receiver over TCP -- the real-hardware sink (the
-    counterpart to KeyboardSink's emulator path). The receiver (pluto-pi-hub, run.sh
+    counterpart to KeyboardSink's emulator path). The receiver (pluto-pico-hub, run.sh
     serve) renders each op with its HidBridge into UART frames to the Pico, which
     presents as a USB gamepad. This sink's contract ends at the Pico: what the Pico
     emulates and what's plugged into it are config, not this layer's concern (today a

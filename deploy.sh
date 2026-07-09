@@ -147,7 +147,7 @@ payload_server() {
   $SSH "mkdir -p ${REMOTE_ROOT}/specs"
   $SSH "cat > ${REMOTE_ROOT}/specs/pluto.yaml"     < pluto/api/openapi.yaml
   $SSH "cat > ${REMOTE_ROOT}/specs/translate.yaml" < pluto-translate/openapi.yaml
-  $SSH "cat > ${REMOTE_ROOT}/specs/pi-hub.yaml"    < pluto-pi-hub/openapi.yaml
+  $SSH "cat > ${REMOTE_ROOT}/specs/pico-hub.yaml"    < pluto-pico-hub/openapi.yaml
   echo "sync ok"
 
   # Restart. Re-sync the unit so a first install (or the /opt/pluto -> /opt/cpc path
@@ -180,6 +180,9 @@ payload_client() {
   # This node's .env one level up from the client dir, keyed by node dir name, so
   # run.sh / sibling_env resolve ../${NODE_DIR}/.env.
   $SSH "mkdir -p ${REMOTE_ROOT}/${NODE_DIR} && cat > ${REMOTE_ROOT}/${NODE_DIR}/.env" < "$ENV_FILE"
+
+  # Suppress locale warnings in shell output (Pi has no en_US.utf-8 locale installed)
+  $SSH "grep -q 'export LC_ALL=C' ~/.bashrc 2>/dev/null || echo 'export LC_ALL=C' >> ~/.bashrc"
   echo "sync ok"
 
   if grep -qvE '^[[:space:]]*(#|$)' pluto-python-tui/requirements-linux.txt; then
@@ -193,13 +196,13 @@ payload_client() {
 }
 
 # hub -- the Pi's native-protocol bridge backend (scaffold). Lands at
-# ${REMOTE_ROOT}/pluto-pi-hub and reads the shared ${NODE_DIR} .env that the client
+# ${REMOTE_ROOT}/pluto-pico-hub and reads the shared ${NODE_DIR} .env that the client
 # payload writes (the Pi always deploys client + hub together, so no env write here).
 payload_hub() {
   echo "##STEP:sync"
-  tar --no-xattrs --no-fflags --no-mac-metadata -cf - pluto-pi-hub \
+  tar --no-xattrs --no-fflags --no-mac-metadata -cf - pluto-pico-hub \
       | $SSH "tar -xf - -C ${REMOTE_ROOT}"
-  $SSH "chmod +x ${REMOTE_ROOT}/pluto-pi-hub/run.sh ${REMOTE_ROOT}/pluto-pi-hub/hub.py"
+  $SSH "chmod +x ${REMOTE_ROOT}/pluto-pico-hub/run.sh ${REMOTE_ROOT}/pluto-pico-hub/hub.py"
   echo "sync ok"
 
   # The engine stays BLIND to firmware: it just hands off to the hub's own
@@ -207,14 +210,14 @@ payload_hub() {
   # .env binding (PICO_<chipid>=<role>). The "next layer" is the hub's job.
   # Pure stdlib (raw-REPL flasher), so plain python3 -- no mpremote dependency.
   echo "##STEP:propagate"
-  $SSH "python3 ${REMOTE_ROOT}/pluto-pi-hub/propagate.py ${REMOTE_ROOT}/${NODE_DIR}/.env" || true
+  $SSH "python3 ${REMOTE_ROOT}/pluto-pico-hub/propagate.py ${REMOTE_ROOT}/${NODE_DIR}/.env" || true
 
   # Bring up the always-up op receiver (Pluto's op stream -> Pico). Same systemd
   # pattern as the server: sync the unit, then `restart` -- which STOPS the instance
   # currently holding the UART + listen port (graceful SIGTERM) before the fresh one
   # binds them, so a redeploy hands off cleanly.
   echo "##STEP:restart"
-  HUB_UNIT="${REMOTE_ROOT}/pluto-pi-hub/deploy/cpc-hub.service"
+  HUB_UNIT="${REMOTE_ROOT}/pluto-pico-hub/deploy/cpc-hub.service"
   if $SSH "[ -d /run/systemd/system ]"; then
     if $SSH "$PRIV \$SUDO cp ${HUB_UNIT} /etc/systemd/system/cpc-hub.service && \$SUDO systemctl daemon-reload && \$SUDO systemctl enable cpc-hub >/dev/null 2>&1 && \$SUDO systemctl restart cpc-hub"; then
       echo "restarted via systemd (cpc-hub.service synced to ${REMOTE_ROOT})"
@@ -224,7 +227,7 @@ payload_hub() {
       exit 1
     fi
   else
-    echo "not managed by systemd -- run ${REMOTE_ROOT}/pluto-pi-hub/run.sh serve manually"
+    echo "not managed by systemd -- run ${REMOTE_ROOT}/pluto-pico-hub/run.sh serve manually"
   fi
 }
 
@@ -240,6 +243,12 @@ payload_translate() {
       --exclude='__pycache__' --exclude='deploy' --exclude='docs' -cf - . \
       | $SSH "tar -xf - -C ${TR_DIR}"
   $SSH "chmod +x ${TR_DIR}/run.sh ${TR_DIR}/*.sh ${TR_DIR}/dc/*.sh"
+
+  # Dreamcast tools reference docs: deployed to /userdata/share/ (actual tools must be
+  # installed separately on Batocera and available in PATH as a prerequisite).
+  $SSH "mkdir -p /userdata/share/dreamcast"
+  tar --no-xattrs --no-fflags --no-mac-metadata -C nodes/local/batocera/share \
+      -cf - . | $SSH "tar -xf - -C /userdata/share"
   echo "sync ok"
 
   echo "##STEP:restart"

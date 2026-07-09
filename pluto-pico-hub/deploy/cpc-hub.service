@@ -1,5 +1,5 @@
 [Unit]
-Description=CPC Pi-Hub op receiver (Pluto op stream -> Pico USB gamepad)
+Description=CPC Pico Hub op receiver (Pluto op stream -> Pico USB gamepad)
 After=network-online.target
 Wants=network-online.target
 
@@ -8,7 +8,7 @@ Type=simple
 # run.sh serve listens on PI_BRIDGE_PORT and frames each incoming controller op to
 # the Pico over UART. systemd's SIGTERM on stop/restart lets it release the UART and
 # the listen port before the next instance binds them, so a redeploy hands off clean.
-ExecStart=/opt/cpc/pluto-pi-hub/run.sh serve
+ExecStart=/opt/cpc/pluto-pico-hub/run.sh serve
 Restart=always
 RestartSec=3
 # Keep the receiver reachable across both crashes and reboots.

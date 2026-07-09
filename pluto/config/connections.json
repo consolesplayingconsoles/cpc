@@ -6,11 +6,6 @@
   },
   {
     "from": "lab",
-    "to": "pluto",
-    "label": "Deploys"
-  },
-  {
-    "from": "lab",
     "to": "gateway",
     "label": "WiFi"
   },
@@ -35,6 +30,11 @@
     "label": "Maple"
   },
     {
+    "from": "dc",
+    "to": "pi",
+    "label": "GP2040-CE / DreamPi"
+  },
+  {
     "from": "gateway",
     "to": "pi",
     "label": "DreamPicoPort"
@@ -43,11 +43,6 @@
     "from": "gba",
     "to": "wii",
     "label": "GBA Link"
-  },
-  {
-    "from": "gba",
-    "to": "pluto",
-    "label": "USB"
   },
   {
     "from": "ws",
@@ -76,12 +71,12 @@
   },
   {
     "from": "saturn",
-    "to": "pi",
+    "to": "pluto",
     "label": "Serial / Pico"
   },
   {
     "from": "megadrive",
-    "to": "pi",
+    "to": "pluto",
     "label": "Serial / Pico"
   },
   {

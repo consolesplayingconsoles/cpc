@@ -12,7 +12,7 @@ adapter (the adapter wants a PS3 pad, and the DC menu navigates), but the same
 firmware is just as valid on a PS3, a PC, or a PS5 through a licensed PS-controller
 upgrader. The Dreamcast is simply the first thing we proved it on.
 
-The Pi-side sender that feeds the UART is `pluto-pi-hub/bridges/hid.py`.
+The Pi-side sender that feeds the UART is `pluto-pico-hub/bridges/hid.py`.
 
 ## Files (committed)
 - `uartinput.h` / `uartinput.cpp` — the GP2040 addon. Reads the frame

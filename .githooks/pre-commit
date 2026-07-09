@@ -23,7 +23,7 @@ if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
 # failing test sail through). unittest prints its own pass/fail summary to stderr.
 echo "[pre-commit] drive-pipeline tests (python)..."
 $PY pluto/api/drive/test_controller.py
-$PY pluto-pi-hub/test_hid.py
+$PY pluto-pico-hub/test_hid.py
 
 # Keep the hand-written OpenAPI specs honest: fail if a non-Pluto API's spec drifts
 # from the routes its code exposes (no framework to auto-generate, so this is the guard).
