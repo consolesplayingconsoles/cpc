@@ -1,6 +1,6 @@
 {
-  "_comment": "Keyboard source -> Roomba target, laid out as a DRIVING pad (not a flat command palette) so a real gamepad -- an 8BitDo over BT to the Mac, added later as its own source -- maps straight onto it. 'layout' mirrors a controller: d-pad left cluster = STEERING (turn left/right; analog wheel added later), face diamond right = throttle + actions. 'actions' is the roomba-specific binding: each btn -> the verb the node's /command endpoint runs (see nodes/local/roomba-rally/openapi.yaml). Movement verbs (drive-forward/back, turn-left/right) + horn need the roomba drive firmware/API, which does not exist yet -- only 'lights' and 'stop' are live today. 'keys' bind the on-screen/physical keyboard for THIS keyboard source; 'colors' tint the buttons.",
-  "controller": "Roomba (rally car)",
+  "_comment": "Keyboard source -> Roomba target, laid out as a DRIVING pad (not a flat command palette) so a real gamepad -- an 8BitDo over BT to the Mac, added later as its own source -- maps straight onto it. 'layout' mirrors a controller: d-pad left cluster = STEERING (turn left/right; analog wheel added later), face diamond right = throttle + actions. 'actions' is the roomba-specific binding: each btn -> the verb the node's /command endpoint runs (see nodes/local/roomba-rally/openapi.yaml). All verbs are LIVE: lights/horn/melody/session (sound+LED) and the movement verbs drive-forward/back + turn-left/right (bounded auto-stop nudges, gated on the session's active/paused state). 'keys' bind the on-screen/physical keyboard for THIS keyboard source; 'colors' tint the buttons.",
+  "controller": "Roomba Rally",
   "kind": "drive",
   "controls": { "Enter": "START", "action": "A", "cancel": "B" },
   "actions": {
