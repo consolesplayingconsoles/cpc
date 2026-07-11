@@ -18,6 +18,7 @@ import imgMegadrive from '../assets/avatars/megadrive.png'
 import imgSubstack    from '../assets/avatars/substack.svg'
 import imgGoogle      from '../assets/avatars/google.svg'
 import imgGateway     from '../assets/avatars/gateway.svg'
+import imgRoombaWheel from '../assets/avatars/roomba-wheel.svg'
 
 export const ICONS: Record<string, string> = {
   wii:       imgWii,
@@ -38,7 +39,9 @@ export const ICONS: Record<string, string> = {
   cloud:         imgCloud,
   dropbox:       imgCloudStorage,   // operator-named storage node; generic brandless glyph
   dreamehome:    imgDreame,    // the vacuum's cloud — reuses the Dreame mark
-  substack:      imgSubstack,
-  google:        imgGoogle,
-  gateway:       imgGateway,   // its own signal/router mark — so it doesn't fall back to the guest icon
+  substack:       imgSubstack,
+  google:         imgGoogle,
+  gateway:        imgGateway,   // its own signal/router mark — so it doesn't fall back to the guest icon
+  'roomba-rally': imgRoombaWheel,
+  'crazy-roomba': imgRoombaWheel,
 }

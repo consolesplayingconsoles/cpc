@@ -1,28 +1,93 @@
 {
   "_comment": "Network-diagram geometry -- hand-edited, like connections.json. The gateway is the origin everything hangs off (assumed 0,0; its spot on the canvas is set in NetworkDiagram.vue). The cloud hub sits directly below it (same x) at `cloudDy`. Every other node is an [dx, dy] pixel offset from its anchor: fromGateway (the LAN) or fromCloud (the cloud cluster). Add a node here + an icon in useIcons + (optionally) an edge in connections.json.",
-  "cloudDy": 320,
+  "cloudDy": 340,
   "_layout_note": "Mirrors the physical setup. LEFT = eeepc (Pluto C2) hub + its handhelds (wii/ws/gba), leaves facing away from the gateway. RIGHT = Pi hub (Segas), a 3-floor shelf: top batocera / middle SMD+Saturn+DC(+VMU) / bottom PS3 (ICU). Outside devices (birdbuddy+dreame = other room, lab = desk) sit along the bottom. Gateway is the centre everything routes through.",
   "fromGateway": {
-    "pluto":     [ 200,  -50],
-    "wii":       [ 220,  240],
-    "gba":       [ 380,  240],
-    "ws":        [   0, -220],
-    "lab":       [-325,  -50],
-    "pi":        [ 250,  100],
-    "batocera":  [-180, -220],
-    "dc":        [ 450,  -10],
-    "vmu":       [ 500,  200],
-    "saturn":    [ 420, -150],
-    "megadrive": [ 270, -220],
-    "ps3":       [ 100,  210],
-    "birdbuddy": [-260,   40],
-    "dreame":    [-200,  170]
+    "pluto": [
+      200,
+      -50
+    ],
+    "wii": [
+      220,
+      210
+    ],
+    "gba": [
+      380,
+      240
+    ],
+    "ws": [
+      0,
+      -220
+    ],
+    "lab": [
+      -325,
+      -200
+    ],
+    "pi": [
+      250,
+      80
+    ],
+    "batocera": [
+      -180,
+      -220
+    ],
+    "dc": [
+      600,
+      -10
+    ],
+    "vmu": [
+      550,
+      200
+    ],
+    "saturn": [
+      420,
+      -150
+    ],
+    "megadrive": [
+      270,
+      -220
+    ],
+    "ps3": [
+      60,
+      210
+    ],
+    "birdbuddy": [
+      -260,
+      -80
+    ],
+    "dreame": [
+      -250,
+      210
+    ],
+    "roomba-rally": [
+      -400,
+      200
+    ],
+    "crazy-roomba": [
+      -360,
+      50
+    ]
   },
   "fromCloud": {
-    "dropbox":       [-250, 40],
-    "dreamehome":    [-120, 100],
-    "claude":        [ 120, 100],
-    "substack":      [ 250, 40],
-    "google":        [   0, 150]
+    "dropbox": [
+      -250,
+      40
+    ],
+    "dreamehome": [
+      -120,
+      100
+    ],
+    "claude": [
+      120,
+      100
+    ],
+    "substack": [
+      250,
+      40
+    ],
+    "google": [
+      0,
+      150
+    ]
   }
 }

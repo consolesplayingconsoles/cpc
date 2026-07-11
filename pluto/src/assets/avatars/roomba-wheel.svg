@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <radialGradient id="rw-tire" cx="50%" cy="42%" r="58%">
+      <stop offset="0%" stop-color="#3a3d42"/>
+      <stop offset="70%" stop-color="#202226"/>
+      <stop offset="100%" stop-color="#0e0f11"/>
+    </radialGradient>
+    <radialGradient id="rw-rim" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#f2f4f7"/>
+      <stop offset="55%" stop-color="#c3c9d1"/>
+      <stop offset="100%" stop-color="#878e98"/>
+    </radialGradient>
+    <radialGradient id="rw-hub" cx="50%" cy="38%" r="60%">
+      <stop offset="0%" stop-color="#e8ebee"/>
+      <stop offset="100%" stop-color="#9aa0a8"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ground shadow -->
+  <ellipse cx="50" cy="90" rx="34" ry="6" fill="#000" opacity="0.18"/>
+
+  <!-- tire -->
+  <circle cx="50" cy="49" r="46" fill="url(#rw-tire)"/>
+  <circle cx="50" cy="49" r="46" fill="none" stroke="#000" stroke-width="1.5" opacity="0.5"/>
+
+  <!-- red brake caliper peeking behind the rim -->
+  <path d="M20 40 a31 31 0 0 0 0 18 l7 -2 a24 24 0 0 1 0 -14 z" fill="#d81f2a"/>
+  <path d="M20 40 a31 31 0 0 0 0 18 l7 -2 a24 24 0 0 1 0 -14 z" fill="#000" opacity="0.12"/>
+
+  <!-- brushed silver rim well -->
+  <circle cx="50" cy="49" r="34" fill="url(#rw-rim)"/>
+  <circle cx="50" cy="49" r="34" fill="none" stroke="#5c626b" stroke-width="1.5"/>
+  <circle cx="50" cy="49" r="30" fill="none" stroke="#fff" stroke-width="1" opacity="0.35"/>
+
+  <!-- 5 racing spokes, tapered, cut through to the dark backing -->
+  <g fill="#12141a">
+    <g id="rw-gap">
+      <path d="M50 49 L44 24 a6 6 0 0 1 12 0 Z"/>
+    </g>
+    <use href="#rw-gap" transform="rotate(72 50 49)"/>
+    <use href="#rw-gap" transform="rotate(144 50 49)"/>
+    <use href="#rw-gap" transform="rotate(216 50 49)"/>
+    <use href="#rw-gap" transform="rotate(288 50 49)"/>
+  </g>
+
+  <!-- spoke highlight edges -->
+  <g fill="none" stroke="#fdfdfe" stroke-width="1" opacity="0.4">
+    <g id="rw-edge"><path d="M46 47 L42.5 25"/></g>
+    <use href="#rw-edge" transform="rotate(72 50 49)"/>
+    <use href="#rw-edge" transform="rotate(144 50 49)"/>
+    <use href="#rw-edge" transform="rotate(216 50 49)"/>
+    <use href="#rw-edge" transform="rotate(288 50 49)"/>
+  </g>
+
+  <!-- centre hub cap -->
+  <circle cx="50" cy="49" r="11" fill="url(#rw-hub)" stroke="#5c626b" stroke-width="1.5"/>
+  <!-- lug bolts -->
+  <g fill="#4a5058">
+    <circle cx="50" cy="42" r="1.6"/>
+    <circle cx="56.6" cy="46.8" r="1.6"/>
+    <circle cx="54.1" cy="54.6" r="1.6"/>
+    <circle cx="45.9" cy="54.6" r="1.6"/>
+    <circle cx="43.4" cy="46.8" r="1.6"/>
+  </g>
+  <circle cx="50" cy="49" r="3.2" fill="#d81f2a"/>
+</svg>

@@ -1,0 +1,19 @@
+openapi: 3.0.3
+info:
+  title: Roomba Rally Pico API
+  version: 0.1.0
+  description: >
+    Roomba 651 + Pico W bridge (station mode). HTTP server on the Pico's
+    local IP (see NODE_HOST_IP in .env). Terse by design.
+servers:
+  - url: /
+    description: Relative to the Pico's IP
+tags:
+  - { name: control }
+paths:
+  /health:
+    get: { tags: [control], summary: Health check (used by Pluto node discovery), responses: { '200': { description: OK } } }
+  /status:
+    get: { tags: [control], summary: Full device status (battery, lights, last command), responses: { '200': { description: OK } } }
+  /command:
+    post: { tags: [control], summary: Execute Roomba action (lights-on/off, melody, stop), responses: { '200': { description: OK }, '400': { description: bad action }, '500': { description: serial error } } }
