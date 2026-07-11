@@ -7,6 +7,7 @@ import ControlKeyboard from './ControlKeyboard.vue'
 import QuadrantLayout from '../QuadrantLayout.vue'
 import UiButton from '../ui/UiButton.vue'
 import UiIconButton from '../ui/UiIconButton.vue'
+import UiBattery from '../ui/UiBattery.vue'
 import type { NodeMap } from '../../composables/useNodes'
 
 interface Point { x: number; y: number }
@@ -121,12 +122,6 @@ const actClass = computed(() => {
     default:          return 'is-idle'
   }
 })
-const batColor = computed(() => {
-  const p = dev.value?.battery ?? null
-  if (p === null) return 'var(--text-muted)'
-  return p > 50 ? 'var(--ok)' : p > 20 ? 'var(--warn)' : 'var(--bad)'
-})
-
 // ── playback clock (drives map, and later video + Pi) ─────────────
 const currentTime = ref(0)        // seconds into the clean
 const playing     = ref(false)
@@ -494,10 +489,7 @@ async function signIn() {
       <div class="rb-status">
         <template v-if="connected && dev">
           <span class="rb-pill" :class="actClass">{{ dev.status_human ?? humanStatus(dev.status_label) }}</span>
-          <span v-if="dev.battery !== null" class="rb-bat">
-            <span class="rb-bat-shell"><span class="rb-bat-fill" :style="{ width: dev.battery + '%', background: batColor }" /></span>
-            <span class="mono" :style="{ color: batColor }">{{ dev.battery }}%</span>
-          </span>
+          <UiBattery :pct="dev.battery" />
         </template>
         <span v-else class="rb-offline"><span class="rb-offline-dot" />offline</span>
       </div>
@@ -736,9 +728,6 @@ async function signIn() {
 .rb-pill.is-clean  { background: var(--accent-soft); color: var(--accent-hover); }
 .rb-pill.is-return { background: #fef3c7; color: #92580a; }
 .rb-pill.is-error  { background: #fee2e2; color: #b91c1c; }
-.rb-bat { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-.rb-bat-shell { width: 34px; height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
-.rb-bat-fill { display: block; height: 100%; border-radius: 999px; }
 .rb-dot { width: 8px; height: 8px; border-radius: 50%; }
 .rb-dot.on { background: var(--ok); } .rb-dot.off { background: var(--text-faint); }
 .rb-offline {

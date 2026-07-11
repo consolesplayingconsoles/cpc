@@ -11,6 +11,7 @@ import ControlKeyboard from './ControlKeyboard.vue'
 import ClaudeControl from './ClaudeControl.vue'
 import GoogleControl from './GoogleControl.vue'
 import KinectControl from './KinectControl.vue'
+import RoombaTelemetry from './RoombaTelemetry.vue'
 import QuadrantLayout from '../QuadrantLayout.vue'
 
 const props = defineProps<{ active: boolean; nodes?: NodeMap; name?: string; showOffline?: boolean }>()
@@ -138,14 +139,26 @@ const subDev  = computed(() => subList.value.find(s => s.id === effSub.value)?.d
 // roomba node id under 'roomba' (the backend interprets it per target). '' otherwise.
 const driveSub = computed(() =>
   effTarget.value === 'pi' ? subDev.value : effTarget.value === 'roomba' ? effSub.value : '')
+// The selected roomba node's host:port, for the SW telemetry panel to poll /status directly.
+const roombaIp = computed(() =>
+  (effTarget.value === 'roomba' && effSub.value) ? (props.nodes?.[effSub.value]?.ip || '') : '')
 
 // URL-canonicalization: write the resolved defaults INTO the url so the dropdowns and
 // the path never disagree. replace() = no history entry. With no source in the path
 // (bare /control), land on the first available source; only an empty roster leaves
 // the pick-a-source state. Then fill target + mapping defaults.
+// Remember the last Control selection so a round-trip (deploy a node, come back) lands
+// you where you were instead of the default dropdowns. The whole selection already lives
+// in the URL, so we just persist/restore that path (cpc.<domain>.<leaf> key convention).
+// Stale parts (a mapping/node since removed) self-heal via the canon below, so a stored
+// URL never hard-fails -- worst case it falls back to defaults.
+const LAST_URL_KEY = 'cpc.control.lastUrl'
+
 watch([source, target, mapping, sub, mappings, subList, sourceList, () => props.active], () => {
   if (!props.active) return
   if (!source.value) {
+    const last = localStorage.getItem(LAST_URL_KEY)
+    if (last && last.startsWith('/control/') && last !== route.fullPath) { router.replace(last); return }
     if (sourceList.value.length) router.replace(path(sourceList.value[0].id, '', '', ''))
     return
   }
@@ -162,6 +175,7 @@ watch([source, target, mapping, sub, mappings, subList, sourceList, () => props.
   // the URL; under a target that doesn't, no subtarget segment may linger.
   const subMismatch = TARGETS_WITH_SUBTARGET.has(t) ? (!!sb && sb !== sub.value) : (sub.value !== '')
   if (t !== target.value || (m && m !== mapping.value) || subMismatch) router.replace(path(source.value, t, m, sb))
+  else if (m) localStorage.setItem(LAST_URL_KEY, path(source.value, t, m, sb))   // canon settled: remember it
 }, { immediate: true })
 
 // Control OWNS the drive-error surface: the source children (Robutek / ControlKeyboard /
@@ -233,6 +247,10 @@ function openMappingDir() {
           :active="active" :nodes="nodes" :name="name || 'dreame'"
           @drive-error="setError" />
         <QuadrantLayout v-else-if="source === 'keyboard'">
+          <!-- SW quadrant = output/telemetry. Roomba battery capture when driving a roomba. -->
+          <template v-if="roombaIp" #sw>
+            <RoombaTelemetry :ip="roombaIp" :active="active" :name="effSub" />
+          </template>
           <template #se>
             <ControlKeyboard
               :active="active" :map-source="source" :target="effTarget" :mapping="effMapping"

@@ -385,47 +385,90 @@ class NetworkSink(Sink):
 
 
 class RoombaSink(Sink):
-    """Drive a Roomba node over its HTTP API. Each PRESS maps a button to a roomba
-    action verb (the mapping's `actions` -- e.g. X -> 'lights', Start -> 'session')
-    and POSTs {"action": verb} to the node's /command. Roomba commands are DISCRETE
-    (a toggle, a tune, a session flip), so only press fires -- release/axis are no-ops
-    and nothing is held. Stateless: one fire-and-forget POST per press, no held link
-    (unlike NetworkSink's TCP stream to the Pi). Pure stdlib, 3.6+.
+    """Drive a Roomba node over its PERSISTENT command stream (a TCP socket on the node's
+    HTTP port + 1). One held connection, newline-delimited verbs -- NOT an HTTP POST per
+    event, which saturated the single-threaded Pico during movement (fresh connection +
+    parse + the old blocking nudge-sleep each time). Mirrors NetworkSink's model.
 
-    The base_url already carries the port (HOST_IP is host:port). A dropped command
-    isn't fatal -- the roomba just doesn't react -- so failures are swallowed."""
+    Each PRESS maps a button to a verb (the mapping's `actions`). Discrete verbs (lights/
+    horn/melody/session) fire once on press. Movement verbs (drive-*/turn-*) SET a held
+    velocity on press and send 'drive-stop' on release; keepalive() streams 'ping' to feed
+    the firmware DEADMAN (which auto-stops if the stream stalls/drops). A dropped link makes
+    the firmware stop on its own. Pure stdlib, 3.6+, ASCII."""
 
-    def __init__(self, base_url, actions, timeout=3.0):
+    def __init__(self, host, port, actions, timeout=4.0):
         super(RoombaSink, self).__init__()
-        self._base = base_url.rstrip("/")
+        self._host, self._port, self._timeout = host, int(port), timeout
         self._actions = actions or {}
-        self._timeout = timeout
+        self._moving = set()                # movement btns currently held
+        self._sock = None
+        self._closed = False
+        self._connect()                     # raise now if unreachable (surfaces a clean error)
+
+    def _connect(self):
+        import socket
+        try:
+            if self._sock:
+                self._sock.close()
+        except OSError:
+            pass
+        s = socket.create_connection((self._host, self._port), timeout=self._timeout)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)   # low-latency per keypress
+        s.settimeout(None)
+        self._sock = s
+
+    @staticmethod
+    def _is_move(verb):
+        return bool(verb) and (verb.startswith("drive-") or verb.startswith("turn-"))
+
+    def _send(self, line):
+        if self._closed:
+            return
+        data = (line + "\n").encode("ascii")
+        try:
+            self._sock.sendall(data)
+        except OSError:
+            # link dropped -> reconnect ONCE and retry, so a stale stream self-heals
+            # instead of going permanently dead (the cached sink is reused across keys).
+            try:
+                self._connect()
+                self._sock.sendall(data)
+            except OSError:
+                self._closed = True         # still down; the firmware deadman stops the roomba
 
     def press(self, btn):
         super(RoombaSink, self).press(btn)
         verb = self._actions.get(btn)
         if not verb:
-            return                          # unbound button: no-op
-        import json
-        from urllib.request import Request, urlopen
-        data = json.dumps({"action": verb}).encode("ascii")
-        req = Request(self._base + "/command", data=data,
-                      headers={"Content-Type": "application/json"})
-        # Surface failures (unreachable node, non-200) so a dropped COMMAND shows up in
-        # the drive-error bar instead of a silent ok:true. Discrete control wants to know.
-        try:
-            urlopen(req, timeout=self._timeout).close()
-        except Exception as exc:
-            raise RuntimeError("roomba %s -> %s/command failed: %s" % (verb, self._base, exc))
+            return
+        self._send(verb)
+        if self._is_move(verb):
+            self._moving.add(btn)
+
+    def release(self, btn):
+        super(RoombaSink, self).release(btn)
+        verb = self._actions.get(btn)
+        if self._is_move(verb):
+            self._moving.discard(btn)
+            if not self._moving:            # last movement key up -> stop
+                self._send("drive-stop")
 
     def keepalive(self):
-        pass
+        self._send("ping")                  # feed the firmware deadman during a hold
 
     def release_all(self):
-        pass
+        self._moving.clear()
+        self._send("drive-stop")
+        self.close()
 
     def close(self):
-        pass
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._sock.close()
+        except OSError:
+            pass
 
 
 def mappings_dir(base=None):

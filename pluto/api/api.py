@@ -2294,13 +2294,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 raise ValueError("can't reach the Pi receiver at %s:%s (%s) -- is the "
                                  "hub up (run.sh serve / cpc-hub.service)?" % (host, port, exc))
         if target == "roomba":
-            # `dev` carries the chosen roomba subtarget (a node id); its .env HOST_IP
-            # (host:port) is the device to POST /command at.
+            # `dev` carries the chosen roomba subtarget (a node id); its .env HOST_IP is
+            # host:port (the HTTP port). The real-time command STREAM is that port + 1.
             node = self.__class__.node_roster.get(dev or "") or {}
-            host = node.get("HOST_IP", "").strip()
-            if not host:
+            hostport = node.get("HOST_IP", "").strip()
+            if not hostport:
                 raise ValueError("roomba subtarget '%s' has no HOST_IP in its .env" % (dev or "?"))
-            return controller.RoombaSink("http://" + host, mapping.get("actions"))
+            host, _, port_s = hostport.rpartition(":")
+            if not host:
+                host, port_s = hostport, "7724"
+            cmd_port = int(port_s) + 1
+            try:
+                return controller.RoombaSink(host, cmd_port, mapping.get("actions"))
+            except Exception as exc:
+                raise ValueError("can't reach the roomba command stream at %s:%d (%s) -- "
+                                 "is the firmware (v17+) running?" % (host, cmd_port, exc))
         raise ValueError("unknown target: %s" % target)
 
     def _live_ensure(self, controller, target, mapping, dev=None):
