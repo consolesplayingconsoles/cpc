@@ -459,6 +459,16 @@ def picos_from_env(cfg, fw_root=None):
     return out
 
 
+# An HTTP /health probe hits a REAL server -- for a host:port node that's often a
+# single-threaded MicroPython box (a Pico) that a 5s dashboard poll would choke. So
+# cache each host:port result and only re-hit the device every HTTP_PROBE_TTL seconds;
+# in between, every /nodes request reuses the cached up/down. ICMP stays per-request
+# (it's free). Deliberately relaxed: a couple minutes of status lag on these nodes is
+# an acceptable trade for barely touching the device. Keyed ip -> (checked_at, (up, os)).
+HTTP_PROBE_TTL = 120.0
+_http_probe_cache = {}
+
+
 def probe(ip):
     """Reach a host and infer a coarse OS family from the reply TTL.
 
@@ -477,18 +487,25 @@ def probe(ip):
     host is detected locally instead. The `.env` OS= var overrides when wrong.
     """
     if ":" in ip:
+        now = time.time()
+        cached = _http_probe_cache.get(ip)
+        if cached and (now - cached[0]) < HTTP_PROBE_TTL:
+            return cached[1]                 # reuse -- don't touch the device yet
         import http.client as _http
         host, _, port_s = ip.rpartition(":")
+        result = (False, None)
         try:
             conn = _http.HTTPConnection(host, int(port_s), timeout=2)
             conn.request("GET", "/health")
             resp = conn.getresponse()
-            return resp.status == 200, None
+            result = (resp.status == 200, None)
         except Exception:
-            return False, None
+            result = (False, None)
         finally:
             try: conn.close()
             except Exception: pass
+        _http_probe_cache[ip] = (now, result)
+        return result
     try:
         result = subprocess.run(
             ["ping", "-c", "1", "-W", "1", ip],
@@ -2251,10 +2268,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, {"ok": True, "fresh": True, "device": name})
 
     def _make_sink(self, controller, target, mapping, dev=None):
-        """Open a FRESH sink for `target` (pi -> NetworkSink to the hub; keyboard ->
-        KeyboardSink for a local emulator). `dev` selects WHICH pico when the Pi runs
-        more than one (the hub routes by it); None = the hub's default bridge. Raises
-        ValueError(msg) on a bad or unreachable target so callers return a clean JSON error."""
+        """Open a FRESH sink for `target`. The virtual KEYBOARD is the lone LOCAL sink
+        (drives an emulator on THIS host via pynput); every other target drives a
+        networked NODE, differing only in which node + wire protocol -- the Pi hub's
+        op stream (pi), the roomba's HTTP /command (roomba). `dev` is the subtarget
+        selector: the pico's UART dev under 'pi', the roomba node id under 'roomba'.
+        Raises ValueError(msg) on a bad/unreachable target -> clean JSON error."""
+        # The local exception first.
+        if target == "keyboard":
+            try:
+                return controller.KeyboardSink(button_keys=mapping.get("keys"))
+            except Exception as exc:
+                raise ValueError("keyboard sink: %s -- pip install pynput + grant the "
+                                 "terminal Accessibility" % exc)
+        # Everything else is a networked node.
         if target == "pi":
             pi_cfg = self.__class__.node_roster.get("pi") or {}
             host = pi_cfg.get("HOST_IP", "").strip()
@@ -2266,12 +2293,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as exc:
                 raise ValueError("can't reach the Pi receiver at %s:%s (%s) -- is the "
                                  "hub up (run.sh serve / cpc-hub.service)?" % (host, port, exc))
-        if target == "keyboard":
-            try:
-                return controller.KeyboardSink(button_keys=mapping.get("keys"))
-            except Exception as exc:
-                raise ValueError("keyboard sink: %s -- pip install pynput + grant the "
-                                 "terminal Accessibility" % exc)
+        if target == "roomba":
+            # `dev` carries the chosen roomba subtarget (a node id); its .env HOST_IP
+            # (host:port) is the device to POST /command at.
+            node = self.__class__.node_roster.get(dev or "") or {}
+            host = node.get("HOST_IP", "").strip()
+            if not host:
+                raise ValueError("roomba subtarget '%s' has no HOST_IP in its .env" % (dev or "?"))
+            return controller.RoombaSink("http://" + host, mapping.get("actions"))
         raise ValueError("unknown target: %s" % target)
 
     def _live_ensure(self, controller, target, mapping, dev=None):
@@ -2843,6 +2872,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # check -- deterministic, no build flag, same spirit as `code`/has_code.
         deploy_engine = os.path.isfile(os.path.join(os.path.dirname(base_dir), "deploy.sh"))
 
+        # Nodes flashed over USB (the 'pico' payload -- mpremote, no SSH) deploy WITHOUT
+        # ip/creds: the flash is local to the deploy host. So their DEPLOY button gates on
+        # the engine alone. Read the payload map once to know which nodes those are.
+        pico_flash_nodes = set()
+        try:
+            with open(os.path.join(base_dir, "config", "payloads.json")) as _pf:
+                _pmap = json.load(_pf)
+            pico_flash_nodes = {n for n, pl in _pmap.items() if "pico" in (pl or [])}
+        except Exception:
+            pass
+
         # The roster was discovered once at startup (nodes/*/ + pluto the host); we
         # never rescan. Per request we only re-ping: collect every IP and probe them
         # in parallel, so down hosts time out once concurrently, not once per node.
@@ -2907,7 +2947,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             alias    = console_cfg.get("CUSTOM_SSH_ALIAS", "").strip()
             ssh_user = console_cfg.get("SSH_USER", "").strip()
             ssh_key  = console_cfg.get("SSH_KEY_PATH", "").strip()
-            deployable = deploy_engine and bool(ip and (alias or (ssh_user and ssh_key)))
+            # USB-flashed pico nodes deploy with just the engine (local mpremote flash),
+            # but still need their real .env (the flash injects SSID/port from it); SSH
+            # nodes need ip + creds.
+            deployable = deploy_engine and (
+                (node_id in pico_flash_nodes and has_env)
+                or bool(ip and (alias or (ssh_user and ssh_key))))
             # CODE opens the source in the IDE on THIS host, so only surface it
             # where the checkout actually exists — true on the dev workstation,
             # false on the deployed headless box. Deterministic (no build flag).
@@ -2932,6 +2977,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # Declared Pico fleet (PICO_<chipid>=... lines); [] for nodes without.
                 # deploy ownership is derived against the firmware tree (fw_root).
                 "picos":  picos_from_env(console_cfg, fw_root),
+                # Control-rail grouping: nodes sharing a CONTROL_TARGET become the
+                # subtargets of that target (e.g. 'roomba' -> Roomba Rally + Crazy
+                # Roomba). None for nodes that aren't a control subtarget.
+                "controlTarget": console_cfg.get("CONTROL_TARGET", "").strip() or None,
             }
 
         # The Lab node -- Pluto's workspace instance (this repo checkout: the bench

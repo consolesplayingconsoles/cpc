@@ -32,7 +32,9 @@ const emit = defineEmits<{
   'open-tab':    []
 }>()
 
-// Offline / unconfigured nodes can't act — deploy + files need the node reachable.
+// Files (SMB) need the node reachable. DEPLOY does not: it's a dev action (SSH push or
+// USB flash) that may target an offline box on purpose — let it run and surface any
+// error in the console rather than pre-disabling it.
 const offline = computed(() => props.node.status === 'down' || props.node.status === 'unconfigured')
 const unconfigured = computed(() => props.node.status === 'unconfigured')
 // A node's payloads come from config/payloads.json (client, hub, ...), so the button
@@ -181,7 +183,7 @@ function postCommand(text: string) {
             </svg>
           </UiIconButton>
         </div>
-        <UiActionRow v-if="showDeploy" :disabled="deploying || offline" @click="emit('deploy')">
+        <UiActionRow v-if="showDeploy" :disabled="deploying" @click="emit('deploy')">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l4 4M12 3l-4 4M12 3v12"/><path d="M5 21h14"/></svg>
           <span>{{ deployLabel }}</span>
           <span v-if="deploying" class="nd__act-note">Running…</span>
@@ -197,7 +199,7 @@ function postCommand(text: string) {
       <template v-if="isWii">
         <section class="nd__sec">
           <p class="nd__lbl">Linux</p>
-          <UiActionRow v-if="node.deploy" :disabled="deploying || offline" @click="emit('deploy')">
+          <UiActionRow v-if="node.deploy" :disabled="deploying" @click="emit('deploy')">
             <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l4 4M12 3l-4 4M12 3v12"/><path d="M5 21h14"/></svg>
             <span>{{ deployLabel }}</span>
             <span v-if="deploying" class="nd__act-note">Running…</span>
@@ -232,7 +234,7 @@ function postCommand(text: string) {
           <span class="nd__arrow">&rarr;</span>
         </UiActionRow>
 
-        <UiActionRow v-if="node.deploy" :disabled="deploying || offline" @click="emit('deploy')">
+        <UiActionRow v-if="node.deploy" :disabled="deploying" @click="emit('deploy')">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l4 4M12 3l-4 4M12 3v12"/><path d="M5 21h14"/></svg>
           <span>{{ deployLabel }}</span>
           <span v-if="deploying" class="nd__act-note">Running…</span>

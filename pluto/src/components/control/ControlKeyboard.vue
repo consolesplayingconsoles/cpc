@@ -19,9 +19,9 @@ interface Mapping { controller?: string; layout?: LayoutKey[]; colors?: Record<s
 const props = defineProps<{
   active: boolean
   mapSource: string      // mapping dir to load from (the source: 'keyboard' | 'claude' | 'dreame')
-  target: string         // none | keyboard (emulator) | pi
+  target: string         // none | keyboard (emulator) | pi | roomba
   mapping: string        // mapping stem, e.g. 'dreamcast'
-  targetDev?: string     // when target === 'pi': which pico's UART dev to route to
+  targetDev?: string     // subtarget selector: the pico's UART dev under 'pi', the roomba node id under 'roomba'
   compact?: boolean      // smaller caps for an embedded side pane (Dreame)
   heading?: string       // eyebrow above the pad (e.g. "Manual Assistance") where the
                          // keyboard is a manual aid to another driver, not the player itself
@@ -29,7 +29,9 @@ const props = defineProps<{
 const emit = defineEmits<{ 'drive-error': [string] }>()
 
 const API = `http://${window.location.hostname}:7700`
-const canDrive = computed(() => props.target === 'pi' || props.target === 'keyboard')
+// The virtual keyboard is the local exception; every other real target (pi, roomba)
+// drives a node. Only 'none' (and the empty pre-selection) don't drive.
+const canDrive = computed(() => !!props.target && props.target !== 'none')
 const fitEl = ref<HTMLElement | null>(null)   // the controller area; measured to size the pad to fit
 const box = ref({ w: 0, h: 0 })               // its live content box
 let resizeObs: ResizeObserver | null = null
@@ -138,7 +140,7 @@ async function holdPost(btn: string, down: boolean) {
   try {
     const r = await fetch(`${API}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'hold', down, btn, target: props.target, source: props.mapSource, mapping: props.mapping, ...(props.target === 'pi' && props.targetDev ? { dev: props.targetDev } : {}) }),
+      body: JSON.stringify({ action: 'hold', down, btn, target: props.target, source: props.mapSource, mapping: props.mapping, ...(props.targetDev ? { dev: props.targetDev } : {}) }),
     })
     const j = await r.json().catch(() => null)
     emit('drive-error', j && j.ok === false ? (j.error || 'hold failed') : '')
@@ -181,7 +183,7 @@ async function axisPost(name: string, x: number, y: number) {
   try {
     const r = await fetch(`${API}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'axis', name, x, y, target: props.target, source: props.mapSource, mapping: props.mapping, ...(props.target === 'pi' && props.targetDev ? { dev: props.targetDev } : {}) }),
+      body: JSON.stringify({ action: 'axis', name, x, y, target: props.target, source: props.mapSource, mapping: props.mapping, ...(props.targetDev ? { dev: props.targetDev } : {}) }),
     })
     const j = await r.json().catch(() => null)
     emit('drive-error', j && j.ok === false ? (j.error || 'axis failed') : '')

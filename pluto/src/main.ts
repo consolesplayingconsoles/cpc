@@ -20,10 +20,11 @@ const router = createRouter({
     // Control surface: source (event producer) / target (output sink) / mapping
     // (control scheme). All three ride the URL so a reload restores the selection
     // instead of dropping to a default (the old reload-to-Disabled trap).
-    // pico is a PURE APPEND after mapping (4th positional param) so existing
-    // /control/source/target/mapping links keep parsing; it's only meaningful when
-    // target === 'pi' (which of the node's picos to drive).
-    { path: '/control/:source?/:target?/:mapping?/:pico?', name: 'control', component: Blank, meta: { hashtag: '#anything-playing-consoles' } },
+    // sub is the TARGET's subtarget: a PURE APPEND after mapping (4th positional
+    // param) so existing /control/source/target/mapping links keep parsing. Its
+    // meaning is defined by the target -- which pico under 'pi', which roomba node
+    // under 'roomba'; targets without subtargets never fill it.
+    { path: '/control/:source?/:target?/:mapping?/:sub?', name: 'control', component: Blank, meta: { hashtag: '#anything-playing-consoles' } },
     // :ns is the project namespace (game + language) — rides the URL so a reload /
     // HMR / bookmark restores the open table instead of dropping to the picker.
     { path: '/translation/:ns?', name: 'translation', component: Blank, meta: { hashtag: '#consolas-traduciendo-consolas' } },
