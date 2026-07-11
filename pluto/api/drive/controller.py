@@ -384,6 +384,50 @@ class NetworkSink(Sink):
             pass
 
 
+class RoombaSink(Sink):
+    """Drive a Roomba node over its HTTP API. Each PRESS maps a button to a roomba
+    action verb (the mapping's `actions` -- e.g. X -> 'lights', Start -> 'session')
+    and POSTs {"action": verb} to the node's /command. Roomba commands are DISCRETE
+    (a toggle, a tune, a session flip), so only press fires -- release/axis are no-ops
+    and nothing is held. Stateless: one fire-and-forget POST per press, no held link
+    (unlike NetworkSink's TCP stream to the Pi). Pure stdlib, 3.6+.
+
+    The base_url already carries the port (HOST_IP is host:port). A dropped command
+    isn't fatal -- the roomba just doesn't react -- so failures are swallowed."""
+
+    def __init__(self, base_url, actions, timeout=3.0):
+        super(RoombaSink, self).__init__()
+        self._base = base_url.rstrip("/")
+        self._actions = actions or {}
+        self._timeout = timeout
+
+    def press(self, btn):
+        super(RoombaSink, self).press(btn)
+        verb = self._actions.get(btn)
+        if not verb:
+            return                          # unbound button: no-op
+        import json
+        from urllib.request import Request, urlopen
+        data = json.dumps({"action": verb}).encode("ascii")
+        req = Request(self._base + "/command", data=data,
+                      headers={"Content-Type": "application/json"})
+        # Surface failures (unreachable node, non-200) so a dropped COMMAND shows up in
+        # the drive-error bar instead of a silent ok:true. Discrete control wants to know.
+        try:
+            urlopen(req, timeout=self._timeout).close()
+        except Exception as exc:
+            raise RuntimeError("roomba %s -> %s/command failed: %s" % (verb, self._base, exc))
+
+    def keepalive(self):
+        pass
+
+    def release_all(self):
+        pass
+
+    def close(self):
+        pass
+
+
 def mappings_dir(base=None):
     """The mapping store. Mappings are CONFIG/DATA, not engine code, so they live
     with Pluto (pluto/config/mappings), NOT inside this package. Pluto sets the

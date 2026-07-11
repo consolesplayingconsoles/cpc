@@ -12,8 +12,8 @@ tags:
   - { name: control }
 paths:
   /health:
-    get: { tags: [control], summary: Health check (used by Pluto node discovery), responses: { '200': { description: OK } } }
+    get: { tags: [control], summary: Health check + firmware version (used by Pluto node discovery), responses: { '200': { description: OK } } }
   /status:
     get: { tags: [control], summary: Full device status (battery, lights, last command), responses: { '200': { description: OK } } }
   /command:
-    post: { tags: [control], summary: Execute Roomba action (lights-on/off, melody, stop), responses: { '200': { description: OK }, '400': { description: bad action }, '500': { description: serial error } } }
+    post: { tags: [control], summary: Execute Roomba action (lights toggle, melody, session start/game-over), responses: { '200': { description: OK }, '400': { description: bad action }, '500': { description: serial error } } }

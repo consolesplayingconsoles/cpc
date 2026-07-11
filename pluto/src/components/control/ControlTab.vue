@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Control surface: parent of the source/target/(subtarget)/mapping rail. Owns the
-// selections (all in the URL: /control/{source}/{target}/{mapping}[/{pico}]) and renders
+// selections (all in the URL: /control/{source}/{target}/{mapping}[/{sub}]) and renders
 // the source child: Dreame Cloud (Robutek), Keyboard only (ControlKeyboard), or Claude
 // (ClaudeControl). The on-screen keyboard is the one unified controller across all three.
 import { computed, ref, watch } from 'vue'
@@ -36,15 +36,21 @@ const sourceList = computed(() => {
 })
 const source = computed(() => (route.params.source as string) || '')
 
-// ── TARGET — output sink (nothing / emulator / pi), NOT the console itself. ──
+// ── TARGET — output sink (none / emulator / pi / roomba), NOT the console itself.
+// Each sink may own a subtarget dimension (pi -> pico, roomba -> node). ──
 const piPresent = computed(() => {
   const n = props.nodes?.['pi']
   return !!n && n.status !== 'unconfigured'
 })
+const roombaNodes = computed(() =>
+  Object.values(props.nodes || {})
+    .filter(n => n.controlTarget === 'roomba' && (n.status !== 'unconfigured' || props.showOffline)))
+const roombaPresent = computed(() => roombaNodes.value.length > 0)
 const targetOptions = computed(() => [
   { id: 'none', label: 'No output', disabled: false },
-  ...(isLab ? [{ id: 'keyboard', label: 'Emulator (virtual keyboard)', disabled: false }] : []),
-  { id: 'pi', label: 'Console (Raspberry Pi)', disabled: !piPresent.value },
+  ...(isLab ? [{ id: 'keyboard', label: 'Local Emulator (via Virtual Keyboard)', disabled: false }] : []),
+  { id: 'pi', label: 'Console (via Raspberry Pi)', disabled: !piPresent.value },
+  { id: 'roomba', label: 'Roomba', disabled: !roombaPresent.value },
 ])
 const defaultTarget = computed(() => (piPresent.value ? 'pi' : isLab ? 'keyboard' : 'none'))
 const target = computed(() => (route.params.target as string) || '')
@@ -65,50 +71,79 @@ async function fetchMappings(src: string) {
 }
 watch(source, (s) => fetchMappings(s), { immediate: true })
 
-function path(s: string, t: string, m: string, p = '') {
+// Which targets carry a subtarget dimension (a 4th URL segment). Keyed by target id
+// alone so path() can decide from any target, not just the current one.
+const TARGETS_WITH_SUBTARGET = new Set(['pi', 'roomba'])
+
+function path(s: string, t: string, m: string, sb = '') {
   const segs = ['/control', s, t, m]
-  if (t === 'pi' && m && p) segs.push(p)   // pico = 4th positional param, only under target=pi (and needs mapping filled, since positional)
+  if (TARGETS_WITH_SUBTARGET.has(t) && m && sb) segs.push(sb)   // subtarget = 4th positional param (needs mapping filled, since positional)
   return segs.filter((x, i) => i === 0 || x).join('/')
 }
 // Each picker keeps the OTHER two dimensions populated in the URL by pushing the
 // resolved (effective) values, never the raw param -- otherwise changing the target
 // drops the mapping from the path even though the dropdown still shows it.
-function pick(level: 'source' | 'target' | 'mapping' | 'pico', v: string) {
-  if (level === 'source')  router.push(path(v, '', '', ''))                                          // new source resets the rest (canon refills)
-  else if (level === 'target')  router.push(path(source.value, v, effMapping.value, effPico.value))  // canon fills pico when v becomes pi
-  else if (level === 'mapping') router.push(path(source.value, effTarget.value, v, effPico.value))
-  else                          router.push(path(source.value, effTarget.value, effMapping.value, v)) // pico
+function pick(level: 'source' | 'target' | 'mapping' | 'sub', v: string) {
+  if (level === 'source')  router.push(path(v, '', '', ''))                                        // new source resets the rest (canon refills)
+  else if (level === 'target')  router.push(path(source.value, v, effMapping.value, effSub.value)) // canon fills the subtarget when v gains one
+  else if (level === 'mapping') router.push(path(source.value, effTarget.value, v, effSub.value))
+  else                          router.push(path(source.value, effTarget.value, effMapping.value, v)) // subtarget
 }
 
 const effTarget  = computed(() => target.value || defaultTarget.value)
-// Only honour the URL's mapping if it's valid for THIS source's list; otherwise fall
+// The mapping must MATCH the target's sink: a roomba mapping carries `actions` (button
+// -> roomba verb) that only the roomba sink understands, while console mappings (dreamcast,
+// gamecube) drive a console pad and have no actions. Pairing the wrong one silently no-ops
+// (a dreamcast mapping on the roomba sink finds no verb, fires nothing). So the dropdown
+// only offers mappings compatible with the current target: roomba schemes under 'roomba',
+// console schemes everywhere else.
+function isRoombaMapping(m: string) { return m === 'roomba' || m.startsWith('roomba-') }
+const visibleMappings = computed(() =>
+  effTarget.value === 'roomba'
+    ? mappings.value.filter(isRoombaMapping)
+    : mappings.value.filter(m => !isRoombaMapping(m)))
+// Only honour the URL's mapping if it's valid for THIS target's list; otherwise fall
 // back to the first available. Kills the stale/invalid mapping that rendered blank.
 const effMapping = computed(() =>
-  (mapping.value && mappings.value.includes(mapping.value)) ? mapping.value : (mappings.value[0] || ''))
+  (mapping.value && visibleMappings.value.includes(mapping.value)) ? mapping.value : (visibleMappings.value[0] || ''))
 
-// ── PICO — shows ONLY when target === 'pi': which of the node's UART picos to drive.
-// A 4th URL param appended AFTER mapping (the first three never move). Options are the
-// pi node's declared picos, labelled by the alias earned off the wires; the resolved
-// `dev` (ttyAMA4 / ttyAMA0) is what the drive actually routes on. ──
-const picoList = computed(() => {
-  const list = ((props.nodes?.['pi'] as any)?.picos as Array<{ chipid: string; alias?: string; dev?: string; conn?: string }> | undefined) || []
-  return list.filter(p => (p.conn || '').toLowerCase() === 'uart' && p.dev)
-             .map(p => ({ id: p.alias || p.chipid, label: p.alias || p.chipid, dev: p.dev as string }))
+// ── SUBTARGET — a part of the chosen TARGET (the 4th URL param, appended after
+// mapping; the first three never move). Its CONTENT is defined by the target: the
+// 'pi' target's subtargets are the Pi's UART picos (each carrying the ttyAMA `dev`
+// the drive routes on); the 'roomba' target's subtargets are the roomba nodes.
+// Targets without a subtarget (none / emulator) show no picker. A subtarget only
+// exists inside its target -- one slot, target-specific options. ──
+interface SubOption { id: string; label: string; dev?: string }
+const subList = computed<SubOption[]>(() => {
+  if (effTarget.value === 'pi') {
+    const list = ((props.nodes?.['pi'] as any)?.picos as Array<{ chipid: string; alias?: string; dev?: string; conn?: string }> | undefined) || []
+    return list.filter(p => (p.conn || '').toLowerCase() === 'uart' && p.dev)
+               .map(p => ({ id: p.alias || p.chipid, label: p.alias || p.chipid, dev: p.dev as string }))
+  }
+  if (effTarget.value === 'roomba') {
+    return roombaNodes.value.map(n => ({ id: n.id, label: n.name }))
+  }
+  return []
 })
-const pico     = computed(() => (route.params.pico as string) || '')
-const showPico = computed(() => effTarget.value === 'pi' && picoList.value.length > 0)
-const effPico  = computed(() => {
-  if (!showPico.value) return ''
-  const ids = picoList.value.map(p => p.id)
-  return (pico.value && ids.includes(pico.value)) ? pico.value : (ids[0] || '')
+const sub     = computed(() => (route.params.sub as string) || '')
+const showSub = computed(() => subList.value.length > 0)
+const effSub  = computed(() => {
+  if (!showSub.value) return ''
+  const ids = subList.value.map(s => s.id)
+  return (sub.value && ids.includes(sub.value)) ? sub.value : (ids[0] || '')
 })
-const picoDev  = computed(() => picoList.value.find(p => p.id === effPico.value)?.dev || '')
+// The Pi drive routes on the selected pico's ttyAMA dev; other targets don't use it.
+const subDev  = computed(() => subList.value.find(s => s.id === effSub.value)?.dev || '')
+// The subtarget selector handed to the drive: the pico's UART dev under 'pi', the
+// roomba node id under 'roomba' (the backend interprets it per target). '' otherwise.
+const driveSub = computed(() =>
+  effTarget.value === 'pi' ? subDev.value : effTarget.value === 'roomba' ? effSub.value : '')
 
 // URL-canonicalization: write the resolved defaults INTO the url so the dropdowns and
 // the path never disagree. replace() = no history entry. With no source in the path
 // (bare /control), land on the first available source; only an empty roster leaves
 // the pick-a-source state. Then fill target + mapping defaults.
-watch([source, target, mapping, pico, mappings, picoList, sourceList, () => props.active], () => {
+watch([source, target, mapping, sub, mappings, subList, sourceList, () => props.active], () => {
   if (!props.active) return
   if (!source.value) {
     if (sourceList.value.length) router.replace(path(sourceList.value[0].id, '', '', ''))
@@ -122,10 +157,11 @@ watch([source, target, mapping, pico, mappings, picoList, sourceList, () => prop
   }
   const t = effTarget.value
   const m = effMapping.value
-  const p = effPico.value   // '' unless target==='pi' with picos available
-  // pico canon: under pi, the resolved pico must be in the URL; off pi, no pico segment may linger.
-  const picoMismatch = (t === 'pi') ? (!!p && p !== pico.value) : (pico.value !== '')
-  if (t !== target.value || (m && m !== mapping.value) || picoMismatch) router.replace(path(source.value, t, m, p))
+  const sb = effSub.value   // '' unless the target has subtargets available
+  // subtarget canon: under a target that has one, the resolved subtarget must be in
+  // the URL; under a target that doesn't, no subtarget segment may linger.
+  const subMismatch = TARGETS_WITH_SUBTARGET.has(t) ? (!!sb && sb !== sub.value) : (sub.value !== '')
+  if (t !== target.value || (m && m !== mapping.value) || subMismatch) router.replace(path(source.value, t, m, sb))
 }, { immediate: true })
 
 // Control OWNS the drive-error surface: the source children (Robutek / ControlKeyboard /
@@ -163,19 +199,19 @@ function openMappingDir() {
             <option v-for="t in targetOptions" :key="t.id" :value="t.id" :disabled="t.disabled">{{ t.label }}</option>
           </select>
         </label>
-        <template v-if="showPico">
+        <template v-if="showSub">
           <span class="rail-arrow" aria-hidden="true">›</span>
           <label class="rail-ctl"><span>Subtarget</span>
-            <select :value="effPico" @change="pick('pico', ($event.target as HTMLSelectElement).value)">
-              <option v-for="pc in picoList" :key="pc.id" :value="pc.id">{{ pc.label }}</option>
+            <select :value="effSub" @change="pick('sub', ($event.target as HTMLSelectElement).value)">
+              <option v-for="s in subList" :key="s.id" :value="s.id">{{ s.label }}</option>
             </select>
           </label>
         </template>
         <span class="rail-arrow" aria-hidden="true">›</span>
-        <label class="rail-ctl" :class="{ off: !source || !mappings.length }"><span>Mapping</span>
-          <select :value="effMapping" :disabled="!source || !mappings.length" @change="pick('mapping', ($event.target as HTMLSelectElement).value)">
-            <option v-if="!mappings.length" value="">—</option>
-            <option v-for="m in mappings" :key="m" :value="m">{{ m }}</option>
+        <label class="rail-ctl" :class="{ off: !source || !visibleMappings.length }"><span>Mapping</span>
+          <select :value="effMapping" :disabled="!source || !visibleMappings.length" @change="pick('mapping', ($event.target as HTMLSelectElement).value)">
+            <option v-if="!visibleMappings.length" value="">—</option>
+            <option v-for="m in visibleMappings" :key="m" :value="m">{{ m }}</option>
           </select>
         </label>
         <button v-if="isLab && source" class="rail-icon" title="Open this source's mapping folder in your disk" @click="openMappingDir">
@@ -193,28 +229,28 @@ function openMappingDir() {
     <div class="control-body">
       <div class="control-stage">
         <RobutekControl v-if="source === 'dreame'"
-          :source="source" :target="effTarget" :mapping="effMapping" :target-dev="effTarget === 'pi' ? picoDev : ''"
+          :source="source" :target="effTarget" :mapping="effMapping" :target-dev="driveSub"
           :active="active" :nodes="nodes" :name="name || 'dreame'"
           @drive-error="setError" />
         <QuadrantLayout v-else-if="source === 'keyboard'">
           <template #se>
             <ControlKeyboard
               :active="active" :map-source="source" :target="effTarget" :mapping="effMapping"
-              :target-dev="effTarget === 'pi' ? picoDev : ''"
+              :target-dev="driveSub"
               @drive-error="setError" />
           </template>
         </QuadrantLayout>
         <ClaudeControl v-else-if="source === 'claude'"
           :active="active" :nodes="nodes" :map-source="source" :target="effTarget" :mapping="effMapping"
-          :target-dev="effTarget === 'pi' ? picoDev : ''"
+          :target-dev="driveSub"
           @drive-error="setError" />
         <GoogleControl v-else-if="source === 'google'"
           :active="active" :map-source="source" :target="effTarget" :mapping="effMapping"
-          :target-dev="effTarget === 'pi' ? picoDev : ''"
+          :target-dev="driveSub"
           @drive-error="setError" />
         <KinectControl v-else-if="source === 'kinect'"
           :active="active" :nodes="nodes" :target="effTarget" :mapping="effMapping"
-          :target-dev="effTarget === 'pi' ? picoDev : ''"
+          :target-dev="driveSub"
           @drive-error="setError" />
       </div>
     </div>

@@ -82,21 +82,35 @@ if [[ "$HOST_IP" == "localhost" || "$HOST_IP" == "127.0.0.1" ]]; then
   exit 0
 fi
 
-# -- SSH primitive ------------------------------------------------
-if [[ -n "$CUSTOM_SSH_ALIAS" ]]; then
-  SSH="ssh ${CUSTOM_SSH_ALIAS}"
+# -- local vs remote payloads -------------------------------------
+# Some payloads flash the device LOCALLY (over USB via mpremote) -- no SSH, no remote
+# root. If EVERY payload is local, skip all the remote plumbing (SSH primitive + the
+# node-root wipe) so a creds-less device (a Pico) doesn't try to build a broken ssh cmd.
+LOCAL_PAYLOADS=" pico "
+NEEDS_REMOTE=0
+for p in $PAYLOADS; do
+  case "$LOCAL_PAYLOADS" in *" $p "*) : ;; *) NEEDS_REMOTE=1 ;; esac
+done
+
+if [[ $NEEDS_REMOTE -eq 1 ]]; then
+  # -- SSH primitive ----------------------------------------------
+  if [[ -n "$CUSTOM_SSH_ALIAS" ]]; then
+    SSH="ssh ${CUSTOM_SSH_ALIAS}"
+  else
+    SSH="ssh -i ${SSH_KEY_PATH} -o StrictHostKeyChecking=no ${SSH_USER}@${HOST_IP}"
+  fi
+
+  # Privilege prefix, evaluated ON THE REMOTE at run time: empty when the deploy user
+  # is already root, else `sudo -n`. Some nodes deploy as a passwordless-sudo user;
+  # others log in as root, where sudo may not even be installed -- calling `sudo` there
+  # fails and the service never starts. So escalate only when we actually need to.
+  # Single-quoted here so $(id -u)/$SUDO stay literal and resolve on the node, not locally.
+  PRIV='if [ "$(id -u)" -eq 0 ]; then SUDO=; else SUDO="sudo -n"; fi;'
+
+  echo "deploying ${NODE_NAME} (${CUSTOM_SSH_ALIAS:-${SSH_USER}@${HOST_IP}}): payloads [${PAYLOADS}] -> ${REMOTE_ROOT}"
 else
-  SSH="ssh -i ${SSH_KEY_PATH} -o StrictHostKeyChecking=no ${SSH_USER}@${HOST_IP}"
+  echo "deploying ${NODE_NAME}: payloads [${PAYLOADS}] (local flash -- no remote)"
 fi
-
-# Privilege prefix, evaluated ON THE REMOTE at run time: empty when the deploy user
-# is already root, else `sudo -n`. Some nodes deploy as a passwordless-sudo user;
-# others log in as root, where sudo may not even be installed -- calling `sudo` there
-# fails and the service never starts. So escalate only when we actually need to.
-# Single-quoted here so $(id -u)/$SUDO stay literal and resolve on the node, not locally.
-PRIV='if [ "$(id -u)" -eq 0 ]; then SUDO=; else SUDO="sudo -n"; fi;'
-
-echo "deploying ${NODE_NAME} (${CUSTOM_SSH_ALIAS:-${SSH_USER}@${HOST_IP}}): payloads [${PAYLOADS}] -> ${REMOTE_ROOT}"
 
 # =================================================================
 #  Payload shippers. Each ships its files into ${REMOTE_ROOT} and writes the node
@@ -284,9 +298,17 @@ payload_pico() {
     exit 1
   fi
 
-  mpremote cp "$TMPFILE" ":main.py" && mpremote reset
+  # Flash, then reset. Check the copy explicitly: in `cp && reset` under `set -e`, a
+  # failing `cp` is EXEMPT (it's not the final command of the && list), so the script
+  # would sail past to "[done]" even when no board was found. Gate on cp's real result.
+  if ! mpremote cp "$TMPFILE" ":main.py"; then
+    rm -f "$TMPFILE"
+    echo "[ERROR] flash failed -- no Pico found on USB (attached? not held open by Thonny/another serial app?)"
+    exit 1
+  fi
+  mpremote reset || echo "[warn] reset didn't confirm -- power-cycle the board if it didn't restart"
   echo "[done] Pico flashed and reset"
-  rm "$TMPFILE"
+  rm -f "$TMPFILE"
 }
 
 # =================================================================
@@ -296,7 +318,9 @@ payload_pico() {
 #  root-owned /opt. One-time per non-root node:
 #    sudo mkdir -p /opt/cpc && sudo chown <deploy-user> /opt/cpc
 # =================================================================
-$SSH "find ${REMOTE_ROOT} -mindepth 1 -delete 2>/dev/null; mkdir -p ${REMOTE_ROOT}/logs"
+if [[ $NEEDS_REMOTE -eq 1 ]]; then
+  $SSH "find ${REMOTE_ROOT} -mindepth 1 -delete 2>/dev/null; mkdir -p ${REMOTE_ROOT}/logs"
+fi
 
 for payload in $PAYLOADS; do
   if ! declare -F "payload_${payload}" >/dev/null; then
@@ -309,6 +333,8 @@ done
 echo "##STEP:done"
 if echo " ${PAYLOADS} " | grep -q " server "; then
   echo "deploy complete -- http://${HOST_IP}:5173  (API :7700)"
-else
+elif [[ $NEEDS_REMOTE -eq 1 ]]; then
   echo "deploy complete -- ${NODE_NAME} [${PAYLOADS}] at ${REMOTE_ROOT}"
+else
+  echo "deploy complete -- ${NODE_NAME} [${PAYLOADS}]"
 fi

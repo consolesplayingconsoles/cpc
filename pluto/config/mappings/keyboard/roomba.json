@@ -1,0 +1,34 @@
+{
+  "_comment": "Keyboard source -> Roomba target, laid out as a DRIVING pad (not a flat command palette) so a real gamepad -- an 8BitDo over BT to the Mac, added later as its own source -- maps straight onto it. 'layout' mirrors a controller: d-pad left cluster = STEERING (turn left/right; analog wheel added later), face diamond right = throttle + actions. 'actions' is the roomba-specific binding: each btn -> the verb the node's /command endpoint runs (see nodes/local/roomba-rally/openapi.yaml). Movement verbs (drive-forward/back, turn-left/right) + horn need the roomba drive firmware/API, which does not exist yet -- only 'lights' and 'stop' are live today. 'keys' bind the on-screen/physical keyboard for THIS keyboard source; 'colors' tint the buttons.",
+  "controller": "Roomba (rally car)",
+  "kind": "drive",
+  "controls": { "Enter": "START", "action": "A", "cancel": "B" },
+  "actions": {
+    "A": "drive-forward",
+    "B": "drive-back",
+    "D_LEFT": "turn-left",
+    "D_RIGHT": "turn-right",
+    "Y": "horn",
+    "X": "lights",
+    "START": "session"
+  },
+  "keys": {
+    "A": "k", "B": "l", "X": "j", "Y": "i",
+    "D_LEFT": "a", "D_RIGHT": "d", "START": "enter"
+  },
+  "layout": [
+    { "key": "a", "btn": "D_LEFT",  "label": "Turn L", "col": 1, "row": 3 },
+    { "key": "d", "btn": "D_RIGHT", "label": "Turn R", "col": 3, "row": 3 },
+    { "key": "Enter", "btn": "START", "label": "Start / Game Over", "col": 5, "row": 3 },
+    { "key": "i", "btn": "Y", "label": "Horn",    "col": 8, "row": 2 },
+    { "key": "j", "btn": "X", "label": "Lights",  "col": 7, "row": 3 },
+    { "key": "l", "btn": "B", "label": "Back",    "col": 9, "row": 3 },
+    { "key": "k", "btn": "A", "label": "Forward", "col": 8, "row": 4 }
+  ],
+  "colors": {
+    "A": "#36a657", "B": "#d63b34",
+    "X": "#2d8ec9", "Y": "#edba1f",
+    "D_LEFT": "#4b5058", "D_RIGHT": "#4b5058",
+    "START": "#8a9099"
+  }
+}

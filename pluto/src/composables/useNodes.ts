@@ -33,6 +33,7 @@ export interface NodeData {
   os?:    string | null   // declared runtime; 'linux' shows a Tux on the bubble
   cloud?: boolean         // a cloud-cluster service buddy, not a pinged LAN node
   picos?: PicoInfo[]      // declared Pico fleet (nodes with PICO_<chipid>=... lines)
+  controlTarget?: string | null  // CONTROL_TARGET group — this node is a subtarget of that Control target
 }
 
 export type NodeMap = Record<string, NodeData>
