@@ -16,6 +16,12 @@
       </CapScreen>
     </template>
 
+    <!-- NE: live pose log (the text context that rides along with each /frame). -->
+    <template #ne>
+      <ControlFeed title="Pose Log" :lines="logLines" :show-input="false"
+        :empty-text="running ? (paused ? 'Paused — press Play to resume reading.' : 'Reading your pose…') : 'Press Play to start reading your pose'" />
+    </template>
+
     <template #se>
       <ControlKeyboard
         :active="active" :map-source="'kinect'" :target="props.target || 'none'"
@@ -29,6 +35,7 @@
 import { ref, onUnmounted, withDefaults } from 'vue'
 import CapScreen from '../CapScreen.vue'
 import ControlKeyboard from './ControlKeyboard.vue'
+import ControlFeed, { type FeedLine } from './ControlFeed.vue'
 import QuadrantLayout from '../QuadrantLayout.vue'
 
 interface Props {
@@ -61,13 +68,23 @@ let lastHandState = { left: false, right: false }
 // stops sending hand events to the pico (like HDMI recording continuing on WAIT), STOP
 // ends the capture on the bridge. Idle by default -> "no signal", never spamming the pico.
 const running = ref(false)   // capture started (GO), not yet ended (STOP)
-const paused  = ref(false)   // WAIT: streaming but not driving
+const paused  = ref(false)   // WAIT: warm but the pose engine idles (cheap disable)
 const sending = ref(false)   // a start/stop request is in flight (disables GO/WAIT)
+
+// NE pose log: the text context the bridge attaches to each /frame (PERSON/DIR/…),
+// appended as it changes. Capped so the deep-watched feed stays small.
+const logLines = ref<FeedLine[]>([])
+let lastContext = ''
+function pushContext(ctx: string) {
+  if (!ctx || ctx === lastContext) return
+  lastContext = ctx
+  logLines.value = [...logLines.value.slice(-149), { state: ctx }]
+}
 
 // The Kinect bridge lives on the pi node itself (port 7730), same host the frames come
 // from -- so the capture lifecycle POSTs go straight there, not through the Pluto API.
 function piIpAddr() { return (props.nodes?.['pi'] as any)?.ip || '' }
-async function postCapture(action: 'start' | 'stop') {
+async function postCapture(action: 'start' | 'pause' | 'stop') {
   const ip = piIpAddr()
   if (!ip) { emit('drive-error', 'Kinect: no pi node address'); return }
   sending.value = true
@@ -158,6 +175,7 @@ async function pollOnce() {
     }
 
     const statusData = await statusResp.json()
+    if (statusData.context) pushContext(statusData.context)   // pose text -> NE log
     frameReceived.value = statusData.depth || statusData.rgb
     if (frameReceived.value) {
       hasEverReceivedFrame.value = true
@@ -203,7 +221,10 @@ async function onGo() {                     // start the capture on the bridge, 
   paused.value = false
   startPoll()
 }
-function onWait() { paused.value = true }   // client-side pause: keep preview, stop driving
+async function onWait() {                    // cheap disable: bridge pauses, pose engine idles
+  await postCapture('pause')
+  paused.value = true
+}
 async function onStop() {                   // end the capture on the bridge, back to idle
   await postCapture('stop')
   running.value = false
@@ -212,6 +233,7 @@ async function onStop() {                   // end the capture on the bridge, ba
   frameReceived.value = false
   hasEverReceivedFrame.value = false        // clear the last frame -> "no signal"
   lastHandState = { left: false, right: false }
+  // Keep the pose log on Stop -- that's the moment to read back the session.
 }
 
 onUnmounted(() => {

@@ -148,6 +148,8 @@ payload_server() {
   $SSH "cat > ${REMOTE_ROOT}/specs/pluto.yaml"     < pluto/api/openapi.yaml
   $SSH "cat > ${REMOTE_ROOT}/specs/translate.yaml" < pluto-translate/openapi.yaml
   $SSH "cat > ${REMOTE_ROOT}/specs/pico-hub.yaml"    < pluto-pico-hub/openapi.yaml
+  $SSH "cat > ${REMOTE_ROOT}/specs/roomba-rally.yaml"    < nodes/local/roomba-rally/openapi.yaml
+  $SSH "cat > ${REMOTE_ROOT}/specs/crazy-roomba.yaml"    < nodes/local/crazy-roomba/openapi.yaml
   echo "sync ok"
 
   # Restart. Re-sync the unit so a first install (or the /opt/pluto -> /opt/cpc path
@@ -257,6 +259,34 @@ payload_translate() {
     $SSH "F=\$(fuser 7711/tcp 2>/dev/null); [ -n \"\$F\" ] && kill \$F 2>/dev/null; sleep 1; setsid sh ${TR_DIR}/run.sh serve > ${TR_DIR}/service.log 2>&1 < /dev/null &"
     echo "started via run.sh (no batocera-services)"
   fi
+}
+
+payload_pico() {
+  # Roomba Pico flash: substitute secrets from .env into template, then flash via mpremote.
+  echo "##STEP:pico-flash"
+  NODE_SCRIPT="nodes/local/${NODE_DIR}/scripts/main.py"
+  [[ -f "$NODE_SCRIPT" ]] || { echo "[ERROR] no script at $NODE_SCRIPT"; exit 1; }
+
+  # Extract config from .env (roomba-rally-specific keys; generalize if adding other Pico nodes)
+  SSID="$(_env_get ROOMBA_SSID)"
+  PASS="$(_env_get ROOMBA_PASSWORD)"
+  PORT="$(_env_get HOST_PORT)"
+  [[ -n "$SSID" && -n "$PASS" && -n "$PORT" ]] || { echo "[ERROR] ROOMBA_SSID, ROOMBA_PASSWORD, or HOST_PORT missing"; exit 1; }
+
+  TMPFILE=$(mktemp)
+  sed "s|@@ROOMBA_SSID@@|${SSID}|g; s|@@ROOMBA_PASSWORD@@|${PASS}|g; s|@@HOST_PORT@@|${PORT}|g" \
+      "$NODE_SCRIPT" > "$TMPFILE"
+
+  # Flash via mpremote (Pico must be plugged in + in bootloader or running MicroPython)
+  if ! command -v mpremote &>/dev/null; then
+    echo "[ERROR] mpremote not found. Install: pip install mpremote"
+    rm "$TMPFILE"
+    exit 1
+  fi
+
+  mpremote cp "$TMPFILE" ":main.py" && mpremote reset
+  echo "[done] Pico flashed and reset"
+  rm "$TMPFILE"
 }
 
 # =================================================================

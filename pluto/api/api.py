@@ -2893,8 +2893,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "os":         None,
                 }
                 continue
-            # A node configured without a HOST_IP (e.g. a placeholder loaded from
-            # .env.sample) renders 'unconfigured' so "show unconfigured" reveals it.
+            # 'configured' means a real .env exists (not just a .env.sample
+            # placeholder) AND it names a HOST_IP. _has_env is the authoritative
+            # signal from discovery -- keying off HOST_IP alone would let a sample
+            # that happens to carry an example IP masquerade as a real (down) node.
+            has_env = bool(console_cfg.get("_has_env"))
             ip    = console_cfg.get("HOST_IP", "").strip()
             # The host node is the live command/comms instance -- label it "Pluto C2"
             # everywhere (bubble, drawer, deploy) so it reads apart from the Lab.
@@ -2910,8 +2913,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # false on the deployed headless box. Deterministic (no build flag).
             ws         = os.path.expanduser(console_cfg.get("WORKSPACE_PATH", "").strip())
             has_code   = bool(ws) and os.path.isdir(ws)
-            up, det_os = pinged.get(ip, (False, None)) if ip else (False, None)
-            status = ("up" if up else "down") if ip else "unconfigured"
+            configured = has_env and bool(ip)
+            up, det_os = pinged.get(ip, (False, None)) if configured else (False, None)
+            status = ("up" if up else "down") if configured else "unconfigured"
             nodes[node_id] = {
                 "id":     node_id,
                 "name":   name,

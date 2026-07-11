@@ -108,5 +108,15 @@
     "from": "cloud",
     "to": "google",
     "label": "Vision / Translate"
+  },
+  {
+    "from": "roomba-rally",
+    "to": "gateway",
+    "label": "WiFi"
+  },
+  {
+    "from": "crazy-roomba",
+    "to": "gateway",
+    "label": "WiFi"
   }
 ]

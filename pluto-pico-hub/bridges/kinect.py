@@ -30,16 +30,34 @@ class KinectFrame:
         # Capture lifecycle, mirroring the HDMI capturer: nothing streams until Pluto
         # starts it (GO), so the sensor sits idle -- "no signal" -- by default and never
         # spams the pico unrequested. Stop (end) clears the last frame back to no-signal.
+        #   capturing = frames flow (Play);  paused = warm but the pose engine idles (WAIT).
+        # The heavy pose inference lives in a sibling engine that reads these flags off
+        # /frame and only runs while capturing and not paused -- so Pause/Off hand the Pi's
+        # CPU back to its other jobs. `context` is the engine's latest text (PERSON/DIR...).
         self.capturing = False
+        self.paused = False
+        self.context = ""
+        self.context_ts = 0
 
     def set_capture(self, on):
         with self.lock:
             self.capturing = bool(on)
+            self.paused = False          # start/stop always clears pause
             if not self.capturing:
                 self.hand_left = False
                 self.hand_right = False
                 self.depth = None
                 self.rgb = None
+                self.context = ""
+
+    def set_paused(self, on):
+        with self.lock:
+            self.paused = bool(on)
+
+    def set_context(self, text):
+        with self.lock:
+            self.context = str(text or "")
+            self.context_ts = time.time()
 
     def update(self, depth=None, rgb=None, skeleton=None):
         with self.lock:
@@ -90,6 +108,8 @@ class KinectFrame:
             return {
                 'timestamp': self.timestamp,
                 'capturing': self.capturing,
+                'paused': self.paused,
+                'context': self.context,
                 'depth': self.depth is not None,
                 'rgb': self.rgb is not None,
                 'skeleton': bool(self.skeleton),
@@ -119,19 +139,39 @@ class KinectHandler(BaseHTTPRequestHandler):
                 action = (json.loads(raw.decode() or '{}').get('action') or '').lower()
             except Exception:
                 action = ''
-            # start/go turns capture on; stop/end turns it off. Pause (WAIT) is a client
-            # concern (keep streaming, just stop driving), so the bridge ignores it here.
+            # start/go = capture on (clears pause -> resume-or-boot); pause = warm idle
+            # (engine stops inferring); stop/end = off. Play's double duty (resume vs boot)
+            # falls out naturally: start just clears pause and turns capturing on.
             if self.frame is not None:
                 if action in ('start', 'go', 'resume'):
                     self.frame.set_capture(True)
+                elif action in ('pause', 'wait'):
+                    self.frame.set_paused(True)
                 elif action in ('stop', 'end'):
                     self.frame.set_capture(False)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            capturing = self.frame.capturing if self.frame else False
-            self.wfile.write(json.dumps({'ok': True, 'capturing': capturing}).encode())
+            f = self.frame
+            self.wfile.write(json.dumps({'ok': True,
+                'capturing': f.capturing if f else False,
+                'paused': f.paused if f else False}).encode())
+        elif self.path == '/context':
+            # The sibling pose engine pushes its latest text line here; /frame returns it.
+            length = int(self.headers.get('Content-Length', 0) or 0)
+            raw = self.rfile.read(length) if length else b''
+            try:
+                text = json.loads(raw.decode() or '{}').get('text') or ''
+            except Exception:
+                text = ''
+            if self.frame is not None:
+                self.frame.set_context(text)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({'ok': True}).encode())
         else:
             self.send_response(404)
             self.send_header('Access-Control-Allow-Origin', '*')

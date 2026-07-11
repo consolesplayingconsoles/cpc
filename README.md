@@ -108,6 +108,8 @@ This is built on a lot of other people's work. A few that earned a specific ment
 - **[FUSE-VMU](https://github.com/RossMeikleham/FUSE-VMU)**: FUSE filesystem implementation for the Dreamcast VMU — the reference for the VMU block format and filesystem layout.
 - **Dreamcast ROM tooling**: Extraction and patching workflows built on [AFSPacker](https://github.com/MaikelChan/AFSPacker), [QuickBMS](https://aluigi.altervista.org/quickbms.html), [gditools](https://github.com/einsteinx2/gditools), [UniversalDreamcastPatcher](https://github.com/DerekPascarella/UniversalDreamcastPatcher), and [sega2asm](https://github.com/hansbonini/sega2asm).
 - **[libfreenect](https://github.com/OpenKinect/libfreenect)**: open-source driver for Xbox Kinect v1 (depth, RGB, audio, skeletal tracking).
+- **[MoveNet](https://github.com/tensorflow/tfjs-models/blob/master/pose-detection/src/movenet/README.md)** (Google): the SinglePose Lightning body-pose model behind the Kinect gesture controller — 17 keypoints, real-time on the Pi 5's CPU. Run from the ONNX export by **[Xenova](https://huggingface.co/Xenova/movenet-singlepose-lightning)**.
+- **[ONNX Runtime](https://github.com/microsoft/onnxruntime)** (Microsoft): runs MoveNet on the Pi's aarch64 CPU — the piece that made on-device pose work where MediaPipe ships no ARM wheels.
 
 Built on these, not instead of them.
 
