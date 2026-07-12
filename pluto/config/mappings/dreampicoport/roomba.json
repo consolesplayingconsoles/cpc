@@ -4,21 +4,30 @@
   "kind": "drive",
   "controls": { "Enter": "START", "action": "A", "cancel": "B" },
   "actions": {
-    "A": "drive-forward",
-    "B": "drive-back",
-    "D_LEFT": "turn-left",
-    "D_RIGHT": "turn-right",
+    "A": "robot",
+    "B": "warble",
     "Y": "horn",
     "X": "lights",
+    "D_UP": "drive-forward",
+    "D_DOWN": "drive-back",
+    "D_LEFT": "turn-left",
+    "D_RIGHT": "turn-right",
     "START": "session",
     "AXIS5+": "drive-forward",
     "AXIS2+": "drive-back",
     "AXIS0-": "turn-left",
     "AXIS0+": "turn-right",
     "BTN0": "horn",
-    "BTN1": "melody",
+    "BTN1": "robot",
+    "BTN2": "warble",
     "BTN3": "lights",
     "BTN11": "session"
+  },
+  "combinations": {
+    "D_UP+D_LEFT": "forward-left",
+    "D_UP+D_RIGHT": "forward-right",
+    "D_DOWN+D_LEFT": "back-left",
+    "D_DOWN+D_RIGHT": "back-right"
   },
   "keys": {
     "A": "k", "B": "l", "X": "j", "Y": "i",
@@ -36,6 +45,7 @@
   "colors": {
     "A": "#36a657", "B": "#d63b34",
     "X": "#2d8ec9", "Y": "#edba1f",
+    "D_UP": "#4b5058", "D_DOWN": "#4b5058",
     "D_LEFT": "#4b5058", "D_RIGHT": "#4b5058",
     "START": "#8a9099"
   }
