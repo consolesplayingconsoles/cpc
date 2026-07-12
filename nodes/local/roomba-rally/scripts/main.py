@@ -15,7 +15,7 @@ ROUTES = {
 # Firmware version. Reported in /health so you can confirm a Pluto DEPLOY actually
 # flashed the running board: bump this, deploy, then re-check /health -- if the number
 # changed, the new bytes are live. (The Thonny-saved copy predates this field.)
-FIRMWARE_VERSION = "19"
+FIRMWARE_VERSION = "23"
 
 # --- CONFIGURATION (injected from .env at flash time) ---
 # Deployment process: substitute @@ROOMBA_SSID@@, @@ROOMBA_PASSWORD@@, @@HOST_PORT@@
@@ -34,17 +34,57 @@ DEADMAN_MS = 2500
 
 # --- HARDWARE ---
 dashboard_led = Pin(15, Pin.OUT)
-# BRC held idle-high: we talk at the OI FACTORY DEFAULT 115200 baud (the proven-working
-# path). Pulsing BRC low would drop the Roomba to 19200 -- a different, flakier mode we
-# deliberately avoid. So the pin is parked high and never pulsed.
+# BRC pin for baud rate control (pulse = 19200, idle-high = 115200 or unknown)
 brc_pin = Pin(2, Pin.OUT)
-brc_pin.value(1)
 
-# One OI UART, opened once and reused (like the proven script). 115200 = OI default;
-# no wake pulse needed once the battery has charge -- a flat battery is what looked like
-# "asleep/ignoring commands". tx=GP0, rx=GP1.
-ROOMBA_BAUD = 115200
-roomba = UART(0, baudrate=ROOMBA_BAUD, tx=Pin(0), rx=Pin(1), bits=8, parity=None, stop=1)
+def brc_pulse():
+    """Pulse BRC to drop Roomba to 19200 baud. Run at boot + on recovery."""
+    brc_pin.value(1)
+    time.sleep(0.5)
+    for _ in range(3):
+        brc_pin.value(0); time.sleep(0.2)
+        brc_pin.value(1); time.sleep(0.2)
+    time.sleep(2)  # stabilization window
+
+brc_pulse()  # Initial pulse on boot
+
+# Baud rate auto-detection: try 19200 first (after BRC pulse), fallback to 115200
+BAUD_RATES = [19200, 115200]
+current_baud_idx = 0  # start at 19200
+roomba = None
+
+def open_roomba_uart():
+    """Open UART at current baud rate, auto-detect if needed."""
+    global current_baud_idx, roomba
+    baud = BAUD_RATES[current_baud_idx]
+    try:
+        if roomba:
+            try: roomba.deinit()
+            except: pass
+        roomba = UART(0, baudrate=baud, tx=Pin(0), rx=Pin(1), bits=8, parity=None, stop=1)
+        if roomba.any(): roomba.read()  # flush
+        return True
+    except Exception as e:
+        print(f"[UART] Failed to open at {baud}: {e}")
+        return False
+
+open_roomba_uart()  # open at 19200
+
+def oi_start():
+    """OPEN the OI session (Start=128) and enter SAFE mode (131). SAFE keeps the built-in
+    safeties ON: a cliff / wheel-drop / charger event stops the motors and reverts the OI to
+    PASSIVE -- that's our collision behavior. The catch: after such a revert, commands are
+    ignored until SAFE is re-asserted, so every actuator payload below is PREFIXED with 0x83
+    (re-enter Safe) to self-heal. We send Start (0x80) only here -- resending it mid-session
+    would needlessly drop to Passive. The 100ms pauses let the Roomba allocate the session +
+    trip the mode relay.
+    NOTE: if serial + mode readback work but nothing actuates, the OI is WEDGED -- pull the
+    Roomba battery to reset it; no serial command can clear that state."""
+    if roomba:
+        roomba.write(b'\x80'); time.sleep(0.1)   # Start -> Passive (open session)
+        roomba.write(b'\x83'); time.sleep(0.1)   # Safe
+
+oi_start()
 
 # Battery % divides charge by THIS fixed capacity, not the Roomba's live (shrinking)
 # capacity estimate. Set to the pack's healthy full-charge capacity in mAh.
@@ -52,53 +92,80 @@ DESIGN_CAPACITY_MAH = 2696
 
 # --- STATE ---
 headlights_active = False
-session_active = True     # in an OI session (Full mode) vs. relinquished after game-over
+session_active = True     # in an OI session (Safe mode) vs. relinquished after game-over
 last_command = None
 driving = False           # currently holding a drive velocity (movement in progress)
 last_drive_ms = 0         # ticks_ms of the last drive/keepalive -- watched by the deadman
 
 # --- ROOMBA PAYLOADS ---
-# Every payload is prefixed 0x80 0x83 (Start + SAFE mode). Safe keeps the Roomba's built-in
-# cliff + wheel-drop safeties ON (Full mode disables them). Everything we do -- LED (139),
-# songs (140/141), Drive (137) -- is valid in Safe, so there's no reason to be in Full. Re-
-# prefixing every command re-enters Safe, so if a cliff/wheel-drop event bumps it to Passive
-# it self-recovers on the next command.
-LIGHTS_ON = b'\x80\x83\x8b\x0d\xff\xff'
-LIGHTS_OFF = b'\x80\x83\x8b\x00\x00\x00'
-SEGA_CHIME = b'\x80\x83\x8c\x00\x04\x4c\x08\x4f\x08\x51\x08\x54\x18\x8d\x00'
+# Each is prefixed 0x83 (Safe): re-enters SAFE mode first, so a command self-heals if a
+# collision (cliff/wheel-drop) had reverted the OI to PASSIVE. The session itself is opened
+# once in oi_start(); we never resend 0x80 here (that would reset to Passive needlessly).
+# 139(0x8b)=LED, 140(0x8c)=song def, 141(0x8d)=song play, 137(0x89)=Drive.
+LIGHTS_ON = b'\x83\x8b\x0d\xff\xff'
+LIGHTS_OFF = b'\x83\x8b\x00\x00\x00'
 
-HORN = b'\x8c\x00\x01\x43\x30\x8d\x00'
+# A button: a "robot" chirp -- alternating hi/lo notes, durations long enough to be audible.
+ROBOT_SOUND = b'\x83\x8c\x00\x04\x54\x0a\x3c\x0a\x54\x0a\x3c\x0a\x8d\x00'
+# Y button: one sustained low honk (note 58, ~1s) -- unmistakable.
+HORN = b'\x83\x8c\x00\x01\x3a\x40\x8d\x00'
 
-# Game-over: TRIUMPHANT rising G-major arpeggio (G5 B5 D6) landing on a held high G6 --
-# the "...YEAAAH!". NO trailing OI-Stop here: we play it, wait it out, THEN relinquish,
-# so the tune isn't cut off (the old payload stopped the OI in the same write).
-GAME_OVER_TUNE = b'\x80\x83\x8c\x00\x04\x4f\x08\x53\x08\x56\x0c\x5b\x28\x8d\x00'
-GAME_OVER_MS = 1100      # ~ (8+8+12+40)/64 s of song, + slack, before we drop the OI
-# Re-enter chime: two quick rising notes confirming we're back in Full mode.
-START_TUNE = b'\x80\x83\x8c\x00\x02\x4f\x08\x56\x10\x8d\x00'
-OI_STOP = b'\xad'         # 173: stop the OI (relinquish control until the next command)
+# Game-over: rising G-major arpeggio landing on a held high G6 -- the "...YEAAAH!".
+GAME_OVER_TUNE = b'\x83\x8c\x00\x04\x4f\x08\x53\x08\x56\x0c\x5b\x28\x8d\x00'
+GAME_OVER_MS = 1100
+# Re-enter chime: two quick rising notes.
+START_TUNE = b'\x83\x8c\x00\x02\x4f\x08\x56\x10\x8d\x00'
 
 # --- MOVEMENT (OI Drive, opcode 137 = 0x89: [vel_hi vel_lo][radius_hi radius_lo]) ---
-# HOLD-TO-MOVE model: a drive verb just SETS a velocity (no blocking sleep -- that sleep
-# was half the saturation) and the Roomba holds it until 'drive-stop' (key release) or the
-# DEADMAN fires. Modest velocity + the deadman keep the ~1m tether safe. Radius 0x8000 =
-# straight; 0x0001 = turn-in-place CCW (left); 0xFFFF = turn-in-place CW (right).
-DRIVE_FWD  = b'\x80\x83\x89\x00\x96\x80\x00'   # +150 mm/s, straight
-DRIVE_BACK = b'\x80\x83\x89\xff\x6a\x80\x00'   # -150 mm/s, straight
-TURN_LEFT  = b'\x80\x83\x89\x00\x96\x00\x01'   # +150 mm/s, turn in place CCW
-TURN_RIGHT = b'\x80\x83\x89\x00\x96\xff\xff'   # +150 mm/s, turn in place CW
-DRIVE_STOP = b'\x89\x00\x00\x00\x00'           # velocity 0 (already in Safe)
+# HOLD-TO-MOVE: a drive verb SETS a velocity (non-blocking) and the Roomba holds it until
+# 'drive-stop' or the DEADMAN fires. Radius 0x8000=straight, 0x0001=in-place-CCW(left),
+# 0xFFFF=in-place-CW(right), +/-500 = a moderate ARC (turn WHILE moving) for the diagonals.
+# 0x83 prefix = re-enter Safe (self-heal after a cliff/wheel-drop revert) before driving.
+DRIVE_FWD  = b'\x83\x89\x00\x96\x80\x00'   # +150 mm/s, straight
+DRIVE_BACK = b'\x83\x89\xff\x6a\x80\x00'   # -150 mm/s, straight
+TURN_LEFT  = b'\x83\x89\x00\x96\x00\x01'   # +150 mm/s, turn in place CCW
+TURN_RIGHT = b'\x83\x89\x00\x96\xff\xff'   # +150 mm/s, turn in place CW
+FWD_LEFT   = b'\x83\x89\x00\x96\xfe\x0c'   # +150 mm/s, radius -500 -> forward-left arc
+FWD_RIGHT  = b'\x83\x89\x00\x96\x01\xf4'   # +150 mm/s, radius +500 -> forward-right arc
+BACK_LEFT  = b'\x83\x89\xff\x6a\xfe\x0c'   # -150 mm/s, radius -500 -> back-left arc
+BACK_RIGHT = b'\x83\x89\xff\x6a\x01\xf4'   # -150 mm/s, radius +500 -> back-right arc
+DRIVE_STOP = b'\x83\x89\x00\x00\x00\x00'   # velocity 0 (the "speed stop" / handbrake)
 DRIVE_ACTIONS = {
     "drive-forward": DRIVE_FWD, "drive-back": DRIVE_BACK,
     "turn-left": TURN_LEFT, "turn-right": TURN_RIGHT,
+    "forward-left": FWD_LEFT, "forward-right": FWD_RIGHT,
+    "back-left": BACK_LEFT, "back-right": BACK_RIGHT,
 }
 
-def _open():
-    """The shared OI UART, with any stale RX line-noise flushed first. No BRC wake --
-    at 115200 with a charged battery the Roomba responds directly."""
-    if roomba.any():
-        roomba.read()
+def _open(retry_alt_baud=True):
+    """The shared OI UART, with recovery. If current baud fails, try the other."""
+    global current_baud_idx, roomba
+    if not roomba:
+        open_roomba_uart()
+    if roomba and roomba.any():
+        roomba.read()  # flush stale data
     return roomba
+
+def try_with_recovery(write_data, label=""):
+    """Send data, auto-recover if baud rate changed."""
+    global current_baud_idx, roomba
+    try:
+        _open().write(write_data)
+        return True
+    except Exception as e:
+        print(f"[{label}] Write failed at {BAUD_RATES[current_baud_idx]}: {e}, trying other baud...")
+        # Try the other baud rate
+        current_baud_idx = 1 - current_baud_idx
+        if open_roomba_uart():
+            try:
+                roomba.write(write_data)
+                print(f"[{label}] Recovered at {BAUD_RATES[current_baud_idx]}")
+                return True
+            except Exception as e2:
+                print(f"[{label}] Failed at both bauds: {e2}")
+                current_baud_idx = 1 - current_baud_idx  # revert
+                return False
+        return False
 
 def get_telemetry():
     """Full battery telemetry via OI Sensor GROUP Packet 3 (opcode 142) -- it bundles
@@ -163,51 +230,40 @@ def get_sensors():
         return {}
 
 def send_command(action):
-    """Execute a Roomba command by action name."""
+    """Execute a Roomba command by action name. Auto-recovers on baud rate changes."""
     global headlights_active, session_active, last_command, driving, last_drive_ms
 
     try:
         if action == "lights":
-            # Toggle: the roomba owns its own lights state, so one event flips it.
             headlights_active = not headlights_active
             dashboard_led.value(1 if headlights_active else 0)
-            _open().write(LIGHTS_ON if headlights_active else LIGHTS_OFF)
-        elif action == "melody":
-            _open().write(SEGA_CHIME)
+            try_with_recovery(LIGHTS_ON if headlights_active else LIGHTS_OFF, "lights")
+        elif action == "robot":
+            try_with_recovery(ROBOT_SOUND, "robot")
         elif action == "horn":
-            _open().write(HORN)
+            try_with_recovery(HORN, "horn")
         elif action == "session":
-            # START button, toggled: game-over <-> restart, each with its own tune. We do
-            # NOT relinquish the OI on game-over: the trailing OI-Stop (173) was racing and
-            # KILLING the tune (why "off" was silent while "on" beeped). Staying in Full
-            # means the tune plays AND control is never lost -- both wins.
-            uart = _open()
             if session_active:
-                uart.write(GAME_OVER_TUNE)
+                try_with_recovery(GAME_OVER_TUNE, "session-over")
                 headlights_active = False
                 dashboard_led.value(0)
                 session_active = False
             else:
-                uart.write(START_TUNE)
+                try_with_recovery(START_TUNE, "session-start")
                 session_active = True
         elif action in DRIVE_ACTIONS:
-            # Movement is gated on the session: a PAUSED (game-over) roomba ignores drive
-            # verbs -- ack but don't move. Otherwise SET the velocity (non-blocking) and
-            # let it hold until 'drive-stop' or the deadman. Feeds the deadman clock.
             if session_active:
-                _open().write(DRIVE_ACTIONS[action])
+                try_with_recovery(DRIVE_ACTIONS[action], action)
                 driving = True
                 last_drive_ms = time.ticks_ms()
         elif action == "drive-stop":
-            _open().write(DRIVE_STOP)
+            try_with_recovery(DRIVE_STOP, "drive-stop")
             driving = False
         elif action == "ping":
-            # keepalive from the command stream: proves Pluto is alive so the deadman
-            # doesn't cut a legitimate hold. Only meaningful while driving.
             if driving:
                 last_drive_ms = time.ticks_ms()
         else:
-            return False    # genuinely unknown action
+            return False
         last_command = action
         print(f"[Roomba] {action}")
         return True
@@ -428,5 +484,11 @@ while True:
         if driving and time.ticks_diff(time.ticks_ms(), last_drive_ms) > DEADMAN_MS:
             _stop_moving()
             print("[Deadman] auto-stop")
+    except KeyboardInterrupt:
+        # In MicroPython KeyboardInterrupt subclasses Exception, so a bare `except Exception`
+        # would SWALLOW the Ctrl-C mpremote/Thonny send to break in -- making the board look
+        # "held" and impossible to reflash. Re-raise so the REPL can always interrupt us.
+        _stop_moving()
+        raise
     except Exception as e:
         print("[Loop Error]", e)

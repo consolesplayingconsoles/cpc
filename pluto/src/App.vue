@@ -561,4 +561,19 @@ const displayNodes = computed(() => {
   opacity: 0.7;
   flex-shrink: 0;
 }
+
+/* ── Phone: the desktop chrome (title + wide controls + 4-tab switcher) overflows a
+   ~375px viewport and forces a horizontal page scroll (the "wild margin"). Shrink the
+   header, drop the desktop-only "Show unconfigured" admin toggle, and tighten the tab
+   switcher so it fits. overflow-x:hidden is the safety net. ── */
+@media (max-width: 640px) {
+  .shell { overflow-x: hidden; }
+  .header { padding: 0 12px; }
+  .header-controls { gap: 12px; }
+  .toggle-label { display: none; }         /* admin-only; not needed on a phone controller */
+  .header-title { font-size: 16px; }
+  .tab-switcher { top: 10px; }
+  .tab { padding: 6px 11px; font-size: 11.5px; }
+  .subheader { padding-left: 12px; padding-right: 12px; }
+}
 </style>

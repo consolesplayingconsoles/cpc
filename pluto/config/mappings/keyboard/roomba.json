@@ -1,33 +1,44 @@
 {
-  "_comment": "Keyboard source -> Roomba target, laid out as a DRIVING pad (not a flat command palette) so a real gamepad -- an 8BitDo over BT to the Mac, added later as its own source -- maps straight onto it. 'layout' mirrors a controller: d-pad left cluster = STEERING (turn left/right; analog wheel added later), face diamond right = throttle + actions. 'actions' is the roomba-specific binding: each btn -> the verb the node's /command endpoint runs (see nodes/local/roomba-rally/openapi.yaml). All verbs are LIVE: lights/horn/melody/session (sound+LED) and the movement verbs drive-forward/back + turn-left/right (bounded auto-stop nudges, gated on the session's active/paused state). 'keys' bind the on-screen/physical keyboard for THIS keyboard source; 'colors' tint the buttons.",
+  "_comment": "Keyboard source -> Roomba target, laid out as a DRIVING pad so a real gamepad (8BitDo over BT, added later as its own source) maps straight onto it. D-pad = STEERING + throttle (up/down/left/right); the face diamond = actions. 'actions' binds each btn to the verb the node's command stream runs (see nodes/local/roomba-rally/main.py send_command). 'combinations' fires a SINGLE arc verb when two d-pad dirs are held together (forward+left etc.) so you can turn WHILE moving -- the Roomba's Drive opcode takes velocity AND radius in one command, so a blended arc is one verb, not two fighting nudges. 'keys' bind the on-screen/physical keyboard; 'colors' tint the buttons.",
   "controller": "Roomba Rally",
   "kind": "drive",
   "controls": { "Enter": "START", "action": "A", "cancel": "B" },
   "actions": {
-    "A": "drive-forward",
-    "B": "drive-back",
+    "A": "robot",
+    "B": "drive-stop",
+    "X": "lights",
+    "Y": "horn",
+    "D_UP": "drive-forward",
+    "D_DOWN": "drive-back",
     "D_LEFT": "turn-left",
     "D_RIGHT": "turn-right",
-    "Y": "horn",
-    "X": "lights",
     "START": "session"
+  },
+  "combinations": {
+    "D_UP+D_LEFT": "forward-left",
+    "D_UP+D_RIGHT": "forward-right",
+    "D_DOWN+D_LEFT": "back-left",
+    "D_DOWN+D_RIGHT": "back-right"
   },
   "keys": {
     "A": "k", "B": "l", "X": "j", "Y": "i",
-    "D_LEFT": "a", "D_RIGHT": "d", "START": "enter"
+    "D_UP": "w", "D_DOWN": "s", "D_LEFT": "a", "D_RIGHT": "d", "START": "enter"
   },
   "layout": [
-    { "key": "a", "btn": "D_LEFT",  "label": "Turn L", "col": 1, "row": 3 },
-    { "key": "d", "btn": "D_RIGHT", "label": "Turn R", "col": 3, "row": 3 },
-    { "key": "Enter", "btn": "START", "label": "Start / Game Over", "col": 5, "row": 3 },
-    { "key": "i", "btn": "Y", "label": "Horn",    "col": 8, "row": 2 },
-    { "key": "j", "btn": "X", "label": "Lights",  "col": 7, "row": 3 },
-    { "key": "l", "btn": "B", "label": "Back",    "col": 9, "row": 3 },
-    { "key": "k", "btn": "A", "label": "Forward", "col": 8, "row": 4 }
+    { "key": "w", "btn": "D_UP",    "label": "Fwd",   "col": 2, "row": 1 },
+    { "key": "a", "btn": "D_LEFT",  "label": "Left",  "col": 1, "row": 2 },
+    { "key": "d", "btn": "D_RIGHT", "label": "Right", "col": 3, "row": 2 },
+    { "key": "s", "btn": "D_DOWN",  "label": "Back",  "col": 2, "row": 3 },
+    { "key": "i", "btn": "Y", "label": "Horn",   "col": 5, "row": 1 },
+    { "key": "j", "btn": "X", "label": "Lights", "col": 4, "row": 2 },
+    { "key": "l", "btn": "B", "label": "Stop",   "col": 6, "row": 2 },
+    { "key": "k", "btn": "A", "label": "Robot",  "col": 5, "row": 3 },
+    { "key": "Enter", "btn": "START", "label": "Start", "col": 3, "row": 4 }
   ],
   "colors": {
-    "A": "#36a657", "B": "#d63b34",
+    "A": "#7c5cbf", "B": "#d63b34",
     "X": "#2d8ec9", "Y": "#edba1f",
+    "D_UP": "#4b5058", "D_DOWN": "#4b5058",
     "D_LEFT": "#4b5058", "D_RIGHT": "#4b5058",
     "START": "#8a9099"
   }
