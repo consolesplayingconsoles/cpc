@@ -4,9 +4,9 @@
   "kind": "drive",
   "controls": { "Enter": "START", "action": "A", "cancel": "B" },
   "actions": {
-    "A": "robot",
-    "B": "warble",
-    "Y": "horn",
+    "A": "horn",
+    "B": "robot",
+    "Y": "error",
     "X": "lights",
     "D_UP": "drive-forward",
     "D_DOWN": "drive-back",
@@ -19,7 +19,7 @@
     "AXIS0+": "turn-right",
     "BTN0": "horn",
     "BTN1": "robot",
-    "BTN2": "warble",
+    "BTN2": "error",
     "BTN3": "lights",
     "BTN11": "session"
   },
@@ -31,22 +31,25 @@
   },
   "keys": {
     "A": "k", "B": "l", "X": "j", "Y": "i",
-    "D_LEFT": "a", "D_RIGHT": "d", "START": "enter"
+    "D_UP": "w", "D_DOWN": "s", "D_LEFT": "a", "D_RIGHT": "d", "START": "enter"
   },
   "layout": [
-    { "key": "a", "btn": "D_LEFT",  "label": "Turn L", "col": 1, "row": 3 },
-    { "key": "d", "btn": "D_RIGHT", "label": "Turn R", "col": 3, "row": 3 },
-    { "key": "Enter", "btn": "START", "label": "Start / Game Over", "col": 5, "row": 3 },
-    { "key": "i", "btn": "Y", "label": "Horn",    "col": 8, "row": 2 },
-    { "key": "j", "btn": "X", "label": "Lights",  "col": 7, "row": 3 },
-    { "key": "l", "btn": "B", "label": "Back",    "col": 9, "row": 3 },
-    { "key": "k", "btn": "A", "label": "Forward", "col": 8, "row": 4 }
+    { "key": "q", "btn": "L", "label": "L", "col": 2, "row": 1 },
+    { "key": "p", "btn": "R", "label": "R", "col": 8, "row": 1 },
+    { "key": "w", "btn": "D_UP",    "label": "Up",    "col": 2, "row": 2 },
+    { "key": "a", "btn": "D_LEFT",  "label": "Left",  "col": 1, "row": 3 },
+    { "key": "d", "btn": "D_RIGHT", "label": "Right", "col": 3, "row": 3 },
+    { "key": "s", "btn": "D_DOWN",  "label": "Down",  "col": 2, "row": 4 },
+    { "key": "Enter", "btn": "START", "label": "Start", "col": 5, "row": 3 },
+    { "key": "i", "btn": "Y", "label": "Y", "col": 8, "row": 2 },
+    { "key": "j", "btn": "X", "label": "X", "col": 7, "row": 3 },
+    { "key": "l", "btn": "B", "label": "B", "col": 9, "row": 3 },
+    { "key": "k", "btn": "A", "label": "A", "col": 8, "row": 4 }
   ],
   "colors": {
-    "A": "#36a657", "B": "#d63b34",
-    "X": "#2d8ec9", "Y": "#edba1f",
-    "D_UP": "#4b5058", "D_DOWN": "#4b5058",
-    "D_LEFT": "#4b5058", "D_RIGHT": "#4b5058",
+    "L": "#8a9099", "R": "#8a9099",
+    "D_UP": "#4b5058", "D_DOWN": "#4b5058", "D_LEFT": "#4b5058", "D_RIGHT": "#4b5058",
+    "A": "#d63b34", "B": "#2d8ec9", "X": "#edba1f", "Y": "#36a657",
     "START": "#8a9099"
   }
 }

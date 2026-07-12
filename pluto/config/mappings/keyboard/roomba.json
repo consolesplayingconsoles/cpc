@@ -6,7 +6,7 @@
   "actions": {
     "A": "horn",
     "B": "robot",
-    "Y": "warble",
+    "Y": "error",
     "X": "lights",
     "D_UP": "drive-forward",
     "D_DOWN": "drive-back",
@@ -25,21 +25,22 @@
     "D_UP": "w", "D_DOWN": "s", "D_LEFT": "a", "D_RIGHT": "d", "START": "enter"
   },
   "layout": [
-    { "key": "w", "btn": "D_UP",    "label": "Fwd",   "col": 2, "row": 1 },
-    { "key": "a", "btn": "D_LEFT",  "label": "Left",  "col": 1, "row": 2 },
-    { "key": "d", "btn": "D_RIGHT", "label": "Right", "col": 3, "row": 2 },
-    { "key": "s", "btn": "D_DOWN",  "label": "Back",  "col": 2, "row": 3 },
-    { "key": "i", "btn": "Y", "label": "Horn",   "col": 5, "row": 1 },
-    { "key": "j", "btn": "X", "label": "Lights", "col": 4, "row": 2 },
-    { "key": "l", "btn": "B", "label": "R2D2",   "col": 6, "row": 2 },
-    { "key": "k", "btn": "A", "label": "Robot",  "col": 5, "row": 3 },
-    { "key": "Enter", "btn": "START", "label": "Start", "col": 3, "row": 4 }
+    { "key": "q", "btn": "L", "label": "L", "col": 2, "row": 1 },
+    { "key": "p", "btn": "R", "label": "R", "col": 8, "row": 1 },
+    { "key": "w", "btn": "D_UP",    "label": "Up",    "col": 2, "row": 2 },
+    { "key": "a", "btn": "D_LEFT",  "label": "Left",  "col": 1, "row": 3 },
+    { "key": "d", "btn": "D_RIGHT", "label": "Right", "col": 3, "row": 3 },
+    { "key": "s", "btn": "D_DOWN",  "label": "Down",  "col": 2, "row": 4 },
+    { "key": "Enter", "btn": "START", "label": "Start", "col": 5, "row": 3 },
+    { "key": "i", "btn": "Y", "label": "Y", "col": 8, "row": 2 },
+    { "key": "j", "btn": "X", "label": "X", "col": 7, "row": 3 },
+    { "key": "l", "btn": "B", "label": "B", "col": 9, "row": 3 },
+    { "key": "k", "btn": "A", "label": "A", "col": 8, "row": 4 }
   ],
   "colors": {
-    "A": "#36a657", "B": "#d63b34",
-    "X": "#2d8ec9", "Y": "#edba1f",
-    "D_UP": "#4b5058", "D_DOWN": "#4b5058",
-    "D_LEFT": "#4b5058", "D_RIGHT": "#4b5058",
+    "L": "#8a9099", "R": "#8a9099",
+    "D_UP": "#4b5058", "D_DOWN": "#4b5058", "D_LEFT": "#4b5058", "D_RIGHT": "#4b5058",
+    "A": "#d63b34", "B": "#2d8ec9", "X": "#edba1f", "Y": "#36a657",
     "START": "#8a9099"
   }
 }

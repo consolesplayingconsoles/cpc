@@ -105,10 +105,9 @@ last_drive_ms = 0         # ticks_ms of the last drive/keepalive -- watched by t
 LIGHTS_ON = b'\x83\x8b\x0d\xff\xff'
 LIGHTS_OFF = b'\x83\x8b\x00\x00\x00'
 
-# A button: a "robot" chirp -- alternating hi/lo notes, durations long enough to be audible.
-ROBOT_SOUND = b'\x83\x8c\x00\x04\x54\x0a\x3c\x0a\x54\x0a\x3c\x0a\x8d\x00'
-# Y button: one sustained low honk (note 58, ~1s) -- unmistakable.
 HORN = b'\x83\x8c\x00\x01\x3a\x40\x8d\x00'
+ROBOT_SOUND = b'\x83\x8c\x00\x04\x54\x0a\x3c\x0a\x54\x0a\x3c\x0a\x8d\x00'
+ROBOT_ERROR = b'\x83\x8c\x00\x04\x2d\x06\x24\x06\x2d\x06\x24\x0c\x8d\x00'
 
 # Game-over: rising G-major arpeggio landing on a held high G6 -- the "...YEAAAH!".
 GAME_OVER_TUNE = b'\x83\x8c\x00\x04\x4f\x08\x53\x08\x56\x0c\x5b\x28\x8d\x00'
@@ -240,6 +239,8 @@ def send_command(action):
             try_with_recovery(LIGHTS_ON if headlights_active else LIGHTS_OFF, "lights")
         elif action == "robot":
             try_with_recovery(ROBOT_SOUND, "robot")
+        elif action == "error":
+            try_with_recovery(ROBOT_ERROR, "error")
         elif action == "horn":
             try_with_recovery(HORN, "horn")
         elif action == "session":
@@ -440,7 +441,8 @@ print("[Server] HTTP :%d  cmd-stream :%d" % (LISTEN_PORT, CMD_PORT))
 
 while True:
     try:
-        for sock, ev in poller.poll(200):
+        events = poller.poll(0)
+        for sock, ev in events:
             if sock is http_srv:
                 c, _ = http_srv.accept()
                 serve_http(c)
@@ -484,6 +486,9 @@ while True:
         if driving and time.ticks_diff(time.ticks_ms(), last_drive_ms) > DEADMAN_MS:
             _stop_moving()
             print("[Deadman] auto-stop")
+
+        time.sleep_ms(200)
+
     except KeyboardInterrupt:
         # In MicroPython KeyboardInterrupt subclasses Exception, so a bare `except Exception`
         # would SWALLOW the Ctrl-C mpremote/Thonny send to break in -- making the board look
