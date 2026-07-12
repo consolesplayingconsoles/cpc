@@ -4,8 +4,7 @@
 //   RIGHT = ControlCapture + scan/translate buttons (top), ControlKeyboard full-width (bottom)
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import ControlCapture from './ControlCapture.vue'
-import ControlKeyboard from './ControlKeyboard.vue'
-import QuadrantLayout from '../QuadrantLayout.vue'
+import ControlLayout from './ControlLayout.vue'
 import UiClose from '../ui/UiClose.vue'
 import { LANGUAGES } from '../../lib/languages'
 
@@ -253,7 +252,7 @@ function fmtTime(ts: number) {
 </script>
 
 <template>
-  <QuadrantLayout>
+  <ControlLayout :active="active" :map-source="mapSource" :target="target" :mapping="mapping" :target-dev="targetDev || ''" @drive-error="emit('drive-error', $event)">
 
     <!-- NW: output side — drop strip (top) + Vision output (scrolling) -->
     <template #nw>
@@ -346,15 +345,7 @@ function fmtTime(ts: number) {
       </ControlCapture>
     </template>
 
-    <!-- SE: controller (as usual) -->
-    <template #se>
-      <ControlKeyboard :active="active"
-        map-source="google"
-        :target="target" :mapping="mapping" :target-dev="targetDev"
-        @drive-error="emit('drive-error', $event)" />
-    </template>
-
-  </QuadrantLayout>
+  </ControlLayout>
 </template>
 
 <style scoped>

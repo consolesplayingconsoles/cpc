@@ -6,13 +6,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { NodeMap } from '../../composables/useNodes'
-import RobutekControl from './RobutekControl.vue'
-import ControlKeyboard from './ControlKeyboard.vue'
-import ClaudeControl from './ClaudeControl.vue'
-import GoogleControl from './GoogleControl.vue'
-import KinectControl from './KinectControl.vue'
-import RoombaTelemetry from './RoombaTelemetry.vue'
-import QuadrantLayout from '../QuadrantLayout.vue'
+import ControlBody from './ControlBody.vue'
 
 const props = defineProps<{ active: boolean; nodes?: NodeMap; name?: string; showOffline?: boolean }>()
 const route  = useRoute()
@@ -26,14 +20,20 @@ const isLab = import.meta.env.DEV
 // LLM client must be co-located on the dev host to be fast, so it's hidden on the C2. ──
 const sourceList = computed(() => {
   const out: { id: string; label: string }[] = []
-  out.push({ id: 'keyboard', label: 'Keyboard only' })
   if (isLab) out.push({ id: 'claude',       label: 'Claude' })        // Lab only: capture is local to the dev host
-  if (isLab) out.push({ id: 'google', label: 'Google' })             // Lab only: requires local capture device
   const d = props.nodes?.['dreame']
   if (d && (d.status !== 'unconfigured' || props.showOffline)) out.push({ id: 'dreame', label: 'Dreame Cloud' })
   const pi = props.nodes?.['pi']
-  if (pi && (pi.status !== 'unconfigured' || props.showOffline)) out.push({ id: 'kinect', label: 'Kinect' })
-  return out
+  if (pi && (pi.status !== 'unconfigured' || props.showOffline)) {
+    out.push({ id: 'dreampicoport', label: 'DreamPicoPort' })
+  }
+  if (isLab) out.push({ id: 'google', label: 'Google' })             // Lab only: requires local capture device
+  out.push({ id: 'keyboard', label: 'Keyboard only' })
+  const pi2 = props.nodes?.['pi']
+  if (pi2 && (pi2.status !== 'unconfigured' || props.showOffline)) {
+    out.push({ id: 'kinect', label: 'Kinect' })
+  }
+  return out.sort((a, b) => a.label.localeCompare(b.label))
 })
 const source = computed(() => (route.params.source as string) || '')
 
@@ -242,33 +242,10 @@ function openMappingDir() {
 
     <div class="control-body">
       <div class="control-stage">
-        <RobutekControl v-if="source === 'dreame'"
-          :source="source" :target="effTarget" :mapping="effMapping" :target-dev="driveSub"
-          :active="active" :nodes="nodes" :name="name || 'dreame'"
-          @drive-error="setError" />
-        <QuadrantLayout v-else-if="source === 'keyboard'">
-          <!-- SW quadrant = output/telemetry. Roomba battery capture when driving a roomba. -->
-          <template v-if="roombaIp" #sw>
-            <RoombaTelemetry :ip="roombaIp" :active="active" :name="effSub" />
-          </template>
-          <template #se>
-            <ControlKeyboard
-              :active="active" :map-source="source" :target="effTarget" :mapping="effMapping"
-              :target-dev="driveSub"
-              @drive-error="setError" />
-          </template>
-        </QuadrantLayout>
-        <ClaudeControl v-else-if="source === 'claude'"
-          :active="active" :nodes="nodes" :map-source="source" :target="effTarget" :mapping="effMapping"
-          :target-dev="driveSub"
-          @drive-error="setError" />
-        <GoogleControl v-else-if="source === 'google'"
-          :active="active" :map-source="source" :target="effTarget" :mapping="effMapping"
-          :target-dev="driveSub"
-          @drive-error="setError" />
-        <KinectControl v-else-if="source === 'kinect'"
-          :active="active" :nodes="nodes" :target="effTarget" :mapping="effMapping"
-          :target-dev="driveSub"
+        <ControlBody
+          :active="active" :source="source" :target="effTarget" :mapping="effMapping"
+          :target-dev="driveSub" :roomba-ip="roombaIp" :nodes="nodes" :name="name"
+          :show-offline="showOffline" :sub="effSub"
           @drive-error="setError" />
       </div>
     </div>

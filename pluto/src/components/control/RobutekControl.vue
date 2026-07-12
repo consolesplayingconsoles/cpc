@@ -3,11 +3,11 @@ import { ref, computed, watch, onBeforeUnmount, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import PetIcon from '../PetIcon.vue'
 import CopyButton from '../ui/UiCopyButton.vue'
-import ControlKeyboard from './ControlKeyboard.vue'
-import QuadrantLayout from '../QuadrantLayout.vue'
+import ControlLayout from './ControlLayout.vue'
 import UiButton from '../ui/UiButton.vue'
 import UiIconButton from '../ui/UiIconButton.vue'
 import UiBattery from '../ui/UiBattery.vue'
+import UiStatusPill from '../ui/UiStatusPill.vue'
 import type { NodeMap } from '../../composables/useNodes'
 
 interface Point { x: number; y: number }
@@ -83,7 +83,6 @@ const loading   = ref(false)
 const fetchedAt = ref('')
 
 const dev       = computed(() => data.value?.device ?? null)
-const status    = computed(() => dev.value?.online ? 'on' : 'off')
 const connected = computed(() => !!dev.value)
 const history   = computed(() => data.value?.history ?? [])
 
@@ -475,13 +474,13 @@ async function signIn() {
 
 <template>
   <div class="rb">
-    <QuadrantLayout>
+    <ControlLayout :active="active" :map-source="source" :target="target" :mapping="mapping" :target-dev="targetDev || ''" @drive-error="emit('drive-error', $event)">
 
     <!-- ── header: live tile (cache-first; needs session) + actions ── -->
     <template #header>
     <header class="rb-bar">
       <div class="rb-id">
-        <span class="rb-dot" :class="status" :title="dev?.online ? 'online' : 'offline'"/>
+        <UiStatusPill :state="dev?.online ? 'ok' : 'bad'" :title="dev?.online ? 'online' : 'offline'" />
         <span class="rb-id-name">{{ dev?.name ?? name ?? 'Robutek' }}</span>
         <span v-if="dev?.model" class="rb-id-model mono">{{ dev.model }}</span>
       </div>
@@ -491,7 +490,7 @@ async function signIn() {
           <span class="rb-pill" :class="actClass">{{ dev.status_human ?? humanStatus(dev.status_label) }}</span>
           <UiBattery :pct="dev.battery" />
         </template>
-        <span v-else class="rb-offline"><span class="rb-offline-dot" />offline</span>
+        <span v-else class="rb-offline"><span class="rb-offline-dot" />Offline</span>
       </div>
 
       <div class="rb-bar-right">
@@ -633,13 +632,6 @@ async function signIn() {
       </div>
     </template>
 
-    <!-- ── SE: controller (as usual) ── -->
-    <template #se>
-      <ControlKeyboard :active="active" :map-source="source" :target="target" :mapping="mapping"
-                       :target-dev="targetDev" heading="Manual Assistance"
-                       @drive-error="emit('drive-error', $event)" />
-    </template>
-
     <!-- ── footer: transport / playback bar ── -->
     <template #footer>
     <footer class="rb-transport" :class="{ disabled: !sel?.route?.length }">
@@ -665,7 +657,7 @@ async function signIn() {
       </label>
     </footer>
     </template>
-    </QuadrantLayout>
+    </ControlLayout>
 
     <!-- ── login (compact, only when connecting) — overlay, outside the layout ── -->
     <div v-if="showLogin" class="rb-login-scrim" @click.self="showLogin = false">
@@ -728,8 +720,6 @@ async function signIn() {
 .rb-pill.is-clean  { background: var(--accent-soft); color: var(--accent-hover); }
 .rb-pill.is-return { background: #fef3c7; color: #92580a; }
 .rb-pill.is-error  { background: #fee2e2; color: #b91c1c; }
-.rb-dot { width: 8px; height: 8px; border-radius: 50%; }
-.rb-dot.on { background: var(--ok); } .rb-dot.off { background: var(--text-faint); }
 .rb-offline {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px; font-weight: 500; color: var(--text-muted);

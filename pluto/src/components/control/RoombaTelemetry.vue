@@ -6,6 +6,7 @@
 // bespoke colours.
 import { ref, watch, onBeforeUnmount, computed } from 'vue'
 import UiBattery from '../ui/UiBattery.vue'
+import UiStatusPill from '../ui/UiStatusPill.vue'
 
 const props = defineProps<{ ip: string; active: boolean; name?: string }>()
 
@@ -71,11 +72,11 @@ const metrics = computed(() => {
   <div class="tel">
     <div class="tel__head">
       <span class="tel__title">Telemetry</span>
-      <span class="tel__node mono">{{ name || 'roomba' }}</span>
-      <span class="tel__dot" :class="error ? 'is-bad' : 'is-ok'" :title="error || 'live'" />
+      <span v-if="name" class="tel__node mono">{{ name }}</span>
+      <UiStatusPill :state="error ? 'bad' : 'ok'" :title="error || 'online'" />
     </div>
 
-    <div v-if="error && !data" class="tel__msg mono">roomba unreachable at {{ ip }}</div>
+    <div v-if="error && !data" class="tel__msg mono">Roomba Unreachable at {{ ip }}</div>
 
     <template v-else>
       <div class="tel__batt">
@@ -111,9 +112,6 @@ const metrics = computed(() => {
 .tel__head { display: flex; align-items: center; gap: 8px; }
 .tel__title { font-size: 13px; font-weight: 700; color: var(--text); }
 .tel__node { font-size: 11px; color: var(--text-muted); }
-.tel__dot { width: 8px; height: 8px; border-radius: 50%; margin-left: auto; }
-.tel__dot.is-ok { background: var(--ok); }
-.tel__dot.is-bad { background: var(--bad); }
 .tel__msg { font-size: 12px; color: var(--text-muted); padding: 8px 0; }
 
 .tel__batt { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
