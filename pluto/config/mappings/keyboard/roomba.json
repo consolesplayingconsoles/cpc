@@ -4,10 +4,10 @@
   "kind": "drive",
   "controls": { "Enter": "START", "action": "A", "cancel": "B" },
   "actions": {
-    "A": "robot",
-    "B": "drive-stop",
+    "A": "horn",
+    "B": "robot",
+    "Y": "warble",
     "X": "lights",
-    "Y": "horn",
     "D_UP": "drive-forward",
     "D_DOWN": "drive-back",
     "D_LEFT": "turn-left",
@@ -31,12 +31,12 @@
     { "key": "s", "btn": "D_DOWN",  "label": "Back",  "col": 2, "row": 3 },
     { "key": "i", "btn": "Y", "label": "Horn",   "col": 5, "row": 1 },
     { "key": "j", "btn": "X", "label": "Lights", "col": 4, "row": 2 },
-    { "key": "l", "btn": "B", "label": "Stop",   "col": 6, "row": 2 },
+    { "key": "l", "btn": "B", "label": "R2D2",   "col": 6, "row": 2 },
     { "key": "k", "btn": "A", "label": "Robot",  "col": 5, "row": 3 },
     { "key": "Enter", "btn": "START", "label": "Start", "col": 3, "row": 4 }
   ],
   "colors": {
-    "A": "#7c5cbf", "B": "#d63b34",
+    "A": "#36a657", "B": "#d63b34",
     "X": "#2d8ec9", "Y": "#edba1f",
     "D_UP": "#4b5058", "D_DOWN": "#4b5058",
     "D_LEFT": "#4b5058", "D_RIGHT": "#4b5058",

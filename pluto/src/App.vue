@@ -571,9 +571,12 @@ const displayNodes = computed(() => {
   .header { padding: 0 12px; }
   .header-controls { gap: 12px; }
   .toggle-label { display: none; }         /* admin-only; not needed on a phone controller */
-  .header-title { font-size: 16px; }
-  .tab-switcher { top: 10px; }
+  .header-mark { width: 30px; height: 30px; margin-right: 5px; }
+  .header-title { font-size: 15px; }
+  /* Tabs stop FLOATING: become a normal centered row in the flex column, between the
+     subheader and the panels, so they push the content down instead of overlapping it. */
+  .tab-switcher { position: static; transform: none; align-self: center; margin: 8px 0 4px; }
   .tab { padding: 6px 11px; font-size: 11.5px; }
-  .subheader { padding-left: 12px; padding-right: 12px; }
+  .subheader { padding: 0 12px; }
 }
 </style>
