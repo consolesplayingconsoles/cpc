@@ -1,11 +1,11 @@
 <template>
-  <QuadrantLayout>
+  <ControlLayout :active="active" :map-source="'kinect'" :target="props.target || 'none'" :mapping="props.mapping || ''" :target-dev="props.targetDev || ''" @drive-error="$emit('drive-error', $event)">
     <template #nw>
       <CapScreen :live="running && !paused && frameReceived" device="Xbox Kinect v1 RGB"
                  :timestamp="running && hasEverReceivedFrame ? lastFrame : ''"
                  controls :running="running" :busy="sending" @go="onGo" @wait="onWait" @stop="onStop">
         <template #content>
-          <canvas v-if="running && hasEverReceivedFrame" ref="canvas" :width="props.canvasWidth" :height="props.canvasHeight" class="cap-frame" />
+          <canvas v-if="running && hasEverReceivedFrame" ref="canvas" :width="canvasW" :height="canvasH" class="cap-frame" />
           <div v-else class="cap-frame cap-frame-empty">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="3" y="4.5" width="18" height="12" rx="1.5" /><path d="M9 20h6M12 16.5V20" />
@@ -21,24 +21,16 @@
       <ControlFeed title="Pose Log" :lines="logLines" :show-input="false"
         :empty-text="running ? (paused ? 'Paused — press Play to resume reading.' : 'Reading your pose…') : 'Press Play to start reading your pose'" />
     </template>
-
-    <template #se>
-      <ControlKeyboard
-        :active="active" :map-source="'kinect'" :target="props.target || 'none'"
-        :mapping="props.mapping || ''" :target-dev="props.targetDev || ''"
-        @drive-error="$emit('drive-error', $event)" />
-    </template>
-  </QuadrantLayout>
+  </ControlLayout>
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted, withDefaults } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import CapScreen from '../CapScreen.vue'
-import ControlKeyboard from './ControlKeyboard.vue'
 import ControlFeed, { type FeedLine } from './ControlFeed.vue'
-import QuadrantLayout from '../QuadrantLayout.vue'
+import ControlLayout from './ControlLayout.vue'
 
-interface Props {
+const props = defineProps<{
   active: boolean
   nodes?: Record<string, any>
   target?: string
@@ -46,13 +38,11 @@ interface Props {
   targetDev?: string
   canvasWidth?: number
   canvasHeight?: number
-}
-
-const props = withDefaults(defineProps<Props>(), {
-  canvasWidth: 640,
-  canvasHeight: 480,
-})
+}>()
 const emit = defineEmits<{ 'drive-error': [string] }>()
+
+const canvasW = props.canvasWidth ?? 640
+const canvasH = props.canvasHeight ?? 480
 
 const API = `http://${window.location.hostname}:7700`
 const hasEverReceivedFrame = ref(false)

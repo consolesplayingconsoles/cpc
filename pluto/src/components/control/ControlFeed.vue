@@ -97,9 +97,9 @@ watch(() => props.lines, async () => {
 .cf-feed {
   flex: 1 1 0; min-height: 0; overflow-y: auto;
   padding: 14px 16px 10px; display: flex; flex-direction: column; gap: 3px;
-  scroll-behavior: smooth; background: var(--surface-2);
+  scroll-behavior: smooth; background: var(--surface);
 }
-.cf-empty { margin: auto; color: var(--text-faint); font-size: 13px; text-align: center; line-height: 1.6; }
+.cf-empty { margin: auto; color: var(--text-muted); font-size: 13px; text-align: center; line-height: 1.6; max-width: 80%; }
 .cf-line  { font-size: 13px; line-height: 1.6; color: var(--text); margin: 0; white-space: pre-wrap; }
 .cf-name  { font-weight: 700; }
 

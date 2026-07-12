@@ -1,0 +1,42 @@
+{
+  "_comment": "DreamPicoPort source -> Roomba target. Same driving-pad layout as keyboard/roomba.json (so the SE on-screen/physical keyboard assist works identically) with the confirmed gamepad indices added as extra `actions` keys pointing at the SAME verbs. Gamepad indices from the regular pad, confirmed live via DreamPicoPortControl: buttons 0=A,1=B,3=X,4=Y,11=Start; axis0=left stick X, axis2=left trigger, axis5=right trigger, axis9=dpad(unconfirmed values). Triggers are BUTTONS for forward/back (operator's call): axis5(+)=drive-forward, axis2(+)=drive-back; turn-left/right uses axis0 sign. NOTE: no runtime consumer reads the AXIS/BTN keys yet -- ControlKeyboard only reads keyboard input; a gamepad-driving component is the next piece to build.",
+  "controller": "Roomba Rally",
+  "kind": "drive",
+  "controls": { "Enter": "START", "action": "A", "cancel": "B" },
+  "actions": {
+    "A": "drive-forward",
+    "B": "drive-back",
+    "D_LEFT": "turn-left",
+    "D_RIGHT": "turn-right",
+    "Y": "horn",
+    "X": "lights",
+    "START": "session",
+    "AXIS5+": "drive-forward",
+    "AXIS2+": "drive-back",
+    "AXIS0-": "turn-left",
+    "AXIS0+": "turn-right",
+    "BTN0": "horn",
+    "BTN1": "melody",
+    "BTN3": "lights",
+    "BTN11": "session"
+  },
+  "keys": {
+    "A": "k", "B": "l", "X": "j", "Y": "i",
+    "D_LEFT": "a", "D_RIGHT": "d", "START": "enter"
+  },
+  "layout": [
+    { "key": "a", "btn": "D_LEFT",  "label": "Turn L", "col": 1, "row": 3 },
+    { "key": "d", "btn": "D_RIGHT", "label": "Turn R", "col": 3, "row": 3 },
+    { "key": "Enter", "btn": "START", "label": "Start / Game Over", "col": 5, "row": 3 },
+    { "key": "i", "btn": "Y", "label": "Horn",    "col": 8, "row": 2 },
+    { "key": "j", "btn": "X", "label": "Lights",  "col": 7, "row": 3 },
+    { "key": "l", "btn": "B", "label": "Back",    "col": 9, "row": 3 },
+    { "key": "k", "btn": "A", "label": "Forward", "col": 8, "row": 4 }
+  ],
+  "colors": {
+    "A": "#36a657", "B": "#d63b34",
+    "X": "#2d8ec9", "Y": "#edba1f",
+    "D_LEFT": "#4b5058", "D_RIGHT": "#4b5058",
+    "START": "#8a9099"
+  }
+}

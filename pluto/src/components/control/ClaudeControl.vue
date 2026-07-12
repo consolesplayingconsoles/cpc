@@ -7,8 +7,7 @@ import type { NodeMap } from '../../composables/useNodes'
 import type { FeedLine } from './ControlFeed.vue'
 import ControlFeed from './ControlFeed.vue'
 import ControlCapture from './ControlCapture.vue'
-import ControlKeyboard from './ControlKeyboard.vue'
-import QuadrantLayout from '../QuadrantLayout.vue'
+import ControlLayout from './ControlLayout.vue'
 
 const props = defineProps<{
   active:     boolean
@@ -73,7 +72,7 @@ watch(() => props.active, (on) => { if (on) activate(); else stopPoll() })
 </script>
 
 <template>
-  <QuadrantLayout>
+  <ControlLayout :active="active" :map-source="mapSource" :target="target" :mapping="mapping" :target-dev="targetDev || ''" @drive-error="emit('drive-error', $event)">
     <!-- NW: Guide Dog chat (spans full-height left, SW empty) -->
     <template #nw>
       <ControlFeed
@@ -94,12 +93,5 @@ watch(() => props.active, (on) => { if (on) activate(); else stopPoll() })
         @drive-error="emit('drive-error', $event)"
         @rumble="onRumble" />
     </template>
-
-    <!-- SE: controller (as usual) -->
-    <template #se>
-      <ControlKeyboard :active="active" :map-source="mapSource" :target="target" :mapping="mapping"
-                       :target-dev="targetDev" heading="Manual Assistance"
-                       @drive-error="emit('drive-error', $event)" />
-    </template>
-  </QuadrantLayout>
+  </ControlLayout>
 </template>
