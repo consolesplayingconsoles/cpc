@@ -419,7 +419,10 @@ class RoombaSink(Sink):
 
     @staticmethod
     def _is_move(verb):
-        return bool(verb) and (verb.startswith("drive-") or verb.startswith("turn-"))
+        # drive-/turn- (straight + in-place) plus forward-/back- (the blended arcs from
+        # d-pad combinations, e.g. forward-left = move + steer in one Drive command).
+        return bool(verb) and (verb.startswith("drive-") or verb.startswith("turn-")
+                               or verb.startswith("forward-") or verb.startswith("back-"))
 
     def _send(self, line):
         if self._closed:
@@ -438,19 +441,22 @@ class RoombaSink(Sink):
 
     def press(self, btn):
         super(RoombaSink, self).press(btn)
-        verb = self._actions.get(btn)
+        # `btn` may be a mapping button name (mapped via actions) OR an already-resolved verb
+        # (the on-screen pad pre-resolves combinations to a single arc verb). get(btn, btn)
+        # accepts both; the frontend sends verbs, a raw gamepad would send button names.
+        verb = self._actions.get(btn, btn)
         if not verb:
             return
         self._send(verb)
         if self._is_move(verb):
-            self._moving.add(btn)
+            self._moving.add(verb)
 
     def release(self, btn):
         super(RoombaSink, self).release(btn)
-        verb = self._actions.get(btn)
+        verb = self._actions.get(btn, btn)
         if self._is_move(verb):
-            self._moving.discard(btn)
-            if not self._moving:            # last movement key up -> stop
+            self._moving.discard(verb)
+            if not self._moving:            # last movement verb up -> stop
                 self._send("drive-stop")
 
     def keepalive(self):

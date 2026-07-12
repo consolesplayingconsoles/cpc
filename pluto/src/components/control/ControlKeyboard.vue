@@ -14,7 +14,11 @@ import Joystick from 'vue-joystick-component'
 import { joystickToAxis, keysToAxis, isDirButton, AXIS_CENTER } from '../../lib/analog'
 
 interface LayoutKey { key: string; btn: string; label: string; col: number; row: number }
-interface Mapping { controller?: string; layout?: LayoutKey[]; colors?: Record<string, string> }
+interface Mapping {
+  controller?: string; layout?: LayoutKey[]; colors?: Record<string, string>
+  actions?: Record<string, string>          // btn -> verb
+  combinations?: Record<string, string>     // "BTN1+BTN2" -> verb (fires when both held)
+}
 
 const props = defineProps<{
   active: boolean
@@ -23,6 +27,7 @@ const props = defineProps<{
   mapping: string        // mapping stem, e.g. 'dreamcast'
   targetDev?: string     // subtarget selector: the pico's UART dev under 'pi', the roomba node id under 'roomba'
   compact?: boolean      // smaller caps for an embedded side pane (Dreame)
+  narrow?: boolean       // phone: stick BELOW the board (not corner), big caps -- full-screen pad
   heading?: string       // eyebrow above the pad (e.g. "Manual Assistance") where the
                          // keyboard is a manual aid to another driver, not the player itself
 }>()
@@ -42,6 +47,24 @@ let resizeObs: ResizeObserver | null = null
 const pressed = ref<Set<string>>(new Set())
 function isDown(btn: string) { return pressed.value.has(btn) }
 
+// The verb currently HELD on the target (movement is a single sustained verb). Combinations
+// mean the effective verb depends on the WHOLE held set, not the last key -- e.g. Fwd+Left
+// held together fires one 'forward-left' arc instead of two fighting nudges. We recompute it
+// on every press/release and only send a transition when it actually changes.
+const activeAction = ref<string | null>(null)
+function computeEffectiveAction(): string | null {
+  const d = def.value
+  if (!d) return null
+  const held = Array.from(pressed.value)
+  if (!held.length) return null
+  // combinations win: if every btn of a combo is currently held, that's the verb
+  for (const combo in (d.combinations || {})) {
+    if (combo.split('+').every(b => pressed.value.has(b))) return d.combinations![combo]
+  }
+  // otherwise the single/last held btn's own verb
+  return d.actions?.[held[held.length - 1]] ?? null
+}
+
 // ── mapping: layout + colours ──────────────────────────────────────
 const def = ref<Mapping | null>(null)
 const layout = computed<LayoutKey[]>(() => def.value?.layout ?? [])
@@ -56,6 +79,10 @@ const isGC   = computed(() => ctrl.value.includes('gamecube'))
 const isDC   = computed(() => ctrl.value.includes('dreamcast'))
 const hasMain = computed(() => isGC.value || isDC.value)
 const hasC    = computed(() => isGC.value)
+// Roomba-style mappings (an `actions` table) get an analog stick too -- it quantises to the
+// SAME drive verbs as the d-pad (up->forward, diagonals->arcs), so you can steer with either.
+const verbMode = computed(() => !!def.value?.actions)
+const hasStick = computed(() => hasMain.value || verbMode.value)
 
 // ── WASD -> analog (Guide Dog mode) ────────────────────────────────────────
 // When on, the directional keys/caps steer the MAIN analog stick instead of tapping
@@ -85,30 +112,34 @@ const stickKnobStyle = computed(() => {
 // That keeps every container scrollbar-free: the pad shrinks instead of overflowing.
 const GAP = computed(() => (props.compact ? 6 : 8))
 const CAP_MIN = 22
-const CAP_MAX = computed(() => (props.compact ? 42 : 58))
+// Phone (narrow) wants BIG touch caps; embedded (compact) small; desktop medium.
+const CAP_MAX = computed(() => (props.narrow ? 108 : props.compact ? 42 : 58))
 // When sticks are present they sit in the corner padding (padX ~= stick, padY ~= 0.86*stick,
 // stick ~= 1.4*cap); fold that footprint into the divisor so the fit accounts for it.
 const cap = computed(() => {
   const max = CAP_MAX.value
   if (!box.value.w || !box.value.h) return max
   const g = GAP.value, c = cols.value, r = rows.value
-  const wExtra = hasMain.value ? 2.8 : 0          // 2 * (stick/cap = 1.4)
-  const hExtra = hasMain.value ? 2.41 : 0         // 2 * 0.86 * 1.4
-  const padW = hasMain.value ? 0 : g * 2          // a little breathing room when no sticks
-  const padH = hasMain.value ? 0 : g * 2
+  // Stick footprint in the fit: desktop corner-stick eats BOTH width and height; phone
+  // (narrow) puts the stick BELOW the board so it eats only height -> board keeps full width.
+  const wExtra = hasStick.value && !props.narrow ? 2.8 : 0     // 2 * (stick/cap = 1.4)
+  const hExtra = hasStick.value ? (props.narrow ? 2.0 : 2.41) : 0
+  const padW = hasStick.value && !props.narrow ? 0 : g * 2     // breathing room when no corner sticks
+  const padH = hasStick.value && !props.narrow ? 0 : g * 2
   const capW = (box.value.w - padW - (c - 1) * g) / (c + wExtra)
   const capH = (box.value.h - padH - (r - 1) * g) / (r + hExtra)
   return Math.max(CAP_MIN, Math.min(max, Math.floor(Math.min(capW, capH))))
 })
 const stickSize = computed(() => {
-  if (!hasMain.value) return 0
-  const base = props.compact ? 62 : 92
-  return Math.max(38, Math.min(base, Math.round(cap.value * 1.4)))
+  if (!hasStick.value) return 0
+  const base = props.narrow ? 132 : props.compact ? 62 : 92
+  return Math.max(38, Math.min(base, Math.round(cap.value * (props.narrow ? 1.9 : 1.4))))
 })
 const padStyle = computed(() => {
-  if (!hasMain.value) return { padding: `${GAP.value}px` }
+  if (!hasStick.value) return { padding: `${GAP.value}px` }
+  if (props.narrow) return { padding: `${GAP.value}px` }        // stick is in-flow (below), no corner reserve
   const s = stickSize.value
-  return { padding: `${Math.round(s * 0.86)}px ${s}px` }   // room for the corner sticks
+  return { padding: `${Math.round(s * 0.86)}px ${s}px` }        // room for the corner sticks
 })
 const boardStyle = computed(() => ({
   gridTemplateColumns: `repeat(${cols.value}, var(--cap))`,
@@ -146,20 +177,41 @@ async function holdPost(btn: string, down: boolean) {
     emit('drive-error', j && j.ok === false ? (j.error || 'hold failed') : '')
   } catch { emit('drive-error', 'API unreachable') }
 }
+// Mappings with an `actions` table (the Roomba) resolve the held SET to one verb (so combos
+// like Fwd+Left become a single 'forward-left' arc). Console mappings have no `actions` -- they
+// stay on the classic per-button hold path, untouched. `verbMode`/`hasStick` are declared up
+// with the other stick flags.
+
+// Set the single held drive verb, sending only the transition. New verb goes DOWN before the
+// old goes UP so the target never sees an empty-held gap (no drive-stop stutter between, e.g.,
+// forward and forward-left). Shared by the d-pad (via computeEffectiveAction) and the stick.
+function setDriveVerb(v: string | null) {
+  if (v === activeAction.value) return
+  if (v) holdPost(v, true)
+  if (activeAction.value) holdPost(activeAction.value, false)
+  activeAction.value = v
+}
+function syncActiveAction() { setDriveVerb(computeEffectiveAction()) }
+
 function press(btn: string) {
   if (pressed.value.has(btn)) return            // ignore key auto-repeat / re-entry
   const s = new Set(pressed.value); s.add(btn); pressed.value = s
   startKeepalive()
   if (analogKeys.value && isDirButton(btn)) sendKeyAxis()
+  else if (verbMode.value) syncActiveAction()
   else holdPost(btn, true)
 }
 function release(btn: string) {
   if (!pressed.value.has(btn)) return
   const s = new Set(pressed.value); s.delete(btn); pressed.value = s
   if (analogKeys.value && isDirButton(btn)) sendKeyAxis()
+  else if (verbMode.value) syncActiveAction()
   else holdPost(btn, false)
 }
-function releaseAll() { for (const b of Array.from(pressed.value)) release(b) }
+function releaseAll() {
+  for (const b of Array.from(pressed.value)) release(b)
+  if (activeAction.value) { holdPost(activeAction.value, false); activeAction.value = null }
+}
 
 // WASD->analog: recompute the stick from the currently-held directional keys and send it
 // as one MAIN axis op (the pure vector math lives in lib/analog, unit-tested).
@@ -195,6 +247,36 @@ function stickMove(name: string, e: { x?: number; y?: number }) {
   axisPost(name, v.x, v.y)
 }
 function stickStop(name: string) { axisPost(name, AXIS_CENTER.x, AXIS_CENTER.y) }   // recentre on release
+
+// ── stick -> drive verb (verbMode / Roomba) ────────────────────────────────
+// Quantise the stick position to one of the 8 drive verbs (or none near centre), resolved
+// THROUGH the mapping so it's not Roomba-hardcoded: cardinals use `actions[D_*]`, diagonals
+// use `combinations[...]` (the blended arcs). Same verb set the d-pad fires.
+const STICK_DEAD = 0.28   // deflection (of the 0.5 half-range) before a direction registers
+function stickToVerb(x: number, y: number): string | null {
+  const d = def.value
+  if (!d?.actions) return null
+  const dx = x - 0.5, dy = y - 0.5
+  if (Math.abs(dx) < STICK_DEAD && Math.abs(dy) < STICK_DEAD) return null
+  const up = dy > STICK_DEAD, down = dy < -STICK_DEAD
+  const left = dx < -STICK_DEAD, right = dx > STICK_DEAD
+  const c = d.combinations || {}, a = d.actions
+  if (up && left)    return c['D_UP+D_LEFT']    || a['D_UP']   || null
+  if (up && right)   return c['D_UP+D_RIGHT']   || a['D_UP']   || null
+  if (down && left)  return c['D_DOWN+D_LEFT']  || a['D_DOWN'] || null
+  if (down && right) return c['D_DOWN+D_RIGHT'] || a['D_DOWN'] || null
+  if (up)    return a['D_UP']    || null
+  if (down)  return a['D_DOWN']  || null
+  if (left)  return a['D_LEFT']  || null
+  if (right) return a['D_RIGHT'] || null
+  return null
+}
+function stickDrive(e: { x?: number; y?: number }) {
+  const v = joystickToAxis(e)
+  startKeepalive()
+  setDriveVerb(stickToVerb(v.x, v.y))
+}
+function stickStopDrive() { setDriveVerb(null) }   // recentre -> stop
 
 // keepalive: hold the live sink open the whole time the board is active so each keypress
 // is low-latency (no reconnect). The backend watchdog releases everything if these stop
@@ -302,7 +384,7 @@ function capStyle(it: LayoutKey) {
     </div>
 
     <div ref="fitEl" class="ck-fit">
-    <div v-if="layout.length" class="ck-pad" :class="{ off: !canDrive }" :style="padStyle">
+    <div v-if="layout.length" class="ck-pad" :class="{ off: !canDrive, stacked: narrow }" :style="padStyle">
       <!-- main analog stick (grey): top-left. Toggle lives here so it's spatially linked. -->
       <div v-if="hasMain" class="ck-stick main">
         <div class="ck-stick-wrap" :style="{ width: stickSize + 'px', height: stickSize + 'px' }">
@@ -316,6 +398,15 @@ function capStyle(it: LayoutKey) {
           <span class="analog-pill-thumb" />
         </button>
         <span class="ck-stick-tag" :class="{ active: analogKeys }">{{ analogKeys ? 'Analog' : 'D-Pad' }}</span>
+      </div>
+
+      <!-- Roomba drive stick (grey): quantises to the d-pad's drive verbs. No Guide Dog toggle. -->
+      <div v-else-if="verbMode" class="ck-stick main">
+        <div class="ck-stick-wrap" :style="{ width: stickSize + 'px', height: stickSize + 'px' }">
+          <Joystick :size="stickSize" base-color="#cdd0d4" stick-color="#5b6068" :throttle="80"
+            :disabled="!canDrive" @move="stickDrive($event)" @stop="stickStopDrive()" />
+        </div>
+        <span class="ck-stick-tag active">Drive</span>
       </div>
 
       <div class="ck-board" :style="boardStyle">
@@ -360,6 +451,11 @@ function capStyle(it: LayoutKey) {
 .ck-stick { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 4px; user-select: none; }
 .ck-stick.main { top: 0; left: 0; }
 .ck-stick.cstick { bottom: 0; right: 0; }
+
+/* Phone: board on top (big), stick in-flow below it -- a full-width thumb pad. */
+.ck-pad.stacked { flex-direction: column; gap: 18px; }
+.ck-pad.stacked .ck-board { order: 1; }
+.ck-pad.stacked .ck-stick.main { position: static; order: 2; }
 .ck-stick-wrap { position: relative; flex-shrink: 0; z-index: 5 }
 .ck-stick-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); transition: color 0.18s; }
 .ck-stick-tag.active { color: var(--accent); }
