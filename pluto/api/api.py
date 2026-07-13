@@ -1427,6 +1427,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/control/frame":
             self._handle_control_frame()
 
+        elif parts[:1] == ["camera"] and len(parts) >= 3 and parts[2] == "stream":
+            self._handle_camera_stream(parts[1])
+        elif parts[:1] == ["camera"] and len(parts) >= 3 and parts[2] == "audio":
+            self._handle_camera_audio(parts[1])
+
         elif parsed.path == "/control/google/lens":
             self._handle_control_lens_get()
         elif parsed.path == "/control/google/config":
@@ -1919,6 +1924,98 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._cors_headers()
         self.end_headers()
         self.wfile.write(data)
+
+    def _handle_camera_stream(self, node_id):
+        """GET /camera/<node>/stream -> ffmpeg proxies the node's RTSP camera as MJPEG
+        (multipart/x-mixed-replace) so a plain browser <img> shows it live. The RTSP URL --
+        with credentials -- stays server-side in the node's .env (CAMERA_RTSP_URL); the browser
+        only ever talks to Pluto. One ffmpeg per viewer, killed when the client disconnects.
+        Keeping the stream on the SERVER is also what lets a later autonomous-driving pass read
+        frames off the same source."""
+        import subprocess, shutil
+        node = Handler.node_roster.get(node_id or "") or {}
+        url = (node.get("CAMERA_RTSP_URL") or "").strip()
+        if not url:
+            self._send(404, {"error": "no CAMERA_RTSP_URL for node '%s'" % (node_id or "?")})
+            return
+        if not shutil.which("ffmpeg"):
+            self._send(500, {"error": "ffmpeg not installed on the Pluto host"})
+            return
+        boundary = "frame"
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=%s" % boundary)
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self._cors_headers()
+        self.end_headers()
+        # image2pipe + mjpeg = a stream of concatenated JPEGs; we re-frame each into a multipart
+        # part (find SOI..EOI) so we own the boundary and don't depend on ffmpeg's muxer quirks.
+        proc = subprocess.Popen(
+            ["ffmpeg", "-nostdin", "-loglevel", "error", "-rtsp_transport", "tcp",
+             "-i", url, "-an", "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "6", "-r", "12", "-"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        SOI, EOI = b"\xff\xd8", b"\xff\xd9"
+        buf = b""
+        try:
+            while True:
+                chunk = proc.stdout.read(8192)
+                if not chunk:
+                    break
+                buf += chunk
+                while True:
+                    s = buf.find(SOI)
+                    e = buf.find(EOI, s + 2) if s != -1 else -1
+                    if s == -1 or e == -1:
+                        break
+                    jpg = buf[s:e + 2]
+                    buf = buf[e + 2:]
+                    self.wfile.write(b"--%s\r\n" % boundary.encode())
+                    self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                    self.wfile.write(b"Content-Length: %d\r\n\r\n" % len(jpg))
+                    self.wfile.write(jpg)
+                    self.wfile.write(b"\r\n")
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass   # viewer closed the <img> / navigated away
+        finally:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    def _handle_camera_audio(self, node_id):
+        """GET /camera/<node>/audio -> ffmpeg pulls JUST the RTSP audio track and streams it as
+        MP3, so a browser <audio> can play it (hold-to-listen). Video is untouched. Creds stay
+        server-side; one ffmpeg per listener, killed when the client releases (disconnects)."""
+        import subprocess, shutil
+        node = Handler.node_roster.get(node_id or "") or {}
+        url = (node.get("CAMERA_RTSP_URL") or "").strip()
+        if not url:
+            self._send(404, {"error": "no CAMERA_RTSP_URL for node '%s'" % (node_id or "?")})
+            return
+        if not shutil.which("ffmpeg"):
+            self._send(500, {"error": "ffmpeg not installed on the Pluto host"})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "audio/mpeg")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self._cors_headers()
+        self.end_headers()
+        proc = subprocess.Popen(
+            ["ffmpeg", "-nostdin", "-loglevel", "error", "-rtsp_transport", "tcp",
+             "-i", url, "-vn", "-acodec", "libmp3lame", "-b:a", "64k", "-f", "mp3", "-"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        try:
+            while True:
+                chunk = proc.stdout.read(4096)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass   # listener released the button / navigated away
+        finally:
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
     def _google_api_key(self):
         return (Handler.node_roster.get("google") or {}).get("GOOGLE_API_KEY", "").strip()

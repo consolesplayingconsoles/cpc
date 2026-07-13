@@ -15,7 +15,7 @@ ROUTES = {
 # Firmware version. Reported in /health so you can confirm a Pluto DEPLOY actually
 # flashed the running board: bump this, deploy, then re-check /health -- if the number
 # changed, the new bytes are live. (The Thonny-saved copy predates this field.)
-FIRMWARE_VERSION = "23"
+FIRMWARE_VERSION = "33"
 
 # --- CONFIGURATION (injected from .env at flash time) ---
 # Deployment process: substitute @@ROOMBA_SSID@@, @@ROOMBA_PASSWORD@@, @@HOST_PORT@@
@@ -70,19 +70,22 @@ def open_roomba_uart():
 
 open_roomba_uart()  # open at 19200
 
+# Current OI mode byte for actuator/drive commands, toggled live by the Y "safety" button:
+#   0x84 = FULL  -- safeties OFF, free driving (default; not "caged")
+#   0x83 = SAFE  -- cliff/wheel-drop protection ON (stops at edges, but reverts to Passive)
+# Every command re-asserts this via try_with_recovery, so a Safe->Passive revert self-heals.
+oi_mode = 0x84
+
 def oi_start():
-    """OPEN the OI session (Start=128) and enter SAFE mode (131). SAFE keeps the built-in
-    safeties ON: a cliff / wheel-drop / charger event stops the motors and reverts the OI to
-    PASSIVE -- that's our collision behavior. The catch: after such a revert, commands are
-    ignored until SAFE is re-asserted, so every actuator payload below is PREFIXED with 0x83
-    (re-enter Safe) to self-heal. We send Start (0x80) only here -- resending it mid-session
-    would needlessly drop to Passive. The 100ms pauses let the Roomba allocate the session +
-    trip the mode relay.
+    """OPEN the OI session (Start=128) and enter the CURRENT mode (oi_mode -- FULL by default,
+    so it drives freely; Y toggles to SAFE). Start (0x80) is sent only here -- resending it
+    mid-session drops to Passive. The 100ms pauses let the Roomba allocate the session + trip
+    the mode relay.
     NOTE: if serial + mode readback work but nothing actuates, the OI is WEDGED -- pull the
     Roomba battery to reset it; no serial command can clear that state."""
     if roomba:
-        roomba.write(b'\x80'); time.sleep(0.1)   # Start -> Passive (open session)
-        roomba.write(b'\x83'); time.sleep(0.1)   # Safe
+        roomba.write(b'\x80'); time.sleep(0.1)            # Start -> Passive (open session)
+        roomba.write(bytes([oi_mode])); time.sleep(0.1)   # enter current mode (Full default)
 
 oi_start()
 
@@ -96,6 +99,15 @@ session_active = True     # in an OI session (Safe mode) vs. relinquished after 
 last_command = None
 driving = False           # currently holding a drive velocity (movement in progress)
 last_drive_ms = 0         # ticks_ms of the last drive/keepalive -- watched by the deadman
+
+# --- AUTO-SLEEP ---
+# Pluto polls /status ONLY while you're on the control surface with a roomba selected, so a gap
+# in polls (you left the tab, switched apps, walked away) = idle. No poll AND no command for
+# IDLE_SLEEP_MS -> park the Roomba (OI Power); the next poll/command wakes it. Generous window so
+# a quick hop to the Network tab to deploy, or another app, doesn't nap it.
+IDLE_SLEEP_MS = 600000    # 10 min
+asleep = False            # True after we auto/manually put the Roomba to sleep
+last_activity_ms = time.ticks_ms()   # ticks_ms of the last /status poll or real command
 
 # --- ROOMBA PAYLOADS ---
 # Each is prefixed 0x83 (Safe): re-enters SAFE mode first, so a command self-heals if a
@@ -114,6 +126,21 @@ GAME_OVER_TUNE = b'\x83\x8c\x00\x04\x4f\x08\x53\x08\x56\x0c\x5b\x28\x8d\x00'
 GAME_OVER_MS = 1100
 # Re-enter chime: two quick rising notes.
 START_TUNE = b'\x83\x8c\x00\x02\x4f\x08\x56\x10\x8d\x00'
+
+# Safety-toggle chimes (a pair, like the session game-over/restart tunes): SAFE = a cautious
+# descending two-note ("settling into the cage"); FULL = a confident rising two-note ("free").
+# The leading 0x83 is rewritten to the new oi_mode at send time, so the tune itself asserts it.
+SAFE_TUNE = b'\x83\x8c\x00\x02\x54\x0c\x48\x14\x8d\x00'   # 84 -> 72, down
+FULL_TUNE = b'\x83\x8c\x00\x02\x48\x0c\x54\x14\x8d\x00'   # 72 -> 84, up
+
+# Sleep: a graceful "goodnight" -- a descending C-major arpeggio (C5 G4 E4) settling onto a held
+# low C4. Deliberate and resolved, not the harsh error chirp; it reads as "powering down" not "fail".
+SLEEP_TUNE = b'\x83\x8c\x00\x04\x48\x0c\x43\x0c\x40\x0c\x3c\x20\x8d\x00'   # 72 67 64 -> held 60
+
+# X = sleep (OI Power, 133 -> Roomba powers down); Y = dock (Seek Dock, 143 -> drives to the
+# home base). Both lead with the mode byte (rewritten to oi_mode) like every command.
+SLEEP_CMD = b'\x83\x85'   # 133 Power -> sleep
+DOCK_CMD  = b'\x83\x8f'   # 143 Seek Dock
 
 # --- MOVEMENT (OI Drive, opcode 137 = 0x89: [vel_hi vel_lo][radius_hi radius_lo]) ---
 # HOLD-TO-MOVE: a drive verb SETS a velocity (non-blocking) and the Roomba holds it until
@@ -146,8 +173,13 @@ def _open(retry_alt_baud=True):
     return roomba
 
 def try_with_recovery(write_data, label=""):
-    """Send data, auto-recover if baud rate changed."""
+    """Send data, auto-recover if baud rate changed. Command payloads LEAD with an OI mode
+    byte (0x83/0x84); rewrite that byte to the CURRENT oi_mode so the Y 'safety' toggle takes
+    effect on every command. Sensor reads (get_telemetry/get_sensors) bypass this path, so
+    their query bytes are untouched."""
     global current_baud_idx, roomba
+    if write_data and write_data[0] in (0x83, 0x84):
+        write_data = bytes([oi_mode]) + write_data[1:]
     try:
         _open().write(write_data)
         return True
@@ -228,11 +260,47 @@ def get_sensors():
         print("[Sensors] Error:", e)
         return {}
 
+def do_sleep():
+    """Park the Roomba: a graceful 'goodnight' descending resolve, then OI Power (deep sleep).
+    Sets `asleep` so the loop won't re-sleep and the next activity wakes it."""
+    global asleep
+    try_with_recovery(SLEEP_TUNE, "sleep-tune")
+    time.sleep(0.7)                     # let the tune ring out before it powers down
+    try_with_recovery(SLEEP_CMD, "sleep")
+    asleep = True
+    print("[Sleep] parked")
+
+def do_wake():
+    """Wake a Power-slept Roomba. OI spec: hold Device Detect (BRC) LOW >=500ms; then boot, reopen
+    the UART + Start + mode, with a baud-drift fallback. Clears `asleep` + a rising chime."""
+    global asleep
+    brc_pin.value(0); time.sleep(0.6); brc_pin.value(1)   # >=500ms low -> WAKE
+    time.sleep(2)                                         # let it boot
+    open_roomba_uart()
+    oi_start()
+    if not get_telemetry():                              # no reply -> baud drifted on the cycle
+        brc_pulse(); open_roomba_uart(); oi_start()
+    try_with_recovery(START_TUNE, "wake")
+    asleep = False
+    print("[Wake] up")
+
+def note_activity():
+    """Register real use (a /status poll or a command): resets the idle timer, and if the Roomba
+    had auto-slept, wakes it first so the caller talks to a live robot."""
+    global last_activity_ms
+    last_activity_ms = time.ticks_ms()
+    if asleep:
+        do_wake()
+
 def send_command(action):
     """Execute a Roomba command by action name. Auto-recovers on baud rate changes."""
-    global headlights_active, session_active, last_command, driving, last_drive_ms
+    global headlights_active, session_active, last_command, driving, last_drive_ms, oi_mode
 
     try:
+        # Any real command = activity: reset the idle timer and wake an auto-slept robot first.
+        # Skip the sleep/wake verbs (they manage sleep themselves) and 'ping' (drive keepalive).
+        if action not in ("sleep", "wake", "ping"):
+            note_activity()
         if action == "lights":
             headlights_active = not headlights_active
             dashboard_led.value(1 if headlights_active else 0)
@@ -243,6 +311,32 @@ def send_command(action):
             try_with_recovery(ROBOT_ERROR, "error")
         elif action == "horn":
             try_with_recovery(HORN, "horn")
+        elif action == "safety":
+            # Y toggles the drive safety AND the headlights together, so the LIGHTS ARE the
+            # mode indicator -- instant + physical, no UI lag: lights ON = FULL (free), lights
+            # OFF = SAFE (cliff/wheel-drop protected = "caged"). A pair of chimes marks it too.
+            # Set oi_mode FIRST so the tune's rewritten mode byte asserts the new mode.
+            if oi_mode == 0x84:
+                oi_mode = 0x83
+                headlights_active = False
+                dashboard_led.value(0)
+                try_with_recovery(SAFE_TUNE, "safe-on")
+                try_with_recovery(LIGHTS_OFF, "safe-lights")
+            else:
+                oi_mode = 0x84
+                headlights_active = True
+                dashboard_led.value(1)
+                try_with_recovery(FULL_TUNE, "safe-off")
+                try_with_recovery(LIGHTS_ON, "full-lights")
+        elif action == "sleep":
+            do_sleep()
+        elif action == "dock":
+            # Y: a cheerful "heading home" chirp, then Seek Dock -> it drives to the base.
+            # Sending a drive command afterwards retakes manual control (re-asserts the mode).
+            try_with_recovery(ROBOT_SOUND, "dock-tune")
+            try_with_recovery(DOCK_CMD, "dock")
+        elif action == "wake":
+            do_wake()
         elif action == "session":
             if session_active:
                 try_with_recovery(GAME_OVER_TUNE, "session-over")
@@ -376,12 +470,16 @@ def serve_http(conn):
             response = http_response("200 OK", "application/json",
                                    json.dumps({"ok": True, "version": FIRMWARE_VERSION}))
         elif path == '/status':
+            was_asleep = asleep   # SNAPSHOT before the poll wakes it, so the UI can see it WAS parked
+            note_activity()   # a poll = you're on the surface -> reset idle timer + wake if napped
             tel = get_telemetry()
             response = http_response("200 OK", "application/json",
                                    json.dumps({
                                        "online": True,
                                        "active": session_active,     # play/pause gate
+                                       "asleep": was_asleep,         # state at poll START (was it parked?)
                                        "lights": headlights_active,
+                                       "safety": "safe" if oi_mode == 0x83 else "full",  # Y-toggled drive mode
                                        "last_command": last_command,
                                        "battery": tel.get("battery_pct"),
                                        "telemetry": tel,             # OI battery group
@@ -486,6 +584,12 @@ while True:
         if driving and time.ticks_diff(time.ticks_ms(), last_drive_ms) > DEADMAN_MS:
             _stop_moving()
             print("[Deadman] auto-stop")
+
+        # AUTO-SLEEP: awake, not driving, and no poll/command for IDLE_SLEEP_MS -> park it.
+        if (not asleep) and (not driving) and \
+           time.ticks_diff(time.ticks_ms(), last_activity_ms) > IDLE_SLEEP_MS:
+            print("[Auto-sleep] idle %ds -> sleeping" % (IDLE_SLEEP_MS // 1000))
+            do_sleep()
 
         time.sleep_ms(200)
 

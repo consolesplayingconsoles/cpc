@@ -5,9 +5,9 @@
   "controls": { "Enter": "START", "action": "A", "cancel": "B" },
   "actions": {
     "A": "horn",
-    "B": "robot",
-    "Y": "error",
-    "X": "lights",
+    "B": "safety",
+    "Y": "dock",
+    "X": "listen",
     "D_UP": "drive-forward",
     "D_DOWN": "drive-back",
     "D_LEFT": "turn-left",
@@ -32,10 +32,10 @@
     { "key": "d", "btn": "D_RIGHT", "label": "Right", "col": 3, "row": 3 },
     { "key": "s", "btn": "D_DOWN",  "label": "Down",  "col": 2, "row": 4 },
     { "key": "Enter", "btn": "START", "label": "Start", "col": 5, "row": 3 },
-    { "key": "i", "btn": "Y", "label": "Y", "col": 8, "row": 2 },
-    { "key": "j", "btn": "X", "label": "X", "col": 7, "row": 3 },
-    { "key": "l", "btn": "B", "label": "B", "col": 9, "row": 3 },
-    { "key": "k", "btn": "A", "label": "A", "col": 8, "row": 4 }
+    { "key": "i", "btn": "Y", "label": "Dock",  "col": 8, "row": 2 },
+    { "key": "j", "btn": "X", "label": "Listen", "col": 7, "row": 3 },
+    { "key": "l", "btn": "B", "label": "Safe",  "col": 9, "row": 3 },
+    { "key": "k", "btn": "A", "label": "Honk",  "col": 8, "row": 4 }
   ],
   "colors": {
     "L": "#8a9099", "R": "#8a9099",
