@@ -21,6 +21,8 @@ interface Sensors {
 }
 interface Status {
   online?: boolean; active?: boolean; lights?: boolean; last_command?: string | null
+  safety?: string   // 'full' (safeties off, free) | 'safe' (cliff/wheel-drop protection) -- Y toggle
+  asleep?: boolean  // snapshot at poll START: it was auto-parked and this poll is waking it
   battery?: number | null; telemetry?: Telemetry; sensors?: Sensors
 }
 
@@ -36,10 +38,20 @@ async function poll() {
     data.value = await r.json(); error.value = ''
   } catch { error.value = 'unreachable' }
 }
-function start() { stop(); if (props.active && props.ip) { poll(); timer = window.setInterval(poll, POLL_MS) } }
+// Sleep/wake is fully AUTOMATIC (firmware: idle -> park, poll -> wake), so there are no manual
+// buttons -- they'd be self-defeating (this very poll wakes it). We just surface the snapshot:
+// `data.asleep` is the state at the START of the poll, so on the first poll back it reads true
+// ("it was parked, now waking"), then clears.
+
+// Poll only when the tab is BOTH active and visible. Pausing on hidden (switched apps / minimised)
+// stops the throttled background poll that would otherwise keep resetting the firmware's idle
+// timer and prevent auto-sleep -- so "away = no polls = it naps" actually holds.
+function start() { stop(); if (props.active && props.ip && !document.hidden) { poll(); timer = window.setInterval(poll, POLL_MS) } }
 function stop()  { if (timer) { clearInterval(timer); timer = 0 } }
+function onVisibility() { start() }   // hidden -> stop (let it sleep); visible -> resume (wakes it)
 watch(() => [props.active, props.ip], start, { immediate: true })
-onBeforeUnmount(stop)
+document.addEventListener('visibilitychange', onVisibility)
+onBeforeUnmount(() => { stop(); document.removeEventListener('visibilitychange', onVisibility) })
 
 const tel = computed<Telemetry>(() => data.value?.telemetry || {})
 const sen = computed<Sensors>(() => data.value?.sensors || {})
@@ -83,8 +95,10 @@ const metrics = computed(() => {
         <UiBattery :pct="pct" :charging="charging" />
         <span class="tel__pills">
           <span class="tel__pill" :class="data?.active ? 'is-ok' : 'is-warn'">{{ data?.active ? 'Playing' : 'Paused' }}</span>
-          <span v-if="sen.mode" class="tel__pill" :class="sen.mode === 'full' ? 'is-warn' : 'is-idle'" :title="sen.mode === 'full' ? 'Full: cliff/wheel-drop safeties OFF' : ''">{{ sen.mode }} mode</span>
-          <span v-if="data?.lights" class="tel__pill is-accent">Lights</span>
+          <!-- safety + lights are merged: lights follow the mode (on=Full, off=Safe), so one pill says both -->
+          <span v-if="data?.safety" class="tel__pill" :class="data.safety === 'full' ? 'is-warn' : 'is-ok'" :title="data.safety === 'full' ? 'Full: safeties OFF, lights ON (drives off edges)' : 'Safe: cliff/wheel-drop protection ON, lights OFF'">{{ data.safety === 'full' ? 'Full · lights on' : 'Safe · lights off' }}</span>
+          <!-- snapshot: it was auto-parked when this poll arrived (and this poll is waking it) -->
+          <span v-if="data?.asleep" class="tel__pill is-idle" title="Was parked to save battery; this visit is waking it">💤 Was parked</span>
         </span>
       </div>
 

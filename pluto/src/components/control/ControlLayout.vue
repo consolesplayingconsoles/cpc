@@ -2,6 +2,7 @@
 import { useSlots, computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import ControlKeyboard from './ControlKeyboard.vue'
 import RoombaTelemetry from './RoombaTelemetry.vue'
+import RoombaCamera from './RoombaCamera.vue'
 
 interface Props {
   active: boolean
@@ -17,6 +18,16 @@ const props = defineProps<Props>()
 const shouldShowTelemetry = computed(() => props.target === 'roomba' && props.roombaIp)
 defineEmits<{ 'drive-error': [msg: string] }>()
 
+const slots = useSlots()
+// NE gets the roomba camera when target is roomba AND the source hasn't claimed the slot
+// (keyboard + DreamPicoPort both leave NE free). Mirrors the SW=telemetry hardcode.
+const shouldShowCamera = computed(() =>
+  props.target === 'roomba' && !!props.targetDev && !slots['ne'])
+
+// Hold-to-listen: the controller's X (verb 'listen') emits here; we relay it to the camera panel
+// so it plays the camera audio while held. Purely local -- never touches the Roomba.
+const listening = ref(false)
+
 // Phone / narrow: drop the 2x2 grid and STACK the quadrants in DOM order (nw, ne, sw, se) as a
 // scrollable column. The controller (se) is last -> lands under your thumbs -> and gets a tall
 // min-height so it becomes a full-width touch pad (phone-as-controller). matchMedia (not a CSS
@@ -31,10 +42,10 @@ onMounted(() => {
 })
 onBeforeUnmount(() => { mq?.removeEventListener('change', onMq) })
 
-const slots = useSlots()
 const has = (n: string) => {
   if (n === 'se') return true  // SE is always hardcoded
   if (n === 'sw') return shouldShowTelemetry.value  // SW (telemetry) rendered if target is roomba
+  if (n === 'ne') return !!slots['ne'] || shouldShowCamera.value  // NE: source slot or the camera
   return !!slots[n]
 }
 
@@ -67,12 +78,14 @@ function cellStyle(cell: 'nw' | 'ne' | 'sw' | 'se') {
 
     <div class="ql-grid" :class="{ stacked: isNarrow }">
       <div v-if="has('nw')" class="quad" :style="isNarrow ? undefined : cellStyle('nw')"><slot name="nw" /></div>
-      <div v-if="has('ne')" class="quad" :style="isNarrow ? undefined : cellStyle('ne')"><slot name="ne" /></div>
+      <div v-if="has('ne')" class="quad" :style="isNarrow ? undefined : cellStyle('ne')">
+        <slot name="ne"><RoombaCamera v-if="shouldShowCamera" :node="targetDev" :active="active" :listening="listening" /></slot>
+      </div>
       <div v-if="shouldShowTelemetry" class="quad" :style="isNarrow ? undefined : cellStyle('sw')">
         <RoombaTelemetry :ip="roombaIp!" :active="active" />
       </div>
       <div class="quad quad--main" :style="isNarrow ? undefined : cellStyle('se')">
-        <ControlKeyboard :active="active" :map-source="mapSource" :target="target" :mapping="mapping" :target-dev="targetDev" :narrow="isNarrow" @drive-error="$emit('drive-error', $event)" />
+        <ControlKeyboard :active="active" :map-source="mapSource" :target="target" :mapping="mapping" :target-dev="targetDev" :narrow="isNarrow" @drive-error="$emit('drive-error', $event)" @listen="listening = $event" />
       </div>
     </div>
 

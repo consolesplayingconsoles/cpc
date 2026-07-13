@@ -24,7 +24,7 @@ const router = createRouter({
     // param) so existing /control/source/target/mapping links keep parsing. Its
     // meaning is defined by the target -- which pico under 'pi', which roomba node
     // under 'roomba'; targets without subtargets never fill it.
-    { path: '/control/:source?/:target?/:mapping?/:sub?', name: 'control', component: Blank, meta: { hashtag: '#anything-playing-consoles' } },
+    { path: '/control/:source?/:target?/:mapping?/:sub?', name: 'control', component: Blank, meta: { hashtag: '#anything-playing-anything' } },
     // :ns is the project namespace (game + language) — rides the URL so a reload /
     // HMR / bookmark restores the open table instead of dropping to the picker.
     { path: '/translation/:ns?', name: 'translation', component: Blank, meta: { hashtag: '#consolas-traduciendo-consolas' } },

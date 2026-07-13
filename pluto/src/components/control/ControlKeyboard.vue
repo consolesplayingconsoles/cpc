@@ -12,6 +12,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Joystick from 'vue-joystick-component'
 import { joystickToAxis, keysToAxis, isDirButton, AXIS_CENTER } from '../../lib/analog'
+import { resolveDriveVerb } from '../../lib/driveVerb'
 
 interface LayoutKey { key: string; btn: string; label: string; col: number; row: number }
 interface Mapping {
@@ -31,7 +32,7 @@ const props = defineProps<{
   heading?: string       // eyebrow above the pad (e.g. "Manual Assistance") where the
                          // keyboard is a manual aid to another driver, not the player itself
 }>()
-const emit = defineEmits<{ 'drive-error': [string] }>()
+const emit = defineEmits<{ 'drive-error': [string]; 'listen': [boolean] }>()
 
 const API = `http://${window.location.hostname}:7700`
 // The virtual keyboard is the local exception; every other real target (pi, roomba)
@@ -52,17 +53,10 @@ function isDown(btn: string) { return pressed.value.has(btn) }
 // held together fires one 'forward-left' arc instead of two fighting nudges. We recompute it
 // on every press/release and only send a transition when it actually changes.
 const activeAction = ref<string | null>(null)
+// Held buttons -> one verb, via the SHARED resolver (same one the gamepad path uses), so
+// combos (verb-pairs) blend into arcs identically. See lib/driveVerb.ts.
 function computeEffectiveAction(): string | null {
-  const d = def.value
-  if (!d) return null
-  const held = Array.from(pressed.value)
-  if (!held.length) return null
-  // combinations win: if every btn of a combo is currently held, that's the verb
-  for (const combo in (d.combinations || {})) {
-    if (combo.split('+').every(b => pressed.value.has(b))) return d.combinations![combo]
-  }
-  // otherwise the single/last held btn's own verb
-  return d.actions?.[held[held.length - 1]] ?? null
+  return resolveDriveVerb(pressed.value, def.value)
 }
 
 // ── mapping: layout + colours ──────────────────────────────────────
@@ -193,9 +187,14 @@ function setDriveVerb(v: string | null) {
 }
 function syncActiveAction() { setDriveVerb(computeEffectiveAction()) }
 
+// A button whose verb is 'listen' is a LOCAL hold control (hold-to-listen to the camera audio),
+// not a target command -- so it emits up instead of driving anything.
+function isListen(btn: string) { return def.value?.actions?.[btn] === 'listen' }
+
 function press(btn: string) {
   if (pressed.value.has(btn)) return            // ignore key auto-repeat / re-entry
   const s = new Set(pressed.value); s.add(btn); pressed.value = s
+  if (isListen(btn)) { emit('listen', true); return }
   startKeepalive()
   if (analogKeys.value && isDirButton(btn)) sendKeyAxis()
   else if (verbMode.value) syncActiveAction()
@@ -204,6 +203,7 @@ function press(btn: string) {
 function release(btn: string) {
   if (!pressed.value.has(btn)) return
   const s = new Set(pressed.value); s.delete(btn); pressed.value = s
+  if (isListen(btn)) { emit('listen', false); return }
   if (analogKeys.value && isDirButton(btn)) sendKeyAxis()
   else if (verbMode.value) syncActiveAction()
   else holdPost(btn, false)
@@ -253,23 +253,15 @@ function stickStop(name: string) { axisPost(name, AXIS_CENTER.x, AXIS_CENTER.y) 
 // THROUGH the mapping so it's not Roomba-hardcoded: cardinals use `actions[D_*]`, diagonals
 // use `combinations[...]` (the blended arcs). Same verb set the d-pad fires.
 const STICK_DEAD = 0.28   // deflection (of the 0.5 half-range) before a direction registers
+// Quantise the stick to the d-pad direction BUTTONS, then run them through the shared
+// resolver -- so a diagonal becomes the same arc verb the keyboard/gamepad combos produce.
 function stickToVerb(x: number, y: number): string | null {
-  const d = def.value
-  if (!d?.actions) return null
   const dx = x - 0.5, dy = y - 0.5
   if (Math.abs(dx) < STICK_DEAD && Math.abs(dy) < STICK_DEAD) return null
-  const up = dy > STICK_DEAD, down = dy < -STICK_DEAD
-  const left = dx < -STICK_DEAD, right = dx > STICK_DEAD
-  const c = d.combinations || {}, a = d.actions
-  if (up && left)    return c['D_UP+D_LEFT']    || a['D_UP']   || null
-  if (up && right)   return c['D_UP+D_RIGHT']   || a['D_UP']   || null
-  if (down && left)  return c['D_DOWN+D_LEFT']  || a['D_DOWN'] || null
-  if (down && right) return c['D_DOWN+D_RIGHT'] || a['D_DOWN'] || null
-  if (up)    return a['D_UP']    || null
-  if (down)  return a['D_DOWN']  || null
-  if (left)  return a['D_LEFT']  || null
-  if (right) return a['D_RIGHT'] || null
-  return null
+  const btns = new Set<string>()
+  if (dy > STICK_DEAD) btns.add('D_UP'); else if (dy < -STICK_DEAD) btns.add('D_DOWN')
+  if (dx < -STICK_DEAD) btns.add('D_LEFT'); else if (dx > STICK_DEAD) btns.add('D_RIGHT')
+  return resolveDriveVerb(btns, def.value)
 }
 function stickDrive(e: { x?: number; y?: number }) {
   const v = joystickToAxis(e)
