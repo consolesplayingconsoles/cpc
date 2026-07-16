@@ -1,0 +1,10 @@
+# DreamPi Python deps, pinned to versions that pip-wheel cleanly on
+# Debian 13 (trixie) / Python 3.13 / aarch64. Installed into /opt/dreampi/venv
+# (PEP 668 forbids system-wide pip on trixie, so a venv is mandatory).
+pyserial==3.5
+requests==2.34.2
+sh==2.3.0
+netifaces==0.11.0
+python-iptables==1.2.0
+miniupnpc==2.3.3
+pystun3==2.0.0
