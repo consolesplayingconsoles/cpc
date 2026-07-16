@@ -1,0 +1,15 @@
+[Unit]
+Description=DreamPi (Dreamcast dial-up ISP bridge)
+After=network-online.target dnsmasq.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/dreampi
+ExecStart=/opt/dreampi/venv/bin/python /opt/dreampi/dreampi.py --no-daemon
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,5 @@
+# Pin the Conexant CX93001 USB modem (KALEA 56K) to a stable /dev name, so the
+# daemon never has to guess a ttyACM number. Needed because this Pi is a shared
+# hub: the Pico/DreamPicoPort fleet also enumerates as cdc_acm (ttyACM*), and
+# enumeration order is not stable across reboots. Match by USB VID:PID.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0572", ATTRS{idProduct}=="1340", SYMLINK+="dreampi-modem"
