@@ -183,6 +183,11 @@ async function openConfig() {
 // the node you deployed, independent of which drawer (if any) is open.
 const deployTermId = ref<string | null>(null)
 function startDeploy(id: string) { deployTermId.value = id; deploy(id) }
+// Sync saves -> Dropbox. Batocera runs the mirror; the result (and any "not wired
+// yet" for other nodes) surfaces in the chat feed, so this is fire-and-forget.
+function startSync(id: string) {
+  fetch(`${API_BASE}/sync/${id}`, { method: 'POST' }).catch(() => { /* chat reflects it */ })
+}
 function closeDeployTerm() {
   if (deployTermId.value) clearOutput(deployTermId.value)
   deployTermId.value = null
@@ -340,6 +345,7 @@ watch(hoveredNode, () => nextTick(updatePeekPos))
         :last-at="lastDeployedAt[activeMenu] ?? null"
         @close="closeMenu"
         @deploy="startDeploy(activeMenu)"
+        @sync="startSync(activeMenu)"
         @open-smb="openSmb(activeMenu)"
         @open-config="openConfig"
         @open-tab="emit('open-tab', 'robutek')"
