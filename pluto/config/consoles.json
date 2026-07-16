@@ -1,0 +1,30 @@
+{
+  "_comment": "Canonical save namespace for Dropbox /saves. `consoles` = REAL Batocera system folder names (1:1 mirror of /userdata/saves/<system>, so batocera<->Dropbox needs no reconciliation). Seeded from batocera's NON-EMPTY save dirs (systems that actually hold saves, 2026-07-15); new consoles materialise lazily on first sync. Pluto owns this list; the @dropbox cloud picker shows it, and the Vue app imports it. `nodeConsoles` = which consoles each node can host (many-to-many: wii runs wii + gamecube; dc + vmu both serve dreamcast; ws covers wswan mono + wswanc colour). '*' = emulator host, serves any console. A node may map to a console not yet in `consoles` -- it appears once its saves first sync up.",
+  "consoles": [
+    "snes",
+    "psx",
+    "saturn",
+    "dreamcast",
+    "pcenginecd",
+    "megacd",
+    "mame",
+    "wswan",
+    "wswanc",
+    "psp",
+    "sufami",
+    "nds",
+    "n64"
+  ],
+  "nodeConsoles": {
+    "dc":        ["dreamcast"],
+    "vmu":       ["dreamcast"],
+    "wii":       ["wii", "gamecube"],
+    "megadrive": ["megadrive"],
+    "saturn":    ["saturn"],
+    "gba":       ["gba"],
+    "ws":        ["wswan", "wswanc"],
+    "ps3":       ["ps3"],
+    "batocera":  ["*"],
+    "lab":       ["*"]
+  }
+}

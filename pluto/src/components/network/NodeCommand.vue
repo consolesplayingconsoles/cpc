@@ -9,21 +9,24 @@ import UiSelect from '../ui/UiSelect.vue'
 // the parent posts it to /messages (logged in the chat feed AND messages.log).
 // Every verb is always sendable — an unbuilt one gets a gracious "not implemented
 // yet" from the server. The backend is the contract; the UI never pre-judges.
-interface Cmd { verb: string; desc?: string; target?: string; multiline?: boolean; url?: string; script?: string; credit?: string }
+interface Cmd { verb: string; desc?: string; target?: string; pick?: 'node' | 'console'; multiline?: boolean; url?: string; script?: string; credit?: string }
 
 const props = defineProps<{
-  handle:   string                              // e.g. "@dropbox"
-  cmd:      Cmd
-  targets?: { label: string; value: string }[]  // for the node-dropdown shape
+  handle:    string                              // e.g. "@dropbox"
+  cmd:       Cmd
+  targets?:  { label: string; value: string }[]  // node picker (pick: 'node' | legacy target)
+  consoles?: { label: string; value: string }[]  // console picker (pick: 'console')
 }>()
 const emit = defineEmits<{ run: [text: string] }>()
 
-const kind  = computed(() => props.cmd.multiline ? 'text' : props.cmd.target ? 'node' : 'button')
+// A verb picks its dropdown source: pick:'console' -> consoles, else the node list.
+const opts  = computed(() => props.cmd.pick === 'console' ? (props.consoles ?? []) : (props.targets ?? []))
+const kind  = computed(() => props.cmd.multiline ? 'text' : (props.cmd.pick || props.cmd.target) ? 'node' : 'button')
 const label = computed(() => props.cmd.verb.charAt(0).toUpperCase() + props.cmd.verb.slice(1))
 const base  = computed(() => `${props.handle} ${props.cmd.verb}`)
 
 const text   = ref('')
-const target = ref(props.targets?.[0]?.value ?? '@everyone')
+const target = ref(opts.value[0]?.value ?? '@everyone')
 const sent   = ref(false)
 
 function fire(arg?: string) {
@@ -61,7 +64,7 @@ function fire(arg?: string) {
     </div>
     <div class="cmd__row">
       <UiSelect v-model="target" class="cmd__select">
-        <option v-for="t in targets" :key="t.value" :value="t.value">{{ t.label }}</option>
+        <option v-for="t in opts" :key="t.value" :value="t.value">{{ t.label }}</option>
       </UiSelect>
       <UiButton variant="primary" class="cmd__send" @click="fire(target)">Send</UiButton>
     </div>

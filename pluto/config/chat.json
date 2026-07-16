@@ -17,10 +17,8 @@
       { "verb": "stop",   "desc": "stop / park in place" }
     ],
     "dropbox": [
-      { "verb": "sync",         "desc": "back up saved games from console to cloud", "target": "vmu" },
-      { "verb": "console-list", "desc": "list saved games on the console",           "target": "vmu" },
-      { "verb": "cloud-list",   "desc": "list saved games backed up in the cloud",   "target": "vmu" },
-      { "verb": "restore",      "desc": "restore a saved game",                      "target": "vmu" }
+      { "verb": "cloud", "desc": "list cloud saves for a console", "pick": "console" },
+      { "verb": "node",  "desc": "list saves on a node",           "pick": "node" }
     ],
     "substack": [
       { "verb": "post", "desc": "write & broadcast to substack", "multiline": true }

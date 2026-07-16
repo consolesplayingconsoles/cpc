@@ -9,9 +9,12 @@ import UiClose from '../ui/UiClose.vue'
 import UiActionRow from '../ui/UiActionRow.vue'
 import UiIconButton from '../ui/UiIconButton.vue'
 import chatConfig from '../../../config/chat.json'
+import consolesConfig from '../../../config/consoles.json'
 
-interface Cmd  { verb: string; desc?: string; target?: string; multiline?: boolean; url?: string; script?: string; credit?: string }
+interface Cmd  { verb: string; desc?: string; target?: string; pick?: 'node' | 'console'; multiline?: boolean; url?: string; script?: string; credit?: string }
 const NODE_ACTIONS = (chatConfig.nodeActions ?? {}) as Record<string, Cmd[]>
+// Canonical console list (Batocera-native names) for the @dropbox cloud picker.
+const CONSOLES = ((consolesConfig.consoles ?? []) as string[]).map(c => ({ label: c, value: c }))
 const HANDLES      = (chatConfig.mentions.handles ?? {}) as Record<string, string>
 
 const props = defineProps<{
@@ -27,10 +30,16 @@ const props = defineProps<{
 const emit = defineEmits<{
   close:         []
   deploy:        []
+  sync:          []
   'open-smb':    []
   'open-config': []
   'open-tab':    []
 }>()
+
+// Sync button: emit up (parent POSTs /sync/{id}); the result lands in the chat feed,
+// so here we just give a brief "Started…" ack.
+const syncing = ref(false)
+function doSync() { emit('sync'); syncing.value = true; setTimeout(() => { syncing.value = false }, 2000) }
 
 // Files (SMB) need the node reachable. DEPLOY does not: it's a dev action (SSH push or
 // USB flash) that may target an offline box on purpose — let it run and surface any
@@ -245,6 +254,17 @@ function postCommand(text: string) {
         </UiActionRow>
       </section>
 
+      <!-- Saves: the Sync button shows on every non-cloud node (the "usual" pattern);
+           the API runs it for batocera and honestly reports the rest as unbuilt. -->
+      <section v-if="!node.cloud" class="nd__sec">
+        <p class="nd__lbl">Saves</p>
+        <UiActionRow :disabled="syncing" @click="doSync">
+          <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v6h-6"/></svg>
+          <span>Sync saves</span>
+          <span v-if="syncing" class="nd__act-note">Started…</span>
+        </UiActionRow>
+      </section>
+
       <section v-if="picos.length" class="nd__sec">
         <p class="nd__lbl">Picos</p>
         <div v-for="p in picos" :key="p.chipid" class="nd__pico">
@@ -275,7 +295,7 @@ function postCommand(text: string) {
         <p class="nd__lbl">Commands</p>
         <NodeCommand
           v-for="c in commands" :key="c.verb"
-          :handle="handle" :cmd="c" :targets="targets"
+          :handle="handle" :cmd="c" :targets="targets" :consoles="CONSOLES"
           @run="postCommand"
         />
       </section>

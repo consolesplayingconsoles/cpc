@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 interface ActivityMessage {
   id:     number
@@ -17,10 +17,22 @@ const emit = defineEmits<{ expand: [] }>()
 
 const collapsed = ref(false)
 const recent = computed(() => props.messages.slice(-props.max))
+
+// Gentle attention cue: a soft accent ring pulses whenever a new message lands, so a
+// reply to a fire-and-forget action (like Sync) isn't easy to miss down here. Ignores
+// the initial load (prev undefined) so it only fires on genuinely new messages.
+const pinged = ref(false)
+let pingTimer: ReturnType<typeof setTimeout> | undefined
+watch(() => props.messages[props.messages.length - 1]?.id, (id, prev) => {
+  if (id === undefined || prev === undefined || id <= prev) return
+  pinged.value = true
+  clearTimeout(pingTimer)
+  pingTimer = setTimeout(() => { pinged.value = false }, 1400)
+})
 </script>
 
 <template>
-  <div v-if="messages.length" class="activity" :class="{ 'activity--collapsed': collapsed }" @click.stop>
+  <div v-if="messages.length" class="activity" :class="{ 'activity--collapsed': collapsed, 'activity--ping': pinged }" @click.stop>
     <div class="activity__head">
       <span class="activity__label">Recent Activity</span>
       <span class="activity__btns">
@@ -49,8 +61,8 @@ const recent = computed(() => props.messages.slice(-props.max))
 <style scoped>
 /* recent-activity tail — quiet glass peek, bottom-left, mirrors .zoom-controls */
 .activity {
-  width: 360px;
-  max-width: 360px;
+  width: 504px;
+  max-width: 504px;
   padding: 9px 11px 10px;
   background: var(--tab-track);
   backdrop-filter: blur(10px);
@@ -59,6 +71,13 @@ const recent = computed(() => props.messages.slice(-props.max))
   border-radius: 10px;
   box-shadow: 0 6px 22px rgba(26, 34, 51, 0.10);
 }
+/* gentle pulse when a new message arrives — a soft accent ring that fades out */
+.activity--ping { animation: activity-ping 1.4s ease-out; }
+@keyframes activity-ping {
+  0%   { border-color: var(--accent); box-shadow: 0 6px 22px rgba(26, 34, 51, 0.10), 0 0 0 3px var(--accent-soft); }
+  100% { border-color: var(--line);   box-shadow: 0 6px 22px rgba(26, 34, 51, 0.10), 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .activity--ping { animation: none; } }
 .activity__head {
   display: flex;
   align-items: center;

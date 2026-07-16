@@ -9,6 +9,8 @@ Usage: python3 api/api.py
 import os
 import sys
 import json
+import zlib
+import tempfile
 import platform
 import subprocess
 import http.server
@@ -189,34 +191,310 @@ def _claude_reply(messages_snapshot):
     _new_message(BOT_ID, reply)
 
 
-def _dropbox_dispatch(verb, text, roster):
-    """Route @dropbox verbs: sync / console-list / cloud-list."""
-    pi = (roster or {}).get("pi") or {}
-    host = pi.get("HOST_IP", "").strip()
-    port = pi.get("PI_SYNC_PORT", "7721").strip()
-    # parse optional @target (e.g. "@dropbox sync @dc")
-    target = next((t[1:] for t in text.lower().split() if t.startswith("@") and t != "@dropbox"), None)
+# Dropbox saves live under one canonical namespace, keyed by REAL console name
+# (not node name -- one node hosts many consoles, e.g. wii runs wii + gamecube).
+# The console list + node->console map are Pluto-owned (config/consoles.json); the
+# @dropbox dropup shows them client-side, so bare/unknown forms here just print a
+# usage hint. Per-console metadata (_cpc.json, the conflict ledger) is hidden from
+# listings. Folders are lazy: absent on read -> "empty", created on write.
+_SAVES_ROOT   = "/saves"
+_LEDGER_NAME  = "_cpc.json"
 
-    if verb == "cloud-list":
-        _new_message("dropbox", "cloud-list: not implemented yet.")
+
+def _dropbox_api(token, endpoint, body):
+    """POST to the Dropbox v2 HTTP API (no SDK -- stdlib urllib, 3.6-safe). Returns
+    the decoded JSON dict; raises HTTPError so callers can map codes to UX."""
+    req = Request("https://api.dropboxapi.com/2/" + endpoint,
+                  data=json.dumps(body).encode(),
+                  headers={"Authorization": "Bearer " + token,
+                           "Content-Type": "application/json"})
+    with urlopen(req, timeout=15) as r:
+        return json.loads(r.read().decode())
+
+
+def _dropbox_cloud_list(console, token):
+    """@dropbox cloud <console> list -> live list of that console's saves in the
+    cloud. Missing folder is not an error (lazy namespace) -> reports empty."""
+    if not token:
+        _new_message("dropbox", "no DROPBOX_TOKEN set -- add it to nodes/cloud/dropbox/.env.")
         return
+    path = "%s/%s" % (_SAVES_ROOT, console)
+    try:
+        res = _dropbox_api(token, "files/list_folder", {"path": path})
+    except HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8", "replace").strip()[:300]
+        except Exception:
+            pass
+        if exc.code == 409 and "not_found" in body:  # folder not created yet -> lazy empty
+            _new_message("dropbox", "%s: empty (no folder yet)." % console)
+        elif exc.code == 401:
+            _new_message("dropbox", "Dropbox auth failed -- check DROPBOX_TOKEN. %s" % body)
+        else:
+            _new_message("dropbox", "cloud list failed: HTTP %d -- %s" % (exc.code, body))
+        return
+    except Exception as exc:
+        _new_message("dropbox", "cloud list failed: %s" % exc)
+        return
+    names = sorted(e["name"] for e in res.get("entries", [])
+                   if e.get(".tag") == "file" and e.get("name") != _LEDGER_NAME)
+    if names:
+        _new_message("dropbox", "%s (%d): %s" % (console, len(names), ", ".join(names)))
+    else:
+        _new_message("dropbox", "%s: empty." % console)
 
-    # sync and console-list both go to the Pi hub
-    if not host:
-        _new_message("dropbox", "Pi node has no HOST_IP -- unavailable.")
+
+def _dropbox_upload(token, path, data):
+    """files/upload (content endpoint), overwrite mode. Saves are small (<8 MB)."""
+    req = Request("https://content.dropboxapi.com/2/files/upload", data=data,
+                  headers={"Authorization": "Bearer " + token,
+                           "Dropbox-API-Arg": json.dumps({"path": path, "mode": "overwrite", "mute": True}),
+                           "Content-Type": "application/octet-stream"})
+    with urlopen(req, timeout=120) as r:
+        return json.loads(r.read().decode())
+
+
+def _dropbox_download(token, path):
+    """files/download -> bytes, or None when the path doesn't exist (409)."""
+    req = Request("https://content.dropboxapi.com/2/files/download",
+                  headers={"Authorization": "Bearer " + token,
+                           "Dropbox-API-Arg": json.dumps({"path": path})})
+    try:
+        with urlopen(req, timeout=60) as r:
+            return r.read()
+    except HTTPError as exc:
+        if exc.code == 409:
+            return None
+        raise
+
+
+def _dropbox_copy(token, from_path, to_path):
+    """files/copy_v2 -- server-side copy (no bandwidth). Used to snapshot a cloud save
+    into /backups before an override overwrites it, so any clobber is recoverable."""
+    req = Request("https://api.dropboxapi.com/2/files/copy_v2",
+                  data=json.dumps({"from_path": from_path, "to_path": to_path}).encode(),
+                  headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+    with urlopen(req, timeout=30) as r:
+        return json.loads(r.read().decode())
+
+
+def _sync_audit(**entry):
+    """Append one JSON line to logs/sync-audit.log -- a durable trail of every sync
+    action (upload / override+backup / conflict / failure). Space is cheap; we keep it
+    all. Best-effort: a logging hiccup never breaks a sync."""
+    entry["ts"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    line = json.dumps(entry)
+    print("  [sync-audit] " + line)
+    if not _log_path:
         return
     try:
-        import urllib.request as _ur
-        import json as _json
-        payload = _json.dumps({"action": verb, "target": target}).encode()
-        req = _ur.Request("http://%s:%s/sync" % (host, port),
-                          data=payload, headers={"Content-Type": "application/json"})
-        with _ur.urlopen(req, timeout=10) as r:
-            result = _json.loads(r.read().decode())
-        msg = result.get("message") or result.get("error") or "%s done." % verb
+        logs_dir = os.path.join(os.path.dirname(_log_path), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        with open(os.path.join(logs_dir, "sync-audit.log"), "a") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
+def _save_class(name):
+    """Classify a save-dir file: 'state' (emulator savestate + its .png thumb, cloud-
+    only, emulator-locked) vs 'save' (battery/memory save a real console could load)."""
+    low = name.lower()
+    if ".state" in low or low.endswith((".ppst", ".png")):
+        return "state"
+    return "save"
+
+
+def _display_name(rel):
+    """Human game name for a save file, so the ledger is trackable by eye (you can't
+    read 'MK-51065'). Strips the state-slot + extension: 'Sonic.state3.png' -> 'Sonic',
+    'Super Mario World.srm' -> 'Super Mario World', 'MK-51065.A1.bin' -> 'MK-51065.A1'."""
+    base = os.path.basename(rel)
+    parts = re.split(r"\.state\d*", base, flags=re.I)
+    if len(parts) > 1:
+        return parts[0]
+    return os.path.splitext(base)[0]
+
+
+_SYNC_SKIP_DIRS = ("flatpak", "dolphin-emu")   # not save data
+_SYNC_SKIP_EXTS = (".cfg", ".txt")
+
+
+def _load_ledger(token, path):
+    """Fetch a cloud _cpc.json ledger -> its {file: entry} map, or {} if absent."""
+    raw = _dropbox_download(token, path)
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw.decode()).get("saves", {})
+    except Exception:
+        return {}
+
+
+def _sync_batocera(roster):
+    """MVP Sync (Pluto-orchestrated): mirror batocera's /userdata/saves -> Dropbox in
+    TWO trees by whether a file can travel to real hardware:
+      - battery SAVES -> /saves/<console>/     (canonical, shared, conflict-tracked)
+      - SAVESTATES    -> /states/<console>/batocera/  (per-node silo -- emulator/Everdrive
+                         states never interchange, so no shared namespace; backup only)
+    Each tree keeps its own _cpc.json ledger (crc32 + timestamp + last-writer + name +
+    save|state class). Save conflicts -- a cloud entry owned by ANOTHER node with a
+    different checksum -- are FLAGGED and never overwritten (start firing once VMU writes
+    the same console). Overrides snapshot to /backups first. Reports to the chat feed."""
+    sender = "dropbox"
+    token = ((roster or {}).get("dropbox") or {}).get("DROPBOX_TOKEN", "").strip()
+    if not token:
+        _new_message(sender, "sync: no DROPBOX_TOKEN set."); return
+    bato = (roster or {}).get("batocera") or {}
+    tgt  = bato.get("CUSTOM_SSH_ALIAS", "").strip() or bato.get("HOST_IP", "").strip()
+    if not tgt:
+        _new_message(sender, "sync: batocera has no SSH alias or HOST_IP."); return
+
+    # Pull a local mirror first -- rsync handles SSH, spaces in names, and deltas, so
+    # everything after is a local file walk (crc/classify/diff) + targeted uploads.
+    scratch  = os.path.join(tempfile.gettempdir(), "cpc-sync-batocera")
+    excludes = []
+    for d in _SYNC_SKIP_DIRS:
+        excludes += ["--exclude", d + "/"]
+    try:
+        subprocess.run(["rsync", "-a", "--timeout=30"] + excludes +
+                       ["%s:/userdata/saves/" % tgt, scratch + "/"],
+                       capture_output=True, timeout=180, check=True)
     except Exception as exc:
-        msg = "%s failed: %s" % (verb, exc)
-    _new_message("dropbox", msg)
+        _new_message(sender, "sync: couldn't pull batocera saves (%s)." % exc); return
+
+    now   = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamp = now.replace(":", "").replace("-", "")          # path-safe ts for /backups
+    up = unchanged = conflicts = overrides = 0
+    conflict_names = []
+    _sync_audit(event="sync_start", node="batocera")
+
+    for system in sorted(os.listdir(scratch)):
+        sysdir = os.path.join(scratch, system)
+        if not os.path.isdir(sysdir):
+            continue
+        saves_lp    = "%s/%s/%s" % (_SAVES_ROOT, system, _LEDGER_NAME)
+        states_lp   = "/states/%s/batocera/%s" % (system, _LEDGER_NAME)
+        saves_prev  = _load_ledger(token, saves_lp)
+        states_prev = _load_ledger(token, states_lp)
+        saves_new, states_new = {}, {}
+        for base, _dirs, files in os.walk(sysdir):
+            for fn in files:
+                if fn.lower().endswith(_SYNC_SKIP_EXTS):
+                    continue
+                fp  = os.path.join(base, fn)
+                rel = os.path.relpath(fp, sysdir)          # ledger key within the console
+                try:
+                    with open(fp, "rb") as f: data = f.read()
+                except Exception:
+                    continue
+                summ = format(zlib.crc32(data) & 0xffffffff, "08x")
+                cls  = _save_class(fn)
+                # Route by class: saves are shared+canonical, states are node-siloed.
+                if cls == "save":
+                    cloud_path, prev, new_l = "%s/%s/%s" % (_SAVES_ROOT, system, rel), saves_prev.get(rel), saves_new
+                    # conflict (saves only): cloud copy last written by a DIFFERENT node and differs
+                    if prev and prev.get("node") not in (None, "batocera") and prev.get("sum") != summ:
+                        conflicts += 1
+                        conflict_names.append("%s/%s" % (system, rel))
+                        new_l[rel] = prev                  # keep theirs, flag, don't clobber
+                        _sync_audit(event="conflict", console=system, file=rel,
+                                    cloud_node=prev.get("node"), cloud_sum=prev.get("sum"), local_sum=summ)
+                        continue
+                else:
+                    cloud_path, prev, new_l = "/states/%s/batocera/%s" % (system, rel), states_prev.get(rel), states_new
+                if prev and prev.get("sum") == summ:
+                    unchanged += 1
+                    new_l[rel] = prev
+                    continue
+                # override -> snapshot the current cloud copy to /backups first (recoverable)
+                if prev:
+                    bak = "/backups%s@%s" % (cloud_path, stamp)
+                    try:
+                        _dropbox_copy(token, cloud_path, bak)
+                        overrides += 1
+                        _sync_audit(event="backup", console=system, file=rel,
+                                    backup=bak, old_sum=prev.get("sum"))
+                    except Exception as exc:
+                        _sync_audit(event="backup_failed", console=system, file=rel, error=str(exc))
+                try:
+                    _dropbox_upload(token, cloud_path, data)
+                except Exception as exc:
+                    _sync_audit(event="upload_failed", console=system, file=rel, error=str(exc))
+                    _new_message(sender, "sync: upload failed for %s/%s (%s)" % (system, rel, exc))
+                    continue
+                up += 1
+                _sync_audit(event="upload", console=system, file=rel, sum=summ,
+                            kind=("override" if prev else "new"), cls=cls)
+                names = dict((prev or {}).get("names", {})); names["batocera"] = rel
+                new_l[rel] = {"name": _display_name(rel), "updated": now, "node": "batocera",
+                              "sum": summ, "class": cls, "names": names}
+        if saves_new:
+            body = json.dumps({"console": system, "saves": saves_new}, indent=2).encode()
+            try:    _dropbox_upload(token, saves_lp, body)
+            except Exception as exc: _new_message(sender, "sync: saves ledger write failed for %s (%s)" % (system, exc))
+        if states_new:
+            body = json.dumps({"console": system, "node": "batocera", "saves": states_new}, indent=2).encode()
+            try:    _dropbox_upload(token, states_lp, body)
+            except Exception as exc: _new_message(sender, "sync: states ledger write failed for %s (%s)" % (system, exc))
+
+    _sync_audit(event="sync_done", node="batocera", uploaded=up, unchanged=unchanged,
+                overrides=overrides, conflicts=conflicts)
+    msg = "batocera sync: %d uploaded, %d unchanged" % (up, unchanged)
+    if overrides:
+        msg += " (%d override(s) backed up to /backups)" % overrides
+    if conflicts:
+        msg += ", %d CONFLICT(s) flagged (kept cloud copy): %s" % (conflicts, ", ".join(conflict_names[:6]))
+    _new_message(sender, msg + ".")
+
+
+def _dropbox_dispatch(verb, text, roster, consoles_cfg):
+    """Route @dropbox <domain> [selector] [subverb].
+
+      cloud <console> list   -> live Dropbox read of /saves/<console>  (wired)
+      node  @<handle> list    -> device-side read of a node's saves    (not wired yet)
+
+    `verb` is the matched domain token (cloud|node); the rest is parsed from `text`.
+    The dropup owns discovery client-side, so a bare or malformed form just prints a
+    short usage hint here."""
+    cfg      = consoles_cfg or {}
+    consoles = cfg.get("consoles", [])
+    node_map = cfg.get("nodeConsoles", {})
+    token    = ((roster or {}).get("dropbox") or {}).get("DROPBOX_TOKEN", "").strip()
+
+    low  = text.lower().split()
+    rest = low[low.index(verb) + 1:] if verb in low else []
+
+    if verb == "cloud":
+        if not rest:
+            _new_message("dropbox", "cloud: pick a console -- %s" % ", ".join(consoles))
+            return
+        console = rest[0]
+        if console not in consoles:
+            _new_message("dropbox", "unknown console '%s'. known: %s" % (console, ", ".join(consoles)))
+            return
+        sub = rest[1] if len(rest) > 1 else "list"
+        if sub == "list":
+            _dropbox_cloud_list(console, token)
+        else:
+            _new_message("dropbox", "cloud %s '%s' is not implemented yet." % (console, sub))
+        return
+
+    if verb == "node":
+        handle = next((t[1:] for t in rest if t.startswith("@")), None)
+        if not handle:
+            _new_message("dropbox", "node: pick a node -- %s" % ", ".join(sorted(node_map)))
+            return
+        hosts = node_map.get(handle)
+        if not hosts:
+            _new_message("dropbox", "node '%s' hosts no consoles (see config/consoles.json)." % handle)
+            return
+        served = "any console" if hosts == ["*"] else ", ".join(hosts)
+        _new_message("dropbox", "node @%s hosts: %s. device-side read is not wired yet." % (handle, served))
+        return
+
+    _new_message("dropbox", "usage: cloud <console> list  |  node @<handle> list")
 
 
 def _substack_post(creds, content):
@@ -1129,6 +1407,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     config      = {}
     base_dir    = ""
     chat_config = {}
+    consoles_config = {}  # config/consoles.json: canonical console namespace + node->console map
     node_roster = {}   # {name: cfg} discovered once at startup; the source of truth
     is_lab      = False  # this instance is the Lab (deploy engine present), not the C2
     lab_ip      = ""     # the Lab's address, when the C2 is told about it (LAB_IP)
@@ -1521,6 +1800,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_control_capture_grab()
         elif parsed.path == "/config/open":
             self._handle_open_config()
+        elif len(parts) == 2 and parts[0] == "sync":
+            self._handle_sync(parts[1])
         elif len(parts) == 3 and parts[0] == "native":
             self._handle_native(parts[1], parts[2])
         elif parsed.path == "/translate/run":
@@ -1621,9 +1902,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 creds = self.__class__.node_roster.get("substack", {})
                 threading.Thread(target=_substack_post, args=(creds, content), daemon=True).start()
                 return
-            if node_id == "dropbox" and hit in ("sync", "console-list", "cloud-list"):
+            if node_id == "dropbox" and hit in ("cloud", "node"):
                 threading.Thread(target=_dropbox_dispatch,
-                                 args=(hit, text, self.__class__.node_roster), daemon=True).start()
+                                 args=(hit, text, self.__class__.node_roster,
+                                       self.__class__.consoles_config), daemon=True).start()
                 return
             if hit == "run-script":
                 action = next((a for a in actions if a.get("verb") == "run-script"), None)
@@ -1685,6 +1967,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         threading.Thread(target=work, daemon=True).start()
 
     # ── Existing handlers (unchanged) ─────────────────────────────────────────
+
+    def _handle_sync(self, node_id):
+        """Sync button (node drawer). Batocera is wired (Pluto-orchestrated mirror ->
+        Dropbox + ledger, reported to chat); every other node honestly reports it's not
+        built yet -- the button shows everywhere, the API gates per node."""
+        if node_id == "batocera":
+            # Immediate echo so the click has feedback in the feed (the mirror runs in
+            # the background and posts its summary when done).
+            _new_message("dropbox", "syncing batocera saves to cloud...")
+            threading.Thread(target=_sync_batocera, args=(self.__class__.node_roster,),
+                             daemon=True).start()
+            self._send(200, {"ok": True, "message": "batocera sync started -- watch the chat feed."})
+        else:
+            # Honest gate: the button shows on every node; unbuilt ones say so in chat
+            # (same "the chat message IS the UX" model the other node replies use).
+            _new_message(node_id, "sync is not wired for %s yet." % node_id)
+            self._send(200, {"ok": True, "message": "not implemented"})
 
     def _handle_native(self, node_id, action):
         """A node's NATIVE-system action (e.g. the Wii's homebrew flash / game library),
@@ -3048,7 +3347,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # everywhere (bubble, drawer, deploy) so it reads apart from the Lab.
             name  = "Pluto C2" if node_id == "pluto" else console_cfg.get("NODE_NAME", node_id)
             color = console_cfg.get("UI_PRIMARY_COLOR") or None
-            smb   = console_cfg.get("SMB_PATH", "").strip() or None
+            # The FILES button opens whatever folder URL a node exposes -- SMB for the
+            # Linux/Windows nodes, FTP for a jailbroken console (a PS3's webMAN FTPd
+            # speaks ftp://, not SMB). One field carries either scheme; the frontend
+            # just hands the URL to the OS. SMB wins if a node somehow declares both.
+            smb   = (console_cfg.get("SMB_PATH", "").strip()
+                     or console_cfg.get("FTP_PATH", "").strip() or None)
             alias    = console_cfg.get("CUSTOM_SSH_ALIAS", "").strip()
             ssh_user = console_cfg.get("SSH_USER", "").strip()
             ssh_key  = console_cfg.get("SSH_KEY_PATH", "").strip()
@@ -3063,7 +3367,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # false on the deployed headless box. Deterministic (no build flag).
             ws         = os.path.expanduser(console_cfg.get("WORKSPACE_PATH", "").strip())
             has_code   = bool(ws) and os.path.isdir(ws)
-            configured = has_env and bool(ip)
+            configured = (has_env and bool(ip)) or name == "Pluto C2"
             up, det_os = pinged.get(ip, (False, None)) if configured else (False, None)
             status = ("up" if up else "down") if configured else "unconfigured"
             nodes[node_id] = {
@@ -3179,6 +3483,16 @@ def run():
         print("  chat.json: %d nodes with actions" % len(Handler.chat_config.get("nodeActions", {})))
     except Exception as exc:
         print("  chat.json: not loaded (%s)" % exc)
+
+    # Canonical save namespace: real console folder names + node->console map. Pluto
+    # owns this list (the @dropbox dropup shows it); also imported by the Vue app.
+    consoles_path = os.path.join(parent_dir, "config", "consoles.json")
+    try:
+        with open(consoles_path) as f:
+            Handler.consoles_config = json.load(f)
+        print("  consoles.json: %d consoles" % len(Handler.consoles_config.get("consoles", [])))
+    except Exception as exc:
+        print("  consoles.json: not loaded (%s)" % exc)
 
     global _bot_key, _bot_model, _bot_broke
     _bot_key = config.get("ANTHROPIC_API_KEY", "").strip() or None
