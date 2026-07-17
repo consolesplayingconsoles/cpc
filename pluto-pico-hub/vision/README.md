@@ -37,10 +37,12 @@ top of the script.
 
 ## What it emits
 
-A context line per frame, e.g. `PERSON=0.55 DIR=UP [L dx=+0.10 dy=-1.60]`:
+A context line per frame, e.g. `PERSON=0.55 DIR=UP WX=+0.42 WY=+0.18 [L dx=+0.10 dy=-1.60]`:
 - `PERSON` — torso confidence (aim the sensor until this is solid).
 - `DIR` — the classified direction of the extended arm (`neutral` = arm down; `no-ref` =
-  shoulders not found).
+  shoulders not found). Drives the UI's **Movement** mode (body-relative).
+- `WX WY` — the active wrist's ABSOLUTE position in the frame (0..1, screen-space), or `-`
+  when no wrist is found. Drives the UI's **Zone** mode (3×3 grid). Shoulder-independent.
 - `[which dx dy]` — active wrist and its position relative to the shoulder centre, in
   shoulder-width units (for tuning the thresholds).
 

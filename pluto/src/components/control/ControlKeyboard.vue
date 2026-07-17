@@ -11,6 +11,7 @@
 // is the human's collaboration surface on the Claude screen.
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Joystick from 'vue-joystick-component'
+import UiToggle from '../ui/UiToggle.vue'
 import { joystickToAxis, keysToAxis, isDirButton, AXIS_CENTER } from '../../lib/analog'
 import { resolveDriveVerb } from '../../lib/driveVerb'
 
@@ -385,10 +386,7 @@ function capStyle(it: LayoutKey) {
           <!-- dot follows key presses in analog-keys mode -->
           <div v-if="analogKeys" class="key-dot" :style="stickKnobStyle" />
         </div>
-        <button class="analog-pill" :class="{ on: wasdAnalog }" @click="wasdAnalog = !wasdAnalog"
-                title="Guide Dog mode: direction keys steer the analog stick">
-          <span class="analog-pill-thumb" />
-        </button>
+        <UiToggle v-model="wasdAnalog" title="Guide Dog mode: direction keys steer the analog stick" />
         <span class="ck-stick-tag" :class="{ active: analogKeys }">{{ analogKeys ? 'Analog' : 'D-Pad' }}</span>
       </div>
 
@@ -452,21 +450,6 @@ function capStyle(it: LayoutKey) {
 .ck-stick-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); transition: color 0.18s; }
 .ck-stick-tag.active { color: var(--accent); }
 .ck-stick-tag.c { color: #a9820a; }
-
-/* pill toggle -- sits between the joystick and the "Analog/Keys" label */
-.analog-pill {
-  position: relative; width: 32px; height: 18px;
-  background: var(--line-strong); border: none; border-radius: 9px;
-  cursor: pointer; padding: 0; transition: background 0.18s; flex-shrink: 0;
-}
-.analog-pill.on { background: var(--accent); }
-.analog-pill-thumb {
-  position: absolute; top: 2px; left: 2px;
-  width: 14px; height: 14px; border-radius: 50%;
-  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3); transition: transform 0.18s;
-  pointer-events: none;
-}
-.analog-pill.on .analog-pill-thumb { transform: translateX(14px); }
 
 /* dot that follows key presses when analog-keys mode is on */
 .key-dot {

@@ -32,6 +32,7 @@ const sourceList = computed(() => {
   const pi2 = props.nodes?.['pi']
   if (pi2 && (pi2.status !== 'unconfigured' || props.showOffline)) {
     out.push({ id: 'kinect', label: 'Kinect' })
+    out.push({ id: 'nokia', label: 'Nokia Phone' })   // BT controller via the Pi engine
   }
   return out.sort((a, b) => a.label.localeCompare(b.label))
 })

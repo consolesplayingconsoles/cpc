@@ -1,0 +1,29 @@
+{
+  "_comment": "Nokia 6103 keypad -> Dreamcast pad. The phone (CpcPad MIDlet) is output-agnostic: it reports the raw physical key -- digits '0'..'9','*','#' for the keypad, 'K<code>' for device-specific keys. Pluto owns the mapping HERE: 'controls' maps phone key -> DC button. Snake-on-the-numpad d-pad (2 up / 8 down / 4 left / 6 right), face diamond on 1/3/7/9, 5 = Start. Shoulders L/R = the two SOFT keys (left-soft K-4, right-soft K-3) -- NOT the volume keys, which the phone captures for its own volume and never reach the app.",
+  "controller": "Dreamcast (Nokia keypad)",
+  "controls": {
+    "2": "D_UP", "8": "D_DOWN", "4": "D_LEFT", "6": "D_RIGHT",
+    "7": "A", "9": "B", "1": "X", "3": "Y",
+    "5": "START",
+    "K-4": "L", "K-3": "R"
+  },
+  "layout": [
+    { "key": "q", "btn": "L", "label": "L", "col": 2, "row": 1 },
+    { "key": "p", "btn": "R", "label": "R", "col": 8, "row": 1 },
+    { "key": "w", "btn": "D_UP",    "label": "Up",    "col": 2, "row": 2 },
+    { "key": "a", "btn": "D_LEFT",  "label": "Left",  "col": 1, "row": 3 },
+    { "key": "d", "btn": "D_RIGHT", "label": "Right", "col": 3, "row": 3 },
+    { "key": "s", "btn": "D_DOWN",  "label": "Down",  "col": 2, "row": 4 },
+    { "key": "Enter", "btn": "START", "label": "Start", "col": 5, "row": 3 },
+    { "key": "i", "btn": "Y", "label": "Y", "col": 8, "row": 2 },
+    { "key": "j", "btn": "X", "label": "X", "col": 7, "row": 3 },
+    { "key": "l", "btn": "B", "label": "B", "col": 9, "row": 3 },
+    { "key": "k", "btn": "A", "label": "A", "col": 8, "row": 4 }
+  ],
+  "colors": {
+    "L": "#8a9099", "R": "#8a9099",
+    "D_UP": "#4b5058", "D_DOWN": "#4b5058", "D_LEFT": "#4b5058", "D_RIGHT": "#4b5058",
+    "A": "#d63b34", "B": "#2d8ec9", "X": "#edba1f", "Y": "#36a657",
+    "START": "#8a9099"
+  }
+}

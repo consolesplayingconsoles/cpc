@@ -115,7 +115,15 @@ def _infer(session, rgb, w, h):
         if cand:
             which, dx, dy = max(cand, key=lambda c: math.hypot(c[1], c[2]))
             d = _classify(dx, dy)
-    return "PERSON=%.2f DIR=%s [%s dx=%+.2f dy=%+.2f]" % (torso, d, which, dx, dy)
+
+    # Absolute active-wrist position (screen-space, 0..1) for ZONE mode. Independent of the
+    # shoulders (uses the higher-confidence wrist directly) so it still works when a raised
+    # arm occludes them. "-" when no wrist is confidently found -> the UI reads it as neutral.
+    zw = "WX=- WY=-"
+    if max(lwc, rwc) > CONF:
+        zwx, zwy = (lwx, lwy) if lwc >= rwc else (rwx, rwy)
+        zw = "WX=%+.2f WY=%+.2f" % (zwx, zwy)
+    return "PERSON=%.2f DIR=%s %s [%s dx=%+.2f dy=%+.2f]" % (torso, d, zw, which, dx, dy)
 
 
 def main():

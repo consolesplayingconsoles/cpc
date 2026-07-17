@@ -8,6 +8,8 @@ import threading
 import json
 import time
 import base64
+import os
+import subprocess
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 try:
@@ -118,10 +120,95 @@ class KinectFrame:
             }
 
 
+class PoseEngine:
+    """On-demand manager for the sibling pose-inference process (vision/kinect_pose.py).
+
+    The engine is NOT a daemon (nodes are on-demand + killable, never always-on). Pluto
+    launches it when the Kinect source opens and on Play, and kills it on Stop. As a
+    backstop for a forgotten Stop (tab closed, laptop asleep), Pluto heartbeats every 30s
+    while the source is open; if a heartbeat lapses past TIMEOUT the watchdog kills the
+    engine AND stops the capture, dropping the whole sensor back to idle.
+
+    It runs the engine's OWN venv interpreter as a subprocess, so the hub's system python
+    stays clean; the engine talks back to this bridge over loopback HTTP (never opens the
+    Kinect itself). Missing venv/model is a soft no-op -- the bridge still serves frames.
+    """
+    TIMEOUT = 45.0   # seconds without a heartbeat -> operator walked away, kill (>1 missed 30s ping)
+
+    def __init__(self, bridge_port, on_lapse=None):
+        here = os.path.dirname(os.path.abspath(__file__))
+        vroot = os.path.join(os.path.dirname(here), "vision")
+        self.py = os.path.join(vroot, "venv", "bin", "python")
+        self.script = os.path.join(vroot, "kinect_pose.py")
+        self.cwd = vroot
+        self.bridge_url = "http://127.0.0.1:%d" % bridge_port
+        self.on_lapse = on_lapse          # called when the heartbeat watchdog fires (stop capture)
+        self.proc = None
+        self.last_ping = 0.0
+        self.lock = threading.Lock()
+
+    def _alive(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def ping(self):
+        self.last_ping = time.time()
+
+    def start(self):
+        """Launch the engine if it isn't already running; always refreshes the heartbeat."""
+        with self.lock:
+            self.last_ping = time.time()
+            if self._alive():
+                return True
+            if not (os.path.exists(self.py) and os.path.exists(self.script)):
+                print("  [kinect] pose engine not set up (missing venv/script) -- skipping", flush=True)
+                return False
+            env = dict(os.environ, KINECT_BRIDGE_URL=self.bridge_url)
+            try:
+                self.proc = subprocess.Popen(
+                    [self.py, self.script], cwd=self.cwd, env=env,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print("  [kinect] pose engine launched (pid %d)" % self.proc.pid, flush=True)
+                return True
+            except Exception as e:
+                print("  [kinect] pose engine launch failed: %s" % e, flush=True)
+                self.proc = None
+                return False
+
+    def stop(self):
+        with self.lock:
+            if self._alive():
+                try:
+                    self.proc.terminate()
+                    try:
+                        self.proc.wait(timeout=3)
+                    except Exception:
+                        self.proc.kill()
+                    print("  [kinect] pose engine stopped", flush=True)
+                except Exception:
+                    pass
+            self.proc = None
+
+    def watchdog(self):
+        """Kill the engine (and stop capture) if the operator's heartbeat lapses."""
+        while True:
+            time.sleep(5)
+            if self._alive() and (time.time() - self.last_ping) > self.TIMEOUT:
+                print("  [kinect] heartbeat lapsed (%.0fs) -> killing pose engine, stopping capture"
+                      % (time.time() - self.last_ping), flush=True)
+                self.stop()
+                if self.on_lapse:
+                    try:
+                        self.on_lapse()
+                    except Exception:
+                        pass
+
+
 class KinectHandler(BaseHTTPRequestHandler):
     """HTTP endpoint: GET /frame -> current Kinect frame metadata.
-    POST /capture {action: start|stop} -> capture lifecycle (start = GO, stop = end)."""
+    POST /capture {action: start|stop} -> capture lifecycle (start = GO, stop = end).
+    POST /engine {action: start|ping|stop} -> pose-engine lifecycle + heartbeat."""
     frame: KinectFrame = None
+    engine: 'PoseEngine' = None
 
     def do_OPTIONS(self):
         # CORS preflight for the POST /capture the browser sends.
@@ -145,10 +232,14 @@ class KinectHandler(BaseHTTPRequestHandler):
             if self.frame is not None:
                 if action in ('start', 'go', 'resume'):
                     self.frame.set_capture(True)
+                    if self.engine:            # Play launches (or re-launches after Stop) the engine
+                        self.engine.start()
                 elif action in ('pause', 'wait'):
-                    self.frame.set_paused(True)
+                    self.frame.set_paused(True)  # engine stays up but idles (capturing-and-not-paused)
                 elif action in ('stop', 'end'):
                     self.frame.set_capture(False)
+                    if self.engine:            # Stop kills the engine -> nothing infers, Pi is free
+                        self.engine.stop()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -172,6 +263,30 @@ class KinectHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(json.dumps({'ok': True}).encode())
+        elif self.path == '/engine':
+            # Pose-engine lifecycle, driven by the Kinect source in Pluto:
+            #   start = source opened / Play (spawn if down);  ping = 30s heartbeat (keepalive);
+            #   stop  = source closed / Stop (kill). The watchdog kills a forgotten engine
+            #   when pings lapse. All actions are no-ops if the engine isn't set up.
+            length = int(self.headers.get('Content-Length', 0) or 0)
+            raw = self.rfile.read(length) if length else b''
+            try:
+                action = (json.loads(raw.decode() or '{}').get('action') or '').lower()
+            except Exception:
+                action = ''
+            if self.engine is not None:
+                if action == 'start':
+                    self.engine.start()
+                elif action == 'ping':
+                    self.engine.ping()
+                elif action == 'stop':
+                    self.engine.stop()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({'ok': True,
+                'running': bool(self.engine and self.engine._alive())}).encode())
         else:
             self.send_response(404)
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -281,7 +396,18 @@ class KinectBridge:
         self.frame = KinectFrame()
         self.running = False
         self.enabled = True
+        # On-demand pose engine. If a heartbeat lapses, the watchdog kills the engine and
+        # this callback drops capture back to idle too, so the sensor stops streaming.
+        self.engine = PoseEngine(port, on_lapse=lambda: self.frame.set_capture(False))
         KinectHandler.frame = self.frame
+        KinectHandler.engine = self.engine
+        # Reap any stray engine from a previous hub run so we don't end up with two posting
+        # context (last-writer-wins garbage). Best-effort; pkill may be absent.
+        try:
+            subprocess.run(["pkill", "-f", "kinect_pose.py"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
         # Try to open the device
         try:
@@ -329,6 +455,9 @@ class KinectBridge:
         except Exception as e:
             print(f"  [kinect] reader thread error: {e}", flush=True)
             return False
+
+        # Start the pose-engine heartbeat watchdog (kills a forgotten engine).
+        threading.Thread(target=self.engine.watchdog, daemon=True).start()
 
         return True
 
