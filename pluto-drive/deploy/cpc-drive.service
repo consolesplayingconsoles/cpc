@@ -1,0 +1,18 @@
+[Unit]
+Description=CPC drive API (/control/drive -> local sinks: Pico / roomba / emulator)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# run.sh listens on DRIVE_PORT and renders each /control/drive request to a sink
+# resolved from the node roster. SIGTERM on stop/restart releases the held sink and
+# frees the port before the next instance binds it, so a redeploy hands off clean.
+ExecStart=/opt/cpc/pluto-drive/run.sh
+Restart=always
+RestartSec=3
+# Keep the drive API reachable across both crashes and reboots.
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target

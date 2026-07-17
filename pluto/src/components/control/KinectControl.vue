@@ -35,6 +35,7 @@ import CapScreen from '../CapScreen.vue'
 import ControlFeed, { type FeedLine } from './ControlFeed.vue'
 import ControlLayout from './ControlLayout.vue'
 import UiToggle from '../ui/UiToggle.vue'
+import { DRIVE_API } from '../../lib/drive'
 
 const props = defineProps<{
   active: boolean
@@ -50,7 +51,6 @@ const emit = defineEmits<{ 'drive-error': [string] }>()
 const canvasW = props.canvasWidth ?? 640
 const canvasH = props.canvasHeight ?? 480
 
-const API = `http://${window.location.hostname}:7700`
 const hasEverReceivedFrame = ref(false)
 const frameReceived = ref(false)
 const lastFrame = ref('')
@@ -159,7 +159,7 @@ function canDrive() { return !!(props.mapping && props.target) }
 async function holdPost(btn: string, down: boolean) {
   if (!canDrive()) return
   try {
-    const r = await fetch(`${API}/control/drive`, {
+    const r = await fetch(`${DRIVE_API}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'hold', down, btn, target: props.target, source: 'kinect',
         mapping: props.mapping, ...(props.targetDev ? { dev: props.targetDev } : {}) }),
@@ -208,7 +208,7 @@ let ka = 0
 function startKeepalive() {
   if (ka || !canDrive()) return
   ka = window.setInterval(() => {
-    fetch(`${API}/control/drive`, {
+    fetch(`${DRIVE_API}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'keepalive' }),
     }).catch(() => {})
@@ -217,7 +217,7 @@ function startKeepalive() {
 function stopKeepalive() { if (ka) { clearInterval(ka); ka = 0 } }
 function drivePause() {
   if (!canDrive()) return
-  fetch(`${API}/control/drive`, {
+  fetch(`${DRIVE_API}/control/drive`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'pause' }),
   }).catch(() => {})

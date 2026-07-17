@@ -1,6 +1,7 @@
 import { ref, watch, onBeforeUnmount } from 'vue'
 import { useGamepads } from './useGamepads'
 import { resolveDriveVerb, type DriveMapping } from '../lib/driveVerb'
+import { DRIVE_API } from '../lib/drive'
 
 // Live DreamPicoPort gamepad -> the SAME /control/drive `hold` POSTs the on-screen pad fires.
 // Two kinds of input, handled differently (this is what the old version got wrong -- it fired
@@ -49,7 +50,7 @@ export function useGamepadDrive(opts: {
   async function post(btn: string, down: boolean) {
     if (!opts.canDrive()) return
     try {
-      const r = await fetch(`${API}/control/drive`, {
+      const r = await fetch(`${DRIVE_API}/control/drive`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'hold', down, btn,

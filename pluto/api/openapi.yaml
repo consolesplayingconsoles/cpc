@@ -74,8 +74,6 @@ paths:
     post: { tags: [control], summary: Start / stop the HDMI capture session, responses: { '200': { description: OK } } }
   /control/capture/grab:
     post: { tags: [control], summary: Grab a single capture frame, responses: { '200': { description: OK } } }
-  /control/drive:
-    post: { tags: [control], summary: Send a controller op down the drive pipeline, responses: { '200': { description: OK } } }
   /control/log:
     get: { tags: [control], summary: Guide-Dog control log tail, responses: { '200': { description: Log } } }
   /control/frame:

@@ -31,6 +31,7 @@ APIS = [
     ("roomba-rally",  "nodes/local/roomba-rally/scripts/main.py",    "ROUTES",      "nodes/local/roomba-rally/openapi.yaml"),
     ("crazy-roomba",  "nodes/local/crazy-roomba/scripts/main.py", "ROUTES",    "nodes/local/crazy-roomba/openapi.yaml"),
     ("pluto",         "pluto/api/api.py",                      "API_ROUTES",  "pluto/api/openapi.yaml"),
+    ("drive",         "pluto-drive/server.py",                 "ROUTES",      "pluto-drive/openapi.yaml"),
 ]
 
 

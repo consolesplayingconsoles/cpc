@@ -8,6 +8,7 @@ import UiButton from '../ui/UiButton.vue'
 import UiIconButton from '../ui/UiIconButton.vue'
 import UiBattery from '../ui/UiBattery.vue'
 import UiStatusPill from '../ui/UiStatusPill.vue'
+import { DRIVE_API } from '../../lib/drive'
 import type { NodeMap } from '../../composables/useNodes'
 
 interface Point { x: number; y: number }
@@ -192,7 +193,7 @@ async function drivePost(payload: Record<string, unknown>) {
   // forwards it onto the ops; the hub frames to bridges[dev]). No-op for non-pi payloads.
   const body = (payload.target === 'pi' && props.targetDev) ? { ...payload, dev: props.targetDev } : payload
   try {
-    const r = await fetch(`${API}/control/drive`, {
+    const r = await fetch(`${DRIVE_API}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
@@ -212,7 +213,7 @@ function startKeepalive() {
   if (keepaliveTimer) return
   keepaliveTimer = window.setInterval(() => {
     if (driveTarget.value === 'none') return
-    fetch(`${API}/control/drive`, {
+    fetch(`${DRIVE_API}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'keepalive' }),
     }).catch(() => {})
@@ -234,7 +235,7 @@ function stopDriveOutput() {
 function stopBeacon() {
   if (driveTarget.value === 'none') return
   try {
-    navigator.sendBeacon(`${API}/control/drive`,
+    navigator.sendBeacon(`${DRIVE_API}/control/drive`,
       new Blob([JSON.stringify({ action: 'pause' })], { type: 'application/json' }))
   } catch { /* tab is going away; best effort only */ }
 }
