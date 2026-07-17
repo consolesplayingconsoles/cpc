@@ -5,7 +5,7 @@
 // to Pluto (only the mapping + start/stop do). Lifecycle mirrors the Kinect source:
 // CONNECT starts the engine (and triggers the phone's accept prompt so you can sync
 // it), a 30s ping keeps it alive, leaving the source / STOP tears it down.
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import ControlLayout from './ControlLayout.vue'
 import UiButton from '../ui/UiButton.vue'
 import UiStatusDot from '../ui/UiStatusDot.vue'
@@ -20,28 +20,15 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ 'drive-error': [string] }>()
 
-const API = `http://${window.location.hostname}:7700`
 const ENGINE_PORT = 7740
 
 const running = ref(false)
 const busy = ref(false)
-const controls = ref<Record<string, string>>({})
 let ping: ReturnType<typeof setInterval> | null = null
 let poll: ReturnType<typeof setInterval> | null = null
 
 function piIp(): string { return (props.nodes?.['pi'] as any)?.ip || '' }
 function engineUrl(): string { return `http://${piIp()}:${ENGINE_PORT}/engine` }
-
-// Fetched only to push to the engine on start (a universal mapping view lives elsewhere).
-async function loadControls() {
-  if (!props.mapping) { controls.value = {}; return }
-  try {
-    const r = await fetch(`${API}/mappings/nokia/${props.mapping}`)
-    const j = await r.json().catch(() => null)
-    controls.value = (j && j.controls) ? j.controls : {}
-  } catch { controls.value = {} }
-}
-watch(() => props.mapping, loadControls, { immediate: true })
 
 async function engine(action: 'start' | 'stop' | 'ping', extra: Record<string, unknown> = {}) {
   const ip = piIp()
@@ -60,8 +47,12 @@ async function engine(action: 'start' | 'stop' | 'ping', extra: Record<string, u
 
 async function onGo() {
   busy.value = true
-  await loadControls()
-  const res = await engine('start', { mapping: controls.value, dev: props.targetDev || '' })
+  // The Pi bridge forwards keys to the local drive service, which does the mapping;
+  // we just hand it the current source/mapping/target selection.
+  const res = await engine('start', {
+    source: 'nokia', mapping: props.mapping || '',
+    target: props.target || '', dev: props.targetDev || '',
+  })
   busy.value = false
   if (res && res.ok) {
     running.value = true

@@ -31,6 +31,10 @@ class DriveEngine:
         self._lock = threading.Lock()
         self._state = {"sink": None, "thread": None, "stop": None, "last_seen": 0.0,
                        "live_target": None, "live_dev": None}
+        # Mappings are config that lives in the repo (Pluto), NOT deployed here. The
+        # client SENDS the mapping content at session start; we cache it per source and
+        # reuse it for the subsequent key requests (which omit it). Empty until pushed.
+        self._mappings = {}
 
     # ── drive lifecycle (the single-slot state machine) ──────────────────────
     def stop(self):
@@ -150,14 +154,31 @@ class DriveEngine:
         threading.Thread(target=watchdog, daemon=True).start()
         return sink
 
-    def _mapping(self, body, src_default, map_default):
-        return self._c.load_mapping(body.get("source") or src_default,
-                                    body.get("mapping") or map_default)
+    def _mapping(self, body):
+        """The mapping CONTENT for this request. The client pushes it (a dict) at session
+        start; we cache it per source and reuse it for the key requests that omit it. The
+        repo (Pluto) is the authority -- nothing SHOULD be loaded from disk on the node.
+
+        Backward-compat during the transition: a bare mapping NAME (str) still resolves
+        via a local (deployed) copy -- being removed once every client pushes content."""
+        src = body.get("source") or "keyboard"
+        m = body.get("mapping")
+        if isinstance(m, dict):
+            self._mappings[src] = m          # cache the pushed content
+            return m
+        if src in self._mappings:
+            return self._mappings[src]
+        if isinstance(m, str) and m:         # legacy: name + local copy
+            try:
+                return self._c.load_mapping(src, m)
+            except Exception:
+                pass
+        return {}
 
     # ── per-action handlers (return (code, dict)) ────────────────────────────
     def _do_hold(self, body):
         try:
-            mapping = self._mapping(body, "keyboard", "")
+            mapping = self._mapping(body)
         except Exception as exc:
             return 200, {"ok": False, "error": "mapping: %s" % exc}
         btn = body.get("btn") or (mapping.get("controls") or {}).get(body.get("key") or "")
@@ -176,7 +197,7 @@ class DriveEngine:
 
     def _do_axis(self, body):
         try:
-            mapping = self._mapping(body, "keyboard", "")
+            mapping = self._mapping(body)
         except Exception as exc:
             return 200, {"ok": False, "error": "mapping: %s" % exc}
         try:
@@ -196,7 +217,7 @@ class DriveEngine:
 
     def _do_press(self, body):
         try:
-            mapping = self._mapping(body, "dreame", "gamecube_dpad")
+            mapping = self._mapping(body)
         except Exception as exc:
             return 200, {"ok": False, "error": "mapping: %s" % exc}
         btn = body.get("btn") or (mapping.get("controls") or {}).get(body.get("key") or "")
@@ -231,7 +252,7 @@ class DriveEngine:
         if self._dreame is None:
             return 200, {"ok": False, "error": "replay unavailable on this drive node"}
         try:
-            mapping = self._mapping(body, "dreame", "gamecube_dpad")
+            mapping = self._mapping(body)
         except Exception as exc:
             return 200, {"ok": False, "error": "mapping: %s" % exc}
         speed = float(body.get("speed") or 1.0)

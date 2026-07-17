@@ -425,18 +425,19 @@ def serve(cfg):
     else:
         print("  kinect disabled (no KINECT_DEPTH_PORT in .env)")
 
-    # Nokia: phone keypad over Bluetooth rfcomm -> local Pico (drives the HidBridge
-    # in-process, so keypresses never round-trip to Pluto). On-demand via its HTTP
-    # endpoint; Pluto's NokiaControl pushes the mapping + start/stop.
+    # Nokia: phone keypad over Bluetooth rfcomm -> the LOCAL drive service (:7702),
+    # which maps the key + drives the sink. The phone rides the same distributed
+    # /control/drive path as every other input. On-demand via its HTTP endpoint;
+    # Pluto's NokiaControl pushes source/mapping/target/dev + start/stop.
     nokia_port = (cfg.get("NOKIA_ENGINE_PORT") or "").strip()
     nokia = None
-    if nokia_port and bridges:
+    if nokia_port:
         from bridges.nokia import NokiaBridge
-        nokia = NokiaBridge(int(nokia_port), cfg, bridges)
+        nokia = NokiaBridge(int(nokia_port), cfg)
         if nokia.start():
             print("  nokia engine up -- :%s" % nokia_port)
         else:
-            print("  nokia engine disabled (missing addr / pyserial / pico)")
+            print("  nokia engine disabled (missing addr / pyserial)")
     else:
         print("  nokia disabled (no NOKIA_ENGINE_PORT in .env)")
 
