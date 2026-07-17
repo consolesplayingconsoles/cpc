@@ -72,7 +72,7 @@ watch(() => props.active, (on) => { if (on) activate(); else stopPoll() })
 </script>
 
 <template>
-  <ControlLayout :active="active" :map-source="mapSource" :target="target" :mapping="mapping" :target-dev="targetDev || ''" @drive-error="emit('drive-error', $event)">
+  <ControlLayout :active="active" :map-source="mapSource" :target="target" :mapping="mapping" :target-dev="targetDev || ''" :max-cells="['ne']" @drive-error="emit('drive-error', $event)">
     <!-- NW: Guide Dog chat (spans full-height left, SW empty) -->
     <template #nw>
       <ControlFeed

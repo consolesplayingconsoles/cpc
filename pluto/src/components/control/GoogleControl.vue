@@ -252,7 +252,7 @@ function fmtTime(ts: number) {
 </script>
 
 <template>
-  <ControlLayout :active="active" :map-source="mapSource" :target="target" :mapping="mapping" :target-dev="targetDev || ''" @drive-error="emit('drive-error', $event)">
+  <ControlLayout :active="active" :map-source="mapSource" :target="target" :mapping="mapping" :target-dev="targetDev || ''" :max-cells="['ne']" @drive-error="emit('drive-error', $event)">
 
     <!-- NW: output side — drop strip (top) + Vision output (scrolling) -->
     <template #nw>

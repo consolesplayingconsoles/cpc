@@ -179,15 +179,24 @@ defineExpose({ signal, capture, frameSrc, postLog, refreshLog, sendSignal })
 .cap {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   background: var(--surface);
   position: relative;
 }
-.cap-screen { padding: var(--sp-3); }
+/* Fill the available height (letterboxing the frame) so a maximized quad grows the
+   video vertically too, not just wider. Mirrors CapScreen; the 16/9 shape is kept by
+   the frame's object-fit: contain rather than a fixed-height box. */
+.cap-screen {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  padding: var(--sp-3);
+}
 .cap-screen-inner {
   position: relative;
+  flex: 1 1 auto;
   width: 100%;
-  aspect-ratio: 16 / 9;
-  max-height: 260px;
+  min-height: 0;
   background: #0b0d10;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);

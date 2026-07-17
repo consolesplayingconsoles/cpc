@@ -4,6 +4,7 @@ import RobutekControl from './RobutekControl.vue'
 import ClaudeControl from './ClaudeControl.vue'
 import GoogleControl from './GoogleControl.vue'
 import KinectControl from './KinectControl.vue'
+import NokiaControl from './NokiaControl.vue'
 import DreamPicoPortControl from './DreamPicoPortControl.vue'
 import ControlLayout from './ControlLayout.vue'
 
@@ -43,6 +44,10 @@ defineEmits<{ 'drive-error': [string] }>()
   <KinectControl v-else-if="source === 'kinect'" :key="source"
     :active="active" :nodes="nodes" :target="target" :mapping="mapping"
     :target-dev="targetDev"
+    @drive-error="$emit('drive-error', $event)" />
+  <NokiaControl v-else-if="source === 'nokia'" :key="source"
+    :active="active" :nodes="nodes" :target="target" :mapping="mapping"
+    :target-dev="targetDev" :roomba-ip="roombaIp"
     @drive-error="$emit('drive-error', $event)" />
   <DreamPicoPortControl v-else-if="source === 'dreampicoport'" :key="source"
     :sub="''" :active="active" :target="target" :mapping="mapping"
