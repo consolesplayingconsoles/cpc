@@ -162,6 +162,7 @@ payload_server() {
   $SSH "cat > ${REMOTE_ROOT}/specs/pluto.yaml"     < pluto/api/openapi.yaml
   $SSH "cat > ${REMOTE_ROOT}/specs/translate.yaml" < pluto-translate/openapi.yaml
   $SSH "cat > ${REMOTE_ROOT}/specs/pico-hub.yaml"    < pluto-pico-hub/openapi.yaml
+  $SSH "cat > ${REMOTE_ROOT}/specs/drive.yaml"       < pluto-drive/openapi.yaml
   $SSH "cat > ${REMOTE_ROOT}/specs/roomba-rally.yaml"    < nodes/local/roomba-rally/openapi.yaml
   $SSH "cat > ${REMOTE_ROOT}/specs/crazy-roomba.yaml"    < nodes/local/crazy-roomba/openapi.yaml
   echo "sync ok"
@@ -241,6 +242,48 @@ payload_hub() {
   else
     echo "not managed by systemd -- run ${REMOTE_ROOT}/pluto-pico-hub/run.sh serve manually"
   fi
+}
+
+# drive -- the standalone drive API (pluto-drive). On the C2 the pluto server payload
+# (api.py) launches it as a child, so this payload only ships the package; the server
+# restart brings it up. (On the Pi it runs under its own systemd -- see step 4.) Ship
+# to ${REMOTE_ROOT}/pluto-drive so api.py finds it beside the flattened pluto contents.
+payload_drive() {
+  echo "##STEP:sync"
+  tar --no-xattrs --no-fflags --no-mac-metadata -cf - pluto-drive \
+      | $SSH "tar -xf - -C ${REMOTE_ROOT}"
+  $SSH "chmod +x ${REMOTE_ROOT}/pluto-drive/run.sh"
+  # The drive engine needs the mapping store. The pluto (C2) node's server payload
+  # already ships config/; elsewhere (the Pi) ship mappings so run.sh finds them at
+  # ${REMOTE_ROOT}/pluto/config/mappings.
+  case " $PAYLOADS " in
+    *" server "*) : ;;
+    *)
+      $SSH "mkdir -p ${REMOTE_ROOT}/pluto/config"
+      tar --no-xattrs --no-fflags --no-mac-metadata -cf - pluto/config/mappings \
+          | $SSH "tar -xf - --strip-components=1 -C ${REMOTE_ROOT}/pluto"
+      ;;
+  esac
+  echo "sync ok"
+
+  # On a node WITHOUT the pluto server (the Pi), nothing else launches the drive, so it
+  # runs under its OWN systemd. On the C2 the server payload's api.py spawns it -> skip.
+  case " $PAYLOADS " in
+    *" server "*) echo "  drive: launched by the pluto api (no systemd here)" ;;
+    *)
+      echo "##STEP:restart"
+      if $SSH "[ -d /run/systemd/system ]"; then
+        DRIVE_UNIT="${REMOTE_ROOT}/pluto-drive/deploy/cpc-drive.service"
+        if $SSH "$PRIV \$SUDO cp ${DRIVE_UNIT} /etc/systemd/system/cpc-drive.service && \$SUDO systemctl daemon-reload && \$SUDO systemctl enable cpc-drive >/dev/null 2>&1 && \$SUDO systemctl restart cpc-drive"; then
+          echo "cpc-drive.service restarted"
+        else
+          echo "[WARN] cpc-drive.service install/restart failed"
+        fi
+      else
+        echo "no systemd -- run ${REMOTE_ROOT}/pluto-drive/run.sh manually"
+      fi
+      ;;
+  esac
 }
 
 # translate -- the Dreamcast translation API (pluto-translate). Unlike server/hub

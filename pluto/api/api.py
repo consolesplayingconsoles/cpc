@@ -906,10 +906,6 @@ def _mention_index(roster, chat_config):
 # (controller + the dreame route->event adapter); it's imported lazily because the one
 # working sink (KeyboardSink) needs pynput + macOS Accessibility -- so this whole
 # feature degrades to a clean JSON error anywhere but the dev Mac.
-_drive_lock  = threading.Lock()
-_drive_state = {"sink": None, "thread": None, "stop": None, "last_seen": 0.0,
-                "live_target": None}
-DRIVE_TIMEOUT = 6.0   # stop the drive if the frontend hasn't checked in for this long
 
 
 # ── HDMI capture: the WHOLE point of the Claude source ────────────────────────
@@ -1300,67 +1296,14 @@ def _capture_stop(reason="manual"):
 atexit.register(lambda: _capture_stop("shutdown"))
 
 
-def _drive_libs():
-    """Import the drive engine (generic controller + the dreame route->event adapter)
-    from api/drive/. Imported lazily so the pynput/macOS dependency only loads when
-    the drive is actually used (dev Mac), never at API startup on a headless box."""
-    from drive import controller, dreame_events
-    return controller, dreame_events
+def _mapping_lib():
+    """Import the controller module for the mapping store (/mappings list + load). The
+    DRIVE itself now runs in the separate pluto-drive service; Pluto keeps controller
+    only for reading mappings. Lazy so the optional deps never load at API startup."""
+    from drive import controller
+    return controller
 
 
-def _drive_stop():
-    with _drive_lock:
-        st = _drive_state
-        stop, th, sink = st["stop"], st["thread"], st["sink"]
-        st["stop"] = st["thread"] = st["sink"] = None
-        st["live_target"] = None
-    if stop:
-        stop.set()
-    if th:
-        th.join(timeout=1.0)
-    if sink:
-        try:
-            sink.release_all()
-        except Exception:
-            pass
-
-
-def _drive_play(controller, events, mapping, sink, t0, speed):
-    _drive_stop()
-    stop = threading.Event()
-
-    def run():
-        try:
-            controller.drive_from(events, mapping, sink, t0=t0, speed=speed,
-                                  should_stop=stop.is_set)
-        except Exception as exc:
-            print("  [drive] %s" % exc)
-        finally:
-            try:
-                sink.release_all()
-            except Exception:
-                pass
-
-    def watchdog():
-        # Stop the drive (releasing keys) if the frontend stops sending keepalives --
-        # e.g. the browser/tab closed or crashed and no 'pause' reached us. Without
-        # this the route keeps replaying and the character runs away (only an
-        # emulator with background input visibly shows it).
-        while not stop.wait(2.0):
-            with _drive_lock:
-                current = _drive_state.get("stop") is stop
-                last = _drive_state.get("last_seen", 0.0)
-            if not current:
-                return                       # a newer drive took over
-            if time.time() - last > DRIVE_TIMEOUT:
-                _drive_stop()
-                return
-
-    th = threading.Thread(target=run, daemon=True)
-    with _drive_lock:
-        _drive_state.update(sink=sink, thread=th, stop=stop, last_seen=time.time())
-    th.start()
-    threading.Thread(target=watchdog, daemon=True).start()
 
 
 # ── Request handler ──────────────────────────────────────────────────────────
@@ -1375,6 +1318,7 @@ OPENAPI_SPECS = [
     ("pluto",     "Pluto API",     "pluto/api/openapi.yaml"),
     ("translate", "Translate API", "pluto-translate/openapi.yaml"),
     ("pico-hub",  "Pico Hub API",  "pluto-pico-hub/openapi.yaml"),
+    ("drive",     "Drive API",     "pluto-drive/openapi.yaml"),
 ]
 
 _DOCS_HTML = """<!DOCTYPE html>
@@ -1651,7 +1595,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/translate/{game}/textures"), ("GET", "/translate/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
         ("POST", "/messages"), ("POST", "/dreame/login"), ("POST", "/dreame/logout"),
-        ("POST", "/control/drive"), ("POST", "/control/signal"), ("POST", "/control/capture"),
+        ("POST", "/control/signal"), ("POST", "/control/capture"),
         ("POST", "/control/capture/grab"), ("POST", "/control/google/lens"),
         ("POST", "/control/google/translate"), ("POST", "/control/google/translate-last"),
         ("POST", "/workspace/{node}"), ("POST", "/config/open"), ("POST", "/native/{node}/{action}"),
@@ -1756,9 +1700,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
           GET /mappings/<source>/<target> -> the mapping JSON
         """
         try:
-            controller, _ = _drive_libs()
+            controller = _mapping_lib()
         except Exception:
-            self._send(200, {} if len(parts) < 3 else {"error": "drive libs unavailable"})
+            self._send(200, {} if len(parts) < 3 else {"error": "mapping lib unavailable"})
             return
         if len(parts) == 1:
             self._send(200, {s: controller.list_targets(s) for s in controller.list_sources()})
@@ -1780,8 +1724,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_dreame_login()
         elif parsed.path == "/dreame/logout":
             self._handle_dreame_logout()
-        elif parsed.path == "/control/drive":
-            self._handle_drive()
         elif parsed.path == "/control/signal":
             self._handle_control_signal()
         elif parsed.path == "/control/capture":
@@ -2027,64 +1969,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         print("  [OPEN:config] -> %s" % path)
         open_path(path)
         self._send(200, {"status": "opened", "path": path})
-
-    def _handle_press(self, body):
-        """One-off controller button (the Enter->Start hotkey). Resolves key->button
-        via the mapping's `controls`, then pulses it: through the live drive sink if a
-        replay is running, else a transient connection to the selected target."""
-        try:
-            controller, _ = _drive_libs()
-        except Exception as exc:
-            self._send(200, {"ok": False, "error": "drive libs: %s" % exc})
-            return
-        try:
-            mapping = controller.load_mapping(body.get("source") or "dreame",
-                                              body.get("mapping") or "gamecube_dpad")
-        except Exception as exc:
-            self._send(200, {"ok": False, "error": "mapping: %s" % exc})
-            return
-        btn = body.get("btn") or (mapping.get("controls") or {}).get(body.get("key") or "")
-        if not btn:
-            self._send(200, {"ok": True, "ignored": body.get("key")})   # unbound key: no-op
-            return
-        ops = [{"op": "pulse", "btn": btn, "ms": int(body.get("ms") or 120)}]
-
-        with _drive_lock:
-            live = _drive_state.get("sink")
-        if live is not None:                          # inject into the running replay
-            try:
-                live.apply(ops)
-                self._send(200, {"ok": True, "pressed": btn, "via": "live"})
-            except Exception as exc:
-                self._send(200, {"ok": False, "error": "press: %s" % exc})
-            return
-
-        target = body.get("target")                   # no replay -> transient link
-        try:
-            if target == "pi":
-                pi_cfg = self.__class__.node_roster.get("pi") or {}
-                host = pi_cfg.get("HOST_IP", "").strip()
-                port = pi_cfg.get("PI_BRIDGE_PORT", "").strip()
-                if not host or not port:
-                    self._send(200, {"ok": False, "error": "pi node has no HOST_IP/PI_BRIDGE_PORT"})
-                    return
-                sink = controller.NetworkSink(host, port, dev=body.get("dev"))
-            elif target == "keyboard":
-                sink = controller.KeyboardSink(button_keys=mapping.get("keys"))
-            else:
-                self._send(200, {"ok": False, "error": "unknown target: %s" % target})
-                return
-        except Exception as exc:
-            self._send(200, {"ok": False, "error": "can't reach target (%s)" % exc})
-            return
-        try:
-            sink.apply(ops)
-        finally:
-            try:
-                sink.release_all()
-            except Exception:
-                pass
-        self._send(200, {"ok": True, "pressed": btn, "via": "transient"})
 
     def _read_json_body(self):
         """Parse a JSON request body, or send 400 and return None."""
@@ -2662,265 +2546,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(500, {"error": "ffmpeg grab failed (exit %d)" % r.returncode})
             return
         self._send(200, {"ok": True, "fresh": True, "device": name})
-
-    def _make_sink(self, controller, target, mapping, dev=None):
-        """Open a FRESH sink for `target`. The virtual KEYBOARD is the lone LOCAL sink
-        (drives an emulator on THIS host via pynput); every other target drives a
-        networked NODE, differing only in which node + wire protocol -- the Pi hub's
-        op stream (pi), the roomba's HTTP /command (roomba). `dev` is the subtarget
-        selector: the pico's UART dev under 'pi', the roomba node id under 'roomba'.
-        Raises ValueError(msg) on a bad/unreachable target -> clean JSON error."""
-        # The local exception first.
-        if target == "keyboard":
-            try:
-                return controller.KeyboardSink(button_keys=mapping.get("keys"))
-            except Exception as exc:
-                raise ValueError("keyboard sink: %s -- pip install pynput + grant the "
-                                 "terminal Accessibility" % exc)
-        # Everything else is a networked node.
-        if target == "pi":
-            pi_cfg = self.__class__.node_roster.get("pi") or {}
-            host = pi_cfg.get("HOST_IP", "").strip()
-            port = pi_cfg.get("PI_BRIDGE_PORT", "").strip()
-            if not host or not port:
-                raise ValueError("pi node has no HOST_IP/PI_BRIDGE_PORT in its .env")
-            try:
-                return controller.NetworkSink(host, port, dev=dev)
-            except Exception as exc:
-                raise ValueError("can't reach the Pi receiver at %s:%s (%s) -- is the "
-                                 "hub up (run.sh serve / cpc-hub.service)?" % (host, port, exc))
-        if target == "roomba":
-            # `dev` carries the chosen roomba subtarget (a node id); its .env HOST_IP is
-            # host:port (the HTTP port). The real-time command STREAM is that port + 1.
-            node = self.__class__.node_roster.get(dev or "") or {}
-            hostport = node.get("HOST_IP", "").strip()
-            if not hostport:
-                raise ValueError("roomba subtarget '%s' has no HOST_IP in its .env" % (dev or "?"))
-            host, _, port_s = hostport.rpartition(":")
-            if not host:
-                host, port_s = hostport, "7724"
-            cmd_port = int(port_s) + 1
-            try:
-                return controller.RoombaSink(host, cmd_port, mapping.get("actions"))
-            except Exception as exc:
-                raise ValueError("can't reach the roomba command stream at %s:%d (%s) -- "
-                                 "is the firmware (v17+) running?" % (host, cmd_port, exc))
-        raise ValueError("unknown target: %s" % target)
-
-    def _live_ensure(self, controller, target, mapping, dev=None):
-        """Ensure a PERSISTENT live-input sink for `target` is open (held across
-        keydowns for true press-and-hold) with a watchdog that releases everything if
-        the page goes quiet. Unlike a paced replay there's no drive thread -- just a
-        held sink + watchdog reusing the single _drive_state slot (so it tears down any
-        running replay first). Returns the sink; raises ValueError on a bad target."""
-        with _drive_lock:
-            sink = _drive_state.get("sink")
-            if sink is not None and _drive_state.get("live_target") == target and _drive_state.get("live_dev") == dev:
-                _drive_state["last_seen"] = time.time()
-                return sink
-        _drive_stop()                      # no sink, target changed, or pico changed: drop any prior drive
-        sink = self._make_sink(controller, target, mapping, dev=dev)
-        stop = threading.Event()
-
-        def watchdog():
-            while not stop.wait(2.0):
-                with _drive_lock:
-                    current = _drive_state.get("stop") is stop
-                    last = _drive_state.get("last_seen", 0.0)
-                if not current:
-                    return                 # a newer drive/live-session took over
-                if time.time() - last > DRIVE_TIMEOUT:
-                    _drive_stop()
-                    return
-
-        with _drive_lock:
-            _drive_state.update(sink=sink, thread=None, stop=stop,
-                                last_seen=time.time(), live_target=target, live_dev=dev)
-        threading.Thread(target=watchdog, daemon=True).start()
-        return sink
-
-    def _handle_hold(self, body):
-        """POST /control/drive {action:'hold', down, btn|key, target, source, mapping}.
-        Live press/release: down=true holds the button, down=false releases it. The
-        button resolves from an explicit `btn` or a `key` via the mapping's `controls`.
-        Keepalive (the page heartbeat) keeps the held sink alive between keystrokes."""
-        try:
-            controller, _ = _drive_libs()
-        except Exception as exc:
-            self._send(200, {"ok": False, "error": "drive libs: %s" % exc})
-            return
-        try:
-            mapping = controller.load_mapping(body.get("source") or "keyboard",
-                                              body.get("mapping") or "")
-        except Exception as exc:
-            self._send(200, {"ok": False, "error": "mapping: %s" % exc})
-            return
-        btn = body.get("btn") or (mapping.get("controls") or {}).get(body.get("key") or "")
-        if not btn:
-            self._send(200, {"ok": True, "ignored": body.get("key")})   # unbound key: no-op
-            return
-        try:
-            sink = self._live_ensure(controller, body.get("target"), mapping, dev=body.get("dev"))
-        except ValueError as exc:
-            self._send(200, {"ok": False, "error": str(exc)})
-            return
-        op = "press" if body.get("down") else "release"
-        try:
-            sink.apply([{"op": op, "btn": btn}])
-        except Exception as exc:
-            self._send(200, {"ok": False, "error": "%s: %s" % (op, exc)})
-            return
-        self._send(200, {"ok": True, op: btn})
-
-    def _handle_axis(self, body):
-        """POST /control/drive {action:'axis', name, x, y, target, source, mapping}.
-        Live analog stick: x/y in 0..1 (0.5 = center). `name` picks the stick
-        (MAIN -> left, C/RIGHT -> right); the sink/Pico maps the axis, so no mapping
-        entry is needed. Shares the live sink with hold, so sticks + buttons go over
-        one link to the Pico (and recentre via the watchdog's release_all on silence)."""
-        try:
-            controller, _ = _drive_libs()
-        except Exception as exc:
-            self._send(200, {"ok": False, "error": "drive libs: %s" % exc})
-            return
-        try:
-            mapping = controller.load_mapping(body.get("source") or "keyboard",
-                                              body.get("mapping") or "")
-        except Exception as exc:
-            self._send(200, {"ok": False, "error": "mapping: %s" % exc})
-            return
-        try:
-            sink = self._live_ensure(controller, body.get("target"), mapping, dev=body.get("dev"))
-        except ValueError as exc:
-            self._send(200, {"ok": False, "error": str(exc)})
-            return
-        try:
-            x = float(body.get("x", 0.5)); y = float(body.get("y", 0.5))
-        except (TypeError, ValueError):
-            self._send(200, {"ok": False, "error": "axis x/y must be numbers"})
-            return
-        name = body.get("name") or "MAIN"
-        try:
-            sink.apply([{"op": "axis", "name": name, "x": x, "y": y}])
-        except Exception as exc:
-            self._send(200, {"ok": False, "error": "axis: %s" % exc})
-            return
-        self._send(200, {"ok": True, "axis": name})
-
-    def _handle_drive(self):
-        """POST /control/drive {action, target, session, t, speed, mapping}.
-
-        Drives the selected output from the Pluto playback clock. action 'play'
-        (re)starts a paced replay from offset t at speed; 'pause'/'stop' release.
-        Dev-only: returns {ok:false, error} (never 500) when the libs/sink/target
-        aren't available, so the UI can surface it without breaking.
-        """
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-        except (ValueError, json.JSONDecodeError):
-            self._send(400, {"error": "invalid json"})
-            return
-
-        action = body.get("action")
-        if action in ("pause", "stop"):
-            _drive_stop()
-            self._send(200, {"ok": True})
-            return
-        if action == "keepalive":
-            # heartbeat from the playing page; the watchdog stops the drive if these
-            # go silent (browser closed/crashed before a 'pause' reached us). Also FORWARD
-            # it to the live sink so the Pi-Hub doesn't idle-release a HELD input after ~6s
-            # ("works a bit then stops" on press-and-hold). No-op on sinks without keepalive.
-            with _drive_lock:
-                _drive_state["last_seen"] = time.time()
-                live = _drive_state.get("sink")
-            if live is not None:
-                try:
-                    live.keepalive()
-                except Exception:
-                    pass
-            self._send(200, {"ok": True})
-            return
-        if action == "press":
-            # One-off button (the hidden Enter->Start hotkey). The key->button binding
-            # lives in the mapping's `controls`; the route only steers, so this is how
-            # you dismiss a console menu (e.g. the DC's VMU-removed prompt) by hand. Goes
-            # through the LIVE drive if one's running, else a transient link to the target.
-            self._handle_press(body)
-            return
-        if action == "hold":
-            # Live press-and-HOLD for the keyboard/Claude sources: keydown holds the
-            # button, keyup releases it, over a persistent sink so movement sustains.
-            self._handle_hold(body)
-            return
-        if action == "axis":
-            # Live analog stick (the on-screen joysticks, name MAIN/C): same live
-            # sink as hold, so sticks and buttons share one link to the Pico.
-            self._handle_axis(body)
-            return
-        if action != "play":
-            self._send(400, {"error": "unknown action"})
-            return
-
-        target = body.get("target")
-        if target not in ("keyboard", "pi"):
-            self._send(200, {"ok": False, "error": "unknown target: %s" % target})
-            return
-
-        try:
-            controller, dreame_events = _drive_libs()
-        except Exception as exc:
-            self._send(200, {"ok": False, "error": "drive libs unavailable: %s" % exc})
-            return
-        try:
-            mapping = controller.load_mapping(body.get("source") or "dreame",
-                                              body.get("mapping") or "gamecube_dpad")
-        except Exception as exc:
-            self._send(200, {"ok": False, "error": "mapping: %s" % exc})
-            return
-        speed = float(body.get("speed") or 1.0)
-        if target == "pi":
-            # Stream ops over TCP to the Pi-Hub op receiver (run.sh serve), which
-            # frames them to the Pico. Host/port come from the discovered pi node.
-            pi_cfg = self.__class__.node_roster.get("pi") or {}
-            host = pi_cfg.get("HOST_IP", "").strip()
-            port = pi_cfg.get("PI_BRIDGE_PORT", "").strip()
-            if not host or not port:
-                self._send(200, {"ok": False,
-                    "error": "pi node has no HOST_IP/PI_BRIDGE_PORT in its .env"})
-                return
-            try:
-                sink = controller.NetworkSink(host, port, dev=body.get("dev"))
-            except Exception as exc:
-                self._send(200, {"ok": False,
-                    "error": "can't reach the Pi receiver at %s:%s (%s) -- is the hub up "
-                             "(run.sh serve / cpc-hub.service)?" % (host, port, exc)})
-                return
-        else:
-            # base movement duty (mapping) scaled by speed: 1x = robot pace, the speed
-            # multipliers ramp toward a full sprint (capped at 1.0).
-            eff_duty = min(1.0, float(mapping.get("move_duty", 1.0)) * max(speed, 1e-6))
-            try:
-                # the mapping carries its own per-emulator keys (its "keys" section)
-                sink = controller.KeyboardSink(keyset="arrows", button_keys=mapping.get("keys"),
-                                               move_duty=eff_duty)
-            except Exception as exc:
-                self._send(200, {"ok": False,
-                    "error": "keyboard sink: %s -- pip install pynput, run the API under that "
-                             "interpreter, and grant the terminal Accessibility." % exc})
-                return
-
-        session = body.get("session") or {}
-        events = dreame_events.events_from_route(session)
-        if not events:
-            self._send(200, {"ok": False, "error": "no route in session"})
-            return
-        _drive_play(controller, events, mapping, sink,
-                    float(body.get("t") or 0.0), float(body.get("speed") or 1.0))
-        print("  [drive] play target=%s t=%.1f speed=%g events=%d" % (
-            target, float(body.get("t") or 0.0), float(body.get("speed") or 1.0), len(events)))
-        self._send(200, {"ok": True, "events": len(events), "target": target})
 
     def _handle_deploy_stream(self, node_id):
         """Stream deploy output as Server-Sent Events.
@@ -3524,8 +3149,45 @@ def run():
         len(roster), len(roster) - n_cloud, n_cloud, ", ".join(sorted(roster))))
 
     # Drive mappings live in config/mappings (shipped as part of config/). Point the
-    # the controller there unless the env already set CPC_MAPPINGS.
+    # controller there unless the env already set CPC_MAPPINGS.
     os.environ.setdefault("CPC_MAPPINGS", os.path.join(parent_dir, "config", "mappings"))
+
+    # The drive engine is a SEPARATE local service now (pluto-drive), not handled in
+    # this API -- the frontend posts /control/drive straight to it. Launch it as a
+    # child so it comes up with the backend (dev + deployed). It releases its held keys
+    # on SIGTERM, so terminating it on our shutdown fails safe.
+    repo_root = os.path.dirname(parent_dir)
+    # pluto-drive sits beside the pluto contents: repo/pluto-drive on the Lab, or
+    # <root>/pluto-drive on a deployed box (where pluto/ is flattened into the root).
+    drive_run = ""
+    for cand in (os.path.join(repo_root, "pluto-drive", "run.sh"),
+                 os.path.join(parent_dir, "pluto-drive", "run.sh")):
+        if os.path.isfile(cand):
+            drive_run = cand
+            break
+    drive_proc = None
+    if drive_run:
+        try:
+            drive_proc = subprocess.Popen(
+                ["bash", drive_run],
+                env=dict(os.environ, CPC_MAPPINGS=os.environ["CPC_MAPPINGS"],
+                         CPC_NODES_DIR=os.path.join(repo_root, "nodes")))
+            print("  drive service: launched (pluto-drive)")
+        except Exception as exc:
+            print("  drive service: failed to launch (%s)" % exc)
+    else:
+        print("  drive service: pluto-drive/run.sh not found -- /control/drive unavailable")
+
+    def _stop_drive():
+        if drive_proc and drive_proc.poll() is None:
+            drive_proc.terminate()
+            try:
+                drive_proc.wait(2)
+            except Exception:
+                try:
+                    drive_proc.kill()
+                except Exception:
+                    pass
 
     host_ip = config.get("HOST_IP", "").strip()
 
@@ -3535,14 +3197,12 @@ def run():
 
     server = _Server(("0.0.0.0", PORT), Handler)
 
-    # Release any held synthetic keys on shutdown, so a kill/restart mid-drive can't
-    # strand a keydown -- an emulator's background input would hold it forever and
-    # the character keeps walking. atexit covers normal exit + Ctrl-C; the SIGTERM
-    # handler covers `kill` (e.g. start-pluto-lab.sh restarting the API).
-    atexit.register(_drive_stop)
+    # Stop the drive service on our shutdown so it releases held keys and frees its
+    # port. atexit covers normal exit + Ctrl-C; the SIGTERM handler covers `kill`.
+    atexit.register(_stop_drive)
 
     def _on_term(_sig, _frame):
-        _drive_stop()
+        _stop_drive()
         os._exit(0)
 
     signal.signal(signal.SIGTERM, _on_term)
@@ -3557,7 +3217,7 @@ def run():
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n  stopping...")
-        _drive_stop()
+        _stop_drive()
         server.server_close()
 
 

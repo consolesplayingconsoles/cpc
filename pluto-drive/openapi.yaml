@@ -1,0 +1,99 @@
+openapi: 3.0.3
+info:
+  title: CPC Drive API
+  version: 0.1.0
+  description: >
+    The standalone drive engine (`pluto-drive`), extracted from Pluto so it runs as
+    its own service on each node. It renders `/control/drive` requests to a SINK
+    resolved per node from the roster (KeyboardSink emulator / NetworkSink to the Pi
+    hub / RoombaSink), so the same target drives whatever hardware is local. The
+    mapping decides the buttons; this engine only steers ops to a sink.
+
+    Launched by the Pluto API as a child on the C2/Lab; runs under its own systemd
+    (cpc-drive.service) on the Pi.
+servers:
+  - url: http://{host}:{port}
+    variables:
+      host:
+        default: 127.0.0.1
+        description: the node running the drive service
+      port:
+        default: '7702'
+        description: DRIVE_PORT (defaults to 7702)
+paths:
+  /health:
+    get:
+      summary: Liveness probe
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  service: { type: string, example: cpc-drive }
+                  port: { type: integer, example: 7702 }
+  /control/drive:
+    post:
+      summary: Render a controller op to the target's local sink
+      description: >
+        One request drives the selected output. `action` picks the mode; the sink is
+        resolved from `target` (keyboard / pi / roomba) and the buttons from `mapping`.
+        Never 500 on a drive failure -- returns `{ok:false, error}` so a client can
+        surface it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum: [hold, press, axis, keepalive, pause, stop, play]
+                  description: >
+                    hold = live press/release; press = one-off pulse; axis = analog
+                    stick; keepalive = held-sink heartbeat; pause/stop = release;
+                    play = paced replay of a dreame route.
+                target:
+                  type: string
+                  enum: [keyboard, pi, roomba]
+                  description: which sink (resolved to local hardware per node)
+                source:
+                  type: string
+                  description: mapping source dir (e.g. nokia, keyboard, dreame)
+                mapping:
+                  type: string
+                  description: mapping name under the source (e.g. dreamcast)
+                down:
+                  type: boolean
+                  description: hold only -- true=press, false=release
+                btn:
+                  type: string
+                  description: explicit button (else resolved from key via the mapping)
+                key:
+                  type: string
+                  description: input key, resolved to a button via the mapping's controls
+                dev:
+                  type: string
+                  description: subtarget (the pico's UART dev under pi; roomba node id under roomba)
+                name: { type: string, description: axis name (MAIN / C) }
+                x: { type: number, description: axis x (0..1, 0.5 = center) }
+                y: { type: number, description: axis y (0..1, 0.5 = center) }
+                session: { type: object, description: play -- the dreame route }
+                t: { type: number, description: play -- start offset (seconds) }
+                speed: { type: number, description: play -- replay speed multiplier }
+                ms: { type: integer, description: press -- pulse length in ms }
+      responses:
+        '200':
+          description: Drive result (`{ok:true, ...}` or `{ok:false, error}`)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        '400':
+          description: Invalid JSON or unknown action
