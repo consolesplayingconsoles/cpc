@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Control surface: parent of the source/target/(subtarget)/mapping rail. Owns the
-// selections (all in the URL: /control/{source}/{target}/{mapping}[/{sub}]) and renders
+// selections (all in the URL: /control/{source}/{target}/{mapping}) and renders
 // the source child: Dreame Cloud (Robutek), Keyboard only (ControlKeyboard), or Claude
 // (ClaudeControl). The on-screen keyboard is the one unified controller across all three.
 import { computed, ref, watch } from 'vue'
@@ -38,23 +38,39 @@ const sourceList = computed(() => {
 })
 const source = computed(() => (route.params.source as string) || '')
 
-// ── TARGET — output sink (none / emulator / pi / roomba), NOT the console itself.
-// Each sink may own a subtarget dimension (pi -> pico, roomba -> node). ──
-const piPresent = computed(() => {
-  const n = props.nodes?.['pi']
-  return !!n && n.status !== 'unconfigured'
-})
+// ── TARGET — a FLAT output: the emulator, a specific Pico, or a specific roomba. No
+// subtarget: each option carries the drive SINK it maps to (keyboard / pi / roomba) and
+// its `dev` (the pico's UART dev, or the roomba node id). The label is what the device
+// is/pretends to be -- a ps3 HID pico -> "Ps3 HID Pico", a roomba node -> its name. ──
+interface FlatTarget {
+  id: string
+  label: string
+  drive: 'none' | 'keyboard' | 'pi' | 'roomba'   // the sink the drive service opens
+  dev: string                                     // pico dev (pi) | roomba node id (roomba)
+  kind: 'none' | 'emulator' | 'console' | 'roomba'
+  ip?: string                                     // roomba: host:port, for the telemetry panel
+}
 const roombaNodes = computed(() =>
   Object.values(props.nodes || {})
     .filter(n => n.controlTarget === 'roomba' && (n.status !== 'unconfigured' || props.showOffline)))
-const roombaPresent = computed(() => roombaNodes.value.length > 0)
-const targetOptions = computed(() => [
-  { id: 'none', label: 'No output', disabled: false },
-  ...(isLab ? [{ id: 'keyboard', label: 'Local Emulator (via Virtual Keyboard)', disabled: false }] : []),
-  { id: 'pi', label: 'Console (via Raspberry Pi)', disabled: !piPresent.value },
-  { id: 'roomba', label: 'Roomba', disabled: !roombaPresent.value },
-])
-const defaultTarget = computed(() => (piPresent.value ? 'pi' : isLab ? 'keyboard' : 'none'))
+
+function picoLabel(p: { iface?: string; role?: string; alias?: string; chipid: string }): string {
+  const iface = (p.iface || '').trim()
+  if (iface && /hid/i.test(p.role || ''))          // "ps3" + Remote HID -> "PS3 HID Pico"
+    return iface.charAt(0).toUpperCase() + iface.slice(1) + ' HID Pico'
+  return p.alias || p.chipid
+}
+const targetOptions = computed<FlatTarget[]>(() => {
+  const out: FlatTarget[] = [{ id: 'none', label: 'No output', drive: 'none', dev: '', kind: 'none' }]
+  if (isLab) out.push({ id: 'emulator', label: 'Emulator', drive: 'keyboard', dev: '', kind: 'emulator' })
+  const picos = ((props.nodes?.['pi'] as any)?.picos as Array<{ chipid: string; alias?: string; iface?: string; role?: string; dev?: string; conn?: string }> | undefined) || []
+  for (const p of picos)
+    if ((p.conn || '').toLowerCase() === 'uart' && p.dev)
+      out.push({ id: p.alias || p.chipid, label: picoLabel(p), drive: 'pi', dev: p.dev, kind: 'console' })
+  for (const n of roombaNodes.value)
+    out.push({ id: n.id, label: n.name, drive: 'roomba', dev: n.id, kind: 'roomba', ip: n.ip })
+  return out
+})
 const target = computed(() => (route.params.target as string) || '')
 
 // ── MAPPING — control scheme for the source (from the API). ──
@@ -73,76 +89,39 @@ async function fetchMappings(src: string) {
 }
 watch(source, (s) => fetchMappings(s), { immediate: true })
 
-// Which targets carry a subtarget dimension (a 4th URL segment). Keyed by target id
-// alone so path() can decide from any target, not just the current one.
-const TARGETS_WITH_SUBTARGET = new Set(['pi', 'roomba'])
-
-function path(s: string, t: string, m: string, sb = '') {
-  const segs = ['/control', s, t, m]
-  if (TARGETS_WITH_SUBTARGET.has(t) && m && sb) segs.push(sb)   // subtarget = 4th positional param (needs mapping filled, since positional)
-  return segs.filter((x, i) => i === 0 || x).join('/')
+function path(s: string, t: string, m: string) {
+  return ['/control', s, t, m].filter((x, i) => i === 0 || x).join('/')
 }
-// Each picker keeps the OTHER two dimensions populated in the URL by pushing the
-// resolved (effective) values, never the raw param -- otherwise changing the target
-// drops the mapping from the path even though the dropdown still shows it.
-function pick(level: 'source' | 'target' | 'mapping' | 'sub', v: string) {
-  if (level === 'source')  router.push(path(v, '', '', ''))                                        // new source resets the rest (canon refills)
-  else if (level === 'target')  router.push(path(source.value, v, effMapping.value, effSub.value)) // canon fills the subtarget when v gains one
-  else if (level === 'mapping') router.push(path(source.value, effTarget.value, v, effSub.value))
-  else                          router.push(path(source.value, effTarget.value, effMapping.value, v)) // subtarget
+// Each picker keeps the OTHER dimensions populated in the URL by pushing the resolved
+// (effective) values, never the raw param -- otherwise changing the target drops the
+// mapping from the path even though the dropdown still shows it.
+function pick(level: 'source' | 'target' | 'mapping', v: string) {
+  if (level === 'source')  router.push(path(v, '', ''))                                 // new source resets the rest (canon refills)
+  else if (level === 'target')  router.push(path(source.value, v, effMapping.value))
+  else router.push(path(source.value, effTarget.value, v))
 }
 
-const effTarget  = computed(() => target.value || defaultTarget.value)
+// The selected flat target -> the first real output when the URL has none.
+const effTarget = computed(() => target.value || (targetOptions.value.find(t => t.id !== 'none')?.id || 'none'))
+const curTarget = computed<FlatTarget>(() => targetOptions.value.find(t => t.id === effTarget.value) || targetOptions.value[0])
 // The mapping must MATCH the target's sink: a roomba mapping carries `actions` (button
-// -> roomba verb) that only the roomba sink understands, while console mappings (dreamcast,
-// gamecube) drive a console pad and have no actions. Pairing the wrong one silently no-ops
-// (a dreamcast mapping on the roomba sink finds no verb, fires nothing). So the dropdown
-// only offers mappings compatible with the current target: roomba schemes under 'roomba',
-// console schemes everywhere else.
+// -> roomba verb) only the roomba sink understands; console mappings drive a pad and have
+// no actions. So the dropdown only offers mappings compatible with the target KIND:
+// roomba schemes for a roomba, console schemes everywhere else.
 function isRoombaMapping(m: string) { return m === 'roomba' || m.startsWith('roomba-') }
 const visibleMappings = computed(() =>
-  effTarget.value === 'roomba'
+  curTarget.value.kind === 'roomba'
     ? mappings.value.filter(isRoombaMapping)
     : mappings.value.filter(m => !isRoombaMapping(m)))
-// Only honour the URL's mapping if it's valid for THIS target's list; otherwise fall
-// back to the first available. Kills the stale/invalid mapping that rendered blank.
 const effMapping = computed(() =>
   (mapping.value && visibleMappings.value.includes(mapping.value)) ? mapping.value : (visibleMappings.value[0] || ''))
 
-// ── SUBTARGET — a part of the chosen TARGET (the 4th URL param, appended after
-// mapping; the first three never move). Its CONTENT is defined by the target: the
-// 'pi' target's subtargets are the Pi's UART picos (each carrying the ttyAMA `dev`
-// the drive routes on); the 'roomba' target's subtargets are the roomba nodes.
-// Targets without a subtarget (none / emulator) show no picker. A subtarget only
-// exists inside its target -- one slot, target-specific options. ──
-interface SubOption { id: string; label: string; dev?: string }
-const subList = computed<SubOption[]>(() => {
-  if (effTarget.value === 'pi') {
-    const list = ((props.nodes?.['pi'] as any)?.picos as Array<{ chipid: string; alias?: string; dev?: string; conn?: string }> | undefined) || []
-    return list.filter(p => (p.conn || '').toLowerCase() === 'uart' && p.dev)
-               .map(p => ({ id: p.alias || p.chipid, label: p.alias || p.chipid, dev: p.dev as string }))
-  }
-  if (effTarget.value === 'roomba') {
-    return roombaNodes.value.map(n => ({ id: n.id, label: n.name }))
-  }
-  return []
-})
-const sub     = computed(() => (route.params.sub as string) || '')
-const showSub = computed(() => subList.value.length > 0)
-const effSub  = computed(() => {
-  if (!showSub.value) return ''
-  const ids = subList.value.map(s => s.id)
-  return (sub.value && ids.includes(sub.value)) ? sub.value : (ids[0] || '')
-})
-// The Pi drive routes on the selected pico's ttyAMA dev; other targets don't use it.
-const subDev  = computed(() => subList.value.find(s => s.id === effSub.value)?.dev || '')
-// The subtarget selector handed to the drive: the pico's UART dev under 'pi', the
-// roomba node id under 'roomba' (the backend interprets it per target). '' otherwise.
-const driveSub = computed(() =>
-  effTarget.value === 'pi' ? subDev.value : effTarget.value === 'roomba' ? effSub.value : '')
-// The selected roomba node's host:port, for the SW telemetry panel to poll /status directly.
-const roombaIp = computed(() =>
-  (effTarget.value === 'roomba' && effSub.value) ? (props.nodes?.[effSub.value]?.ip || '') : '')
+// Drive params derived from the flat target (subtarget gone): the sink, its dev (the
+// pico's UART dev under pi / the roomba node id under roomba), and the roomba host:port
+// for the telemetry panel.
+const driveTarget = computed(() => curTarget.value.drive)
+const driveDev = computed(() => curTarget.value.dev)
+const roombaIp = computed(() => curTarget.value.kind === 'roomba' ? (curTarget.value.ip || '') : '')
 
 // URL-canonicalization: write the resolved defaults INTO the url so the dropdowns and
 // the path never disagree. replace() = no history entry. With no source in the path
@@ -155,28 +134,24 @@ const roombaIp = computed(() =>
 // URL never hard-fails -- worst case it falls back to defaults.
 const LAST_URL_KEY = 'cpc.control.lastUrl'
 
-watch([source, target, mapping, sub, mappings, subList, sourceList, () => props.active], () => {
+watch([source, target, mapping, mappings, targetOptions, sourceList, () => props.active], () => {
   if (!props.active) return
   if (!source.value) {
     const last = localStorage.getItem(LAST_URL_KEY)
     if (last && last.startsWith('/control/') && last !== route.fullPath) { router.replace(last); return }
-    if (sourceList.value.length) router.replace(path(sourceList.value[0].id, '', '', ''))
+    if (sourceList.value.length) router.replace(path(sourceList.value[0].id, '', ''))
     return
   }
   // Claude is Lab-only (capture is local to the dev host). A deep link to /control/claude
   // on the C2 must not render it -> fall back to the first available source.
   if ((source.value === 'claude' || source.value === 'google') && !isLab) {
-    router.replace(path(sourceList.value[0]?.id || 'keyboard', '', '', ''))
+    router.replace(path(sourceList.value[0]?.id || 'keyboard', '', ''))
     return
   }
   const t = effTarget.value
   const m = effMapping.value
-  const sb = effSub.value   // '' unless the target has subtargets available
-  // subtarget canon: under a target that has one, the resolved subtarget must be in
-  // the URL; under a target that doesn't, no subtarget segment may linger.
-  const subMismatch = TARGETS_WITH_SUBTARGET.has(t) ? (!!sb && sb !== sub.value) : (sub.value !== '')
-  if (t !== target.value || (m && m !== mapping.value) || subMismatch) router.replace(path(source.value, t, m, sb))
-  else if (m) localStorage.setItem(LAST_URL_KEY, path(source.value, t, m, sb))   // canon settled: remember it
+  if (t !== target.value || (m && m !== mapping.value)) router.replace(path(source.value, t, m))
+  else if (m) localStorage.setItem(LAST_URL_KEY, path(source.value, t, m))   // canon settled: remember it
 }, { immediate: true })
 
 // Control OWNS the drive-error surface: the source children (Robutek / ControlKeyboard /
@@ -211,17 +186,9 @@ function openMappingDir() {
         <span class="rail-arrow" aria-hidden="true">›</span>
         <label class="rail-ctl" :class="{ off: !source }"><span>Target</span>
           <select :value="effTarget" :disabled="!source" @change="pick('target', ($event.target as HTMLSelectElement).value)">
-            <option v-for="t in targetOptions" :key="t.id" :value="t.id" :disabled="t.disabled">{{ t.label }}</option>
+            <option v-for="t in targetOptions" :key="t.id" :value="t.id">{{ t.label }}</option>
           </select>
         </label>
-        <template v-if="showSub">
-          <span class="rail-arrow" aria-hidden="true">›</span>
-          <label class="rail-ctl"><span>Subtarget</span>
-            <select :value="effSub" @change="pick('sub', ($event.target as HTMLSelectElement).value)">
-              <option v-for="s in subList" :key="s.id" :value="s.id">{{ s.label }}</option>
-            </select>
-          </label>
-        </template>
         <span class="rail-arrow" aria-hidden="true">›</span>
         <label class="rail-ctl" :class="{ off: !source || !visibleMappings.length }"><span>Mapping</span>
           <select :value="effMapping" :disabled="!source || !visibleMappings.length" @change="pick('mapping', ($event.target as HTMLSelectElement).value)">
@@ -244,9 +211,9 @@ function openMappingDir() {
     <div class="control-body">
       <div class="control-stage">
         <ControlBody
-          :active="active" :source="source" :target="effTarget" :mapping="effMapping"
-          :target-dev="driveSub" :roomba-ip="roombaIp" :nodes="nodes" :name="name"
-          :show-offline="showOffline" :sub="effSub"
+          :active="active" :source="source" :target="driveTarget" :mapping="effMapping"
+          :target-dev="driveDev" :roomba-ip="roombaIp" :nodes="nodes" :name="name"
+          :show-offline="showOffline"
           @drive-error="setError" />
       </div>
     </div>
