@@ -3,7 +3,7 @@
 // selections (all in the URL: /control/{source}/{target}/{mapping}) and renders
 // the source child: Dreame Cloud (Robutek), Keyboard only (ControlKeyboard), or Claude
 // (ClaudeControl). The on-screen keyboard is the one unified controller across all three.
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { NodeMap } from '../../composables/useNodes'
 import ControlBody from './ControlBody.vue'
@@ -14,28 +14,27 @@ const router = useRouter()
 const API = `http://${window.location.hostname}:7700`
 const isLab = import.meta.env.DEV
 
-// ── SOURCE — the event producer. Dreame Cloud is a configured pinged node (hidden
-// when unconfigured unless "Show unconfigured" is on). Keyboard is a manual input mode,
-// always available. Claude (the capture-driven AI screen) is LAB-ONLY: capture and the
-// LLM client must be co-located on the dev host to be fast, so it's hidden on the C2. ──
-const sourceList = computed(() => {
-  const out: { id: string; label: string }[] = []
-  if (isLab) out.push({ id: 'claude',       label: 'Claude' })        // Lab only: capture is local to the dev host
-  const d = props.nodes?.['dreame']
-  if (d && (d.status !== 'unconfigured' || props.showOffline)) out.push({ id: 'dreame', label: 'Dreame Cloud' })
-  const pi = props.nodes?.['pi']
-  if (pi && (pi.status !== 'unconfigured' || props.showOffline)) {
-    out.push({ id: 'dreampicoport', label: 'DreamPicoPort' })
-  }
-  if (isLab) out.push({ id: 'google', label: 'Google' })             // Lab only: requires local capture device
-  out.push({ id: 'keyboard', label: 'Keyboard only' })
-  const pi2 = props.nodes?.['pi']
-  if (pi2 && (pi2.status !== 'unconfigured' || props.showOffline)) {
-    out.push({ id: 'kinect', label: 'Kinect' })
-    out.push({ id: 'nokia', label: 'Nokia Phone' })   // BT controller via the Pi engine
-  }
-  return out.sort((a, b) => a.label.localeCompare(b.label))
+// ── HOST — Pluto Lab or Raspberry Pi, from config/control.json. Sources + targets are
+// scoped to the picked host and shown in FULL (CPC: no hiding -- the drive API fails
+// loudly if a picked one is missing/misconfigured). ──
+interface ControlHost { id: string; label: string; sources: string[]; targets: string[] }
+const hosts = ref<ControlHost[]>([])
+onMounted(async () => {
+  try { hosts.value = ((await (await fetch(`${API}/control/config`)).json())?.hosts) || [] }
+  catch { hosts.value = [] }
 })
+const host = ref(isLab ? 'lab' : 'pi')
+const curHost = computed(() => hosts.value.find(h => h.id === host.value) || hosts.value[0])
+
+// ── SOURCE — the event producer, scoped to the host (config-driven, shown in full). ──
+const SOURCE_LABELS: Record<string, string> = {
+  claude: 'Claude', google: 'Google', keyboard: 'Keyboard only',
+  dreampicoport: 'DreamPicoPort', kinect: 'Kinect', nokia: 'Nokia Phone', dreame: 'Dreame Cloud',
+}
+const sourceList = computed(() =>
+  (curHost.value?.sources || [])
+    .map(id => ({ id, label: SOURCE_LABELS[id] || id }))
+    .sort((a, b) => a.label.localeCompare(b.label)))
 const source = computed(() => (route.params.source as string) || '')
 
 // ── TARGET — a FLAT output: the emulator, a specific Pico, or a specific roomba. No
@@ -61,14 +60,26 @@ function picoLabel(p: { iface?: string; role?: string; alias?: string; chipid: s
   return p.alias || p.chipid
 }
 const targetOptions = computed<FlatTarget[]>(() => {
+  // 'none' is client-side (maps to nothing), never in config. The rest expand from the
+  // host's config targets: a category id -> the concrete FlatTarget(s) it resolves to.
   const out: FlatTarget[] = [{ id: 'none', label: 'No output', drive: 'none', dev: '', kind: 'none' }]
-  if (isLab) out.push({ id: 'emulator', label: 'Emulator', drive: 'keyboard', dev: '', kind: 'emulator' })
   const picos = ((props.nodes?.['pi'] as any)?.picos as Array<{ chipid: string; alias?: string; iface?: string; role?: string; dev?: string; conn?: string }> | undefined) || []
-  for (const p of picos)
-    if ((p.conn || '').toLowerCase() === 'uart' && p.dev)
-      out.push({ id: p.alias || p.chipid, label: picoLabel(p), drive: 'pi', dev: p.dev, kind: 'console' })
-  for (const n of roombaNodes.value)
-    out.push({ id: n.id, label: n.name, drive: 'roomba', dev: n.id, kind: 'roomba', ip: n.ip })
+  for (const cat of (curHost.value?.targets || [])) {
+    if (cat === 'emulator') {
+      out.push({ id: 'emulator', label: 'Emulator', drive: 'keyboard', dev: '', kind: 'emulator' })
+    } else if (cat === 'hid') {
+      for (const p of picos)
+        if ((p.conn || '').toLowerCase() === 'uart' && p.dev && /hid/i.test(p.role || ''))
+          out.push({ id: p.alias || p.chipid, label: picoLabel(p), drive: 'pi', dev: p.dev, kind: 'console' })
+    } else if (cat === 'roomba') {
+      for (const n of roombaNodes.value)
+        out.push({ id: n.id, label: n.name, drive: 'roomba', dev: n.id, kind: 'roomba', ip: n.ip })
+    } else if (cat === 'megadrive') {
+      // MD command/data channel over the USB pico. Listed now; its drive plumbing
+      // (api -> hub -> pico firmware) is the next piece, so drive is inert for now.
+      out.push({ id: 'megadrive', label: 'Mega Drive', drive: 'none', dev: '', kind: 'console' })
+    }
+  }
   return out
 })
 const target = computed(() => (route.params.target as string) || '')
@@ -136,6 +147,11 @@ const LAST_URL_KEY = 'cpc.control.lastUrl'
 
 watch([source, target, mapping, mappings, targetOptions, sourceList, () => props.active], () => {
   if (!props.active) return
+  // Host changed / stale deep link: if the current source isn't in this host's list,
+  // fall back to the host's first source.
+  if (source.value && sourceList.value.length && !sourceList.value.some(s => s.id === source.value)) {
+    router.replace(path(sourceList.value[0].id, '', '')); return
+  }
   if (!source.value) {
     const last = localStorage.getItem(LAST_URL_KEY)
     if (last && last.startsWith('/control/') && last !== route.fullPath) { router.replace(last); return }
@@ -178,6 +194,12 @@ function openMappingDir() {
   <div class="control">
     <div class="control-head">
       <div class="rail">
+        <label class="rail-ctl"><span>Host</span>
+          <select :value="host" @change="host = ($event.target as HTMLSelectElement).value">
+            <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.label }}</option>
+          </select>
+        </label>
+        <span class="rail-arrow" aria-hidden="true">›</span>
         <label class="rail-ctl"><span>Source</span>
           <select :value="source" @change="pick('source', ($event.target as HTMLSelectElement).value)">
             <option v-for="s in sourceList" :key="s.id" :value="s.id">{{ s.label }}</option>
