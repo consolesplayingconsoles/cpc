@@ -1,0 +1,16 @@
+{
+  "hosts": [
+    {
+      "id": "lab",
+      "label": "Pluto Lab",
+      "sources": ["claude", "google", "keyboard", "dreampicoport", "dreame"],
+      "targets": ["emulator", "roomba"]
+    },
+    {
+      "id": "pi",
+      "label": "Raspberry Pi",
+      "sources": ["dreampicoport", "kinect", "nokia", "keyboard"],
+      "targets": ["hid", "megadrive"]
+    }
+  ]
+}

@@ -180,7 +180,8 @@ def _sync_server(cfg, stop):
                 action = (body.get("action") or "sync").strip()
                 target = (body.get("target") or "").strip()
                 dropbox_path = (body.get("dropbox_path") or "").strip()
-                reply = _handle_sync(action, target, cfg, dropbox_path=dropbox_path)
+                text = body.get("text") or ""
+                reply = _handle_sync(action, target, cfg, dropbox_path=dropbox_path, text=text)
             except Exception as exc:
                 reply = {"error": "sync handler crashed: %s" % exc}
             data = _json.dumps(reply).encode()
@@ -198,8 +199,91 @@ def _sync_server(cfg, stop):
     srv.server_close()
 
 
-def _handle_sync(action, target, cfg, dropbox_path=""):
+# genesis datalink: hold the Pico serial open, CACHE the MD liveness it PUSHES (the Pico
+# watches SELECT and emits md:on/md:off on change, so the hub never polls), and own the
+# write handle for commands. _genesis_health_server serves the cache on its own port.
+_GENESIS = {"ser": None, "md_on": False}
+
+
+def _datalink_chip(cfg):
+    for k, v in cfg.items():
+        if k.startswith("PICO_") and "datalink" in (v or "").lower():
+            return k[len("PICO_"):]
+    return None
+
+
+def _datalink_write(cfg, text):
+    """Write a command line to the genesis Pico via the held-open serial; the Pico reads
+    it off stdin and frames it onto the Mega Drive."""
+    ser = _GENESIS.get("ser")
+    if not ser:
+        return {"error": "datalink pico not connected"}
+    try:
+        ser.write((text + "\n").encode("utf-8", "replace"))
+    except Exception as exc:
+        return {"error": "datalink write failed: %s" % exc}
+    return {"message": "sent to genesis: %s" % text}
+
+
+def _genesis_manager(cfg, stop):
+    """Hold the genesis Pico's serial open: cache the md:on/md:off it pushes, own the
+    write handle, reconnect if the board drops. Chip id -> /dev/serial/by-id symlink."""
+    import glob as _glob
+    chip = _datalink_chip(cfg)
+    if not chip:
+        return
+    while not stop["flag"]:
+        hits = _glob.glob("/dev/serial/by-id/*%s*" % chip)
+        if not hits:
+            _GENESIS["ser"] = None; _GENESIS["md_on"] = False
+            time.sleep(2); continue
+        dev = os.path.realpath(hits[0])
+        try:
+            import serial
+            ser = serial.Serial(dev, 115200, timeout=1)
+            _GENESIS["ser"] = ser
+            print("genesis datalink: %s open, watching MD liveness" % dev)
+            while not stop["flag"]:
+                line = ser.readline().decode("utf-8", "replace").strip()
+                if line == "md:on":
+                    _GENESIS["md_on"] = True
+                elif line == "md:off":
+                    _GENESIS["md_on"] = False
+        except Exception as exc:
+            print("genesis datalink: serial dropped (%s), retrying" % exc)
+        finally:
+            _GENESIS["ser"] = None; _GENESIS["md_on"] = False
+        time.sleep(2)
+
+
+def _genesis_health_server(cfg, stop):
+    """Own-port health for the megadrive node: 200 when the console is on (the last
+    pushed md state), 503 when off. Pluto probes GET /health here via HOST_IP=<pi>:<port>."""
+    import http.server
+    import json as _json
+    port = int((cfg.get("PI_MD_HEALTH_PORT") or "7722").strip())
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_): pass
+        def do_GET(self):
+            up = bool(_GENESIS.get("md_on"))
+            self.send_response(200 if up else 503)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(_json.dumps({"md": "on" if up else "off"}).encode())
+
+    srv = http.server.HTTPServer(("0.0.0.0", port), H)
+    srv.timeout = 1.0
+    print("genesis health server up -- :%d" % port)
+    while not stop["flag"]:
+        srv.handle_request()
+    srv.server_close()
+
+
+def _handle_sync(action, target, cfg, dropbox_path="", text=""):
     """Dispatch a sync/list request. Returns {"message": ...} or {"error": ...}."""
+    if action == "datalink":
+        return _datalink_write(cfg, text)
     if not target:
         return {"error": "no target specified -- try @dropbox %s @vmu" % action}
     if target == "vmu":
@@ -401,6 +485,14 @@ def serve(cfg):
     signal.signal(signal.SIGINT, _term)
 
     threading.Thread(target=_sync_server, args=(cfg, stop), daemon=True).start()
+
+    # genesis datalink: hold the Pico serial (push-based MD liveness cache + command
+    # writes) and serve the megadrive node's health on its own port.
+    if _datalink_chip(cfg):
+        threading.Thread(target=_genesis_manager, args=(cfg, stop), daemon=True).start()
+        threading.Thread(target=_genesis_health_server, args=(cfg, stop), daemon=True).start()
+    else:
+        print("  genesis datalink disabled (no role=datalink pico in .env)")
 
     # Lens trigger: watch DC controller evdev devices, forward all buttons via HidBridge,
     # fire grab -> scan -> translate-last on L+R. Needs PLUTO_IP to be set in the .env.

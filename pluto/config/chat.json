@@ -22,6 +22,9 @@
     ],
     "substack": [
       { "verb": "post", "desc": "write & broadcast to substack", "multiline": true }
+    ],
+    "megadrive": [
+      { "verb": "text", "desc": "print a message on the console", "multiline": true }
     ]
   },
   "emojis": [":)", ":(", ":|", ":D", ":'(", ">:(", "+1", "-1", "<3", "X_X", "O_O", "\\o/", "gg", "lol", "rip", "ugh", "zzz", "ngl", ":P", "..."]

@@ -66,6 +66,8 @@ paths:
         - { name: source, in: path, required: true, schema: { type: string } }
         - { name: target, in: path, required: true, schema: { type: string } }
       responses: { '200': { description: Mapping }, '404': { description: no mapping } }
+  /control/config:
+    get: { tags: [control], summary: Control hosts and their configured sources / targets, responses: { '200': { description: Config } } }
   /control/signal:
     get: { tags: [control], summary: Current control signal state, responses: { '200': { description: State } } }
     post: { tags: [control], summary: Set the control signal, responses: { '200': { description: OK } } }

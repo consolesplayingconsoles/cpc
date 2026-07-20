@@ -449,6 +449,28 @@ def _sync_batocera(roster):
     _new_message(sender, msg + ".")
 
 
+def _datalink_send(pi_cfg, text):
+    """Relay a command line to the genesis datalink Pico via the Pi hub's sync server
+    (POST /sync action=datalink); the hub writes it to the Pico's USB serial and the
+    Pico frames it onto the Mega Drive. Handler for '@megadrive text <msg>'. Success is
+    silent (it shows on the console); only failures surface in chat."""
+    import urllib.request
+    host = (pi_cfg.get("HOST_IP") or "").strip()
+    port = (pi_cfg.get("PI_SYNC_PORT") or "7721").strip()
+    if not host:
+        _new_message("megadrive", "datalink: the Pi node has no HOST_IP set.")
+        return
+    url  = "http://%s:%s/sync" % (host, port)
+    body = json.dumps({"action": "datalink", "text": text}).encode()
+    try:
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+        rep = json.loads(urllib.request.urlopen(req, timeout=5).read().decode())
+        if rep.get("error"):
+            _new_message("megadrive", "datalink: %s" % rep["error"])
+    except Exception as exc:
+        _new_message("megadrive", "datalink unreachable: %s" % exc)
+
+
 def _dropbox_dispatch(verb, text, roster, consoles_cfg):
     """Route @dropbox <domain> [selector] [subverb].
 
@@ -1587,6 +1609,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/connections"), ("GET", "/whoami"), ("GET", "/messages"),
         ("GET", "/deploy/{node}/stream"),
         ("GET", "/mappings"), ("GET", "/mappings/{source}"), ("GET", "/mappings/{source}/{target}"),
+        ("GET", "/control/config"),
         ("GET", "/control/signal"), ("GET", "/control/capture"), ("GET", "/control/log"),
         ("GET", "/control/frame"), ("GET", "/control/google/lens"), ("GET", "/control/google/config"),
         ("GET", "/control/google/latest"),
@@ -1619,6 +1642,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif parsed.path == "/connections":
             self._send(200, self._build_connections())
+
+        elif parsed.path == "/control/config":
+            self._send(200, self._build_control_config())
 
         elif parsed.path == "/whoami":
             self._handle_whoami()
@@ -1843,6 +1869,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 content = vparts[1] if len(vparts) > 1 and vparts[0].lower() == hit else ""
                 creds = self.__class__.node_roster.get("substack", {})
                 threading.Thread(target=_substack_post, args=(creds, content), daemon=True).start()
+                return
+            if node_id == "megadrive" and hit == "text":
+                # everything after "@megadrive text " is the message (like substack post)
+                rest  = text.strip()
+                first = rest.split(None, 1)
+                if first and first[0].startswith("@"):
+                    rest = first[1] if len(first) > 1 else ""
+                vparts  = rest.split(None, 1)
+                content = vparts[1] if len(vparts) > 1 and vparts[0].lower() == hit else ""
+                if content:
+                    pi_cfg = self.__class__.node_roster.get("pi", {})
+                    threading.Thread(target=_datalink_send, args=(pi_cfg, content), daemon=True).start()
                 return
             if node_id == "dropbox" and hit in ("cloud", "node"):
                 threading.Thread(target=_dropbox_dispatch,
@@ -3064,6 +3102,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not os.path.exists(connections_path):
             return []
         with open(connections_path) as f:
+            return json.load(f)
+
+    def _build_control_config(self):
+        # Control hosts (Pluto Lab / Raspberry Pi) + the sources/targets scoped to
+        # each -- config/control.json. Show-everything: the UI lists all of them and
+        # the drive API fails loudly if a picked one is missing/misconfigured.
+        base_dir = self.__class__.base_dir
+        path = os.path.join(base_dir, "config", "control.json")
+        if not os.path.exists(path):
+            return {"hosts": []}
+        with open(path) as f:
             return json.load(f)
 
 
