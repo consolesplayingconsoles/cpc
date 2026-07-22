@@ -23,8 +23,19 @@ onMounted(async () => {
   try { hosts.value = ((await (await fetch(`${API}/control/config`)).json())?.hosts) || [] }
   catch { hosts.value = [] }
 })
-const host = ref(isLab ? 'lab' : 'pi')
+// Host is the FIRST url segment (/control/{host}/{source}/{target}/{mapping}), like the
+// rest of the selection, so a reload or deep link restores it and the scoped source/
+// target lists stay consistent. Default: lab on the dev build, pi elsewhere.
+const host = computed(() => (route.params.host as string) || (isLab ? 'lab' : 'pi'))
 const curHost = computed(() => hosts.value.find(h => h.id === host.value) || hosts.value[0])
+// Picking a host jumps straight to that host's first source (never the empty-source
+// state) so the canon fills target/mapping for the new host.
+function pickHost(h: string) {
+  const first = (hosts.value.find(x => x.id === h)?.sources || [])
+    .map(id => ({ id, label: SOURCE_LABELS[id] || id }))
+    .sort((a, b) => a.label.localeCompare(b.label))[0]?.id || ''
+  router.push(['/control', h, first].filter(Boolean).join('/'))
+}
 
 // ── SOURCE — the event producer, scoped to the host (config-driven, shown in full). ──
 const SOURCE_LABELS: Record<string, string> = {
@@ -44,7 +55,7 @@ const source = computed(() => (route.params.source as string) || '')
 interface FlatTarget {
   id: string
   label: string
-  drive: 'none' | 'keyboard' | 'pi' | 'roomba'   // the sink the drive service opens
+  drive: 'none' | 'keyboard' | 'pi' | 'roomba' | 'megadrive'   // the sink the drive service opens
   dev: string                                     // pico dev (pi) | roomba node id (roomba)
   kind: 'none' | 'emulator' | 'console' | 'roomba'
   ip?: string                                     // roomba: host:port, for the telemetry panel
@@ -75,9 +86,12 @@ const targetOptions = computed<FlatTarget[]>(() => {
       for (const n of roombaNodes.value)
         out.push({ id: n.id, label: n.name, drive: 'roomba', dev: n.id, kind: 'roomba', ip: n.ip })
     } else if (cat === 'megadrive') {
-      // MD command/data channel over the USB pico. Listed now; its drive plumbing
-      // (api -> hub -> pico firmware) is the next piece, so drive is inert for now.
-      out.push({ id: 'megadrive', label: 'Mega Drive', drive: 'none', dev: '', kind: 'console' })
+      // MD as a CONTROLLER target: the selected source's quadrant layout drives it via the
+      // SE ControlKeyboard, same as any pad. The 'megadrive' drive sink (drive service ->
+      // hub -> genesis pico controller mode) is the pending producer; until it lands, driving
+      // it 404s like any unimplemented sink (show everything, let the API fail). Text is NOT
+      // here -- that's the chat verb '@megadrive text'.
+      out.push({ id: 'megadrive', label: 'Mega Drive', drive: 'megadrive', dev: '', kind: 'console' })
     }
   }
   return out
@@ -101,7 +115,7 @@ async function fetchMappings(src: string) {
 watch(source, (s) => fetchMappings(s), { immediate: true })
 
 function path(s: string, t: string, m: string) {
-  return ['/control', s, t, m].filter((x, i) => i === 0 || x).join('/')
+  return ['/control', host.value, s, t, m].filter((x, i) => i === 0 || x).join('/')
 }
 // Each picker keeps the OTHER dimensions populated in the URL by pushing the resolved
 // (effective) values, never the raw param -- otherwise changing the target drops the
@@ -145,8 +159,15 @@ const roombaIp = computed(() => curTarget.value.kind === 'roomba' ? (curTarget.v
 // URL never hard-fails -- worst case it falls back to defaults.
 const LAST_URL_KEY = 'cpc.control.lastUrl'
 
-watch([source, target, mapping, mappings, targetOptions, sourceList, () => props.active], () => {
+watch([source, target, mapping, mappings, targetOptions, sourceList, host, () => props.active], () => {
   if (!props.active) return
+  // Bad host segment (an old link, or none): once the roster's loaded, snap to the default
+  // host so the URL always names a real host (the canon re-runs and fills the source).
+  if (hosts.value.length && !hosts.value.some(h => h.id === host.value)) {
+    const def = isLab ? 'lab' : 'pi'
+    const dh = hosts.value.some(h => h.id === def) ? def : hosts.value[0].id
+    router.replace(['/control', dh].join('/')); return
+  }
   // Host changed / stale deep link: if the current source isn't in this host's list,
   // fall back to the host's first source.
   if (source.value && sourceList.value.length && !sourceList.value.some(s => s.id === source.value)) {
@@ -154,7 +175,9 @@ watch([source, target, mapping, mappings, targetOptions, sourceList, () => props
   }
   if (!source.value) {
     const last = localStorage.getItem(LAST_URL_KEY)
-    if (last && last.startsWith('/control/') && last !== route.fullPath) { router.replace(last); return }
+    const lastHost = last?.split('/')[2]   // /control/<host>/<source>/...
+    if (last && last.startsWith('/control/') && last !== route.fullPath
+        && hosts.value.some(h => h.id === lastHost)) { router.replace(last); return }
     if (sourceList.value.length) router.replace(path(sourceList.value[0].id, '', ''))
     return
   }
@@ -167,7 +190,7 @@ watch([source, target, mapping, mappings, targetOptions, sourceList, () => props
   const t = effTarget.value
   const m = effMapping.value
   if (t !== target.value || (m && m !== mapping.value)) router.replace(path(source.value, t, m))
-  else if (m) localStorage.setItem(LAST_URL_KEY, path(source.value, t, m))   // canon settled: remember it
+  else if (m) localStorage.setItem(LAST_URL_KEY, route.fullPath)   // canon settled: remember it (incl ?host=)
 }, { immediate: true })
 
 // Control OWNS the drive-error surface: the source children (Robutek / ControlKeyboard /
@@ -195,7 +218,7 @@ function openMappingDir() {
     <div class="control-head">
       <div class="rail">
         <label class="rail-ctl"><span>Host</span>
-          <select :value="host" @change="host = ($event.target as HTMLSelectElement).value">
+          <select :value="host" @change="pickHost(($event.target as HTMLSelectElement).value)">
             <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.label }}</option>
           </select>
         </label>

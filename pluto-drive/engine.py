@@ -123,6 +123,17 @@ class DriveEngine:
             except Exception as exc:
                 raise ValueError("can't reach the roomba command stream at %s:%d (%s) -- "
                                  "is the firmware (v17+) running?" % (host, cmd_port, exc))
+        if target == "megadrive":
+            pi_cfg = roster.get("pi") or {}
+            host = (pi_cfg.get("HOST_IP") or "").strip()
+            port = (pi_cfg.get("PI_SYNC_PORT") or "7721").strip()
+            if not host:
+                raise ValueError("pi node has no HOST_IP in its .env")
+            try:
+                return self._c.MegadriveSink(host, port)
+            except Exception as exc:
+                raise ValueError("can't reach the genesis datalink at %s:%s (%s) -- is the "
+                                 "hub up (cpc-hub.service)?" % (host, port, exc))
         raise ValueError("unknown target: %s" % target)
 
     def _live_ensure(self, target, mapping, dev=None):

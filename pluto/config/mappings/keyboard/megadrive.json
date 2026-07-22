@@ -1,0 +1,24 @@
+{
+  "_comment": "Keyboard source -> Mega Drive 3-button pad. The genesis datalink pico presents these as a real pad (controller mode). For this target the 'btn' names are sent straight to the megadrive sink, which folds them into the pad's state byte (D_UP=01 D_DOWN=02 D_LEFT=04 D_RIGHT=08 A=10 B=20 C=40 START=80). 3-button only (no X/Y/Z/Mode). WASD d-pad, J/K/L = A/B/C (left to right, as on the pad), Enter = Start.",
+  "controller": "Mega Drive",
+  "controls": { "Enter": "START", "action": "A", "cancel": "B" },
+  "keys": {
+    "D_UP": "up", "D_DOWN": "down", "D_LEFT": "left", "D_RIGHT": "right",
+    "A": "a", "B": "b", "C": "c", "START": "enter"
+  },
+  "layout": [
+    { "key": "w", "btn": "D_UP",    "label": "Up",    "col": 2, "row": 2 },
+    { "key": "a", "btn": "D_LEFT",  "label": "Left",  "col": 1, "row": 3 },
+    { "key": "d", "btn": "D_RIGHT", "label": "Right", "col": 3, "row": 3 },
+    { "key": "s", "btn": "D_DOWN",  "label": "Down",  "col": 2, "row": 4 },
+    { "key": "Enter", "btn": "START", "label": "Start", "col": 5, "row": 2 },
+    { "key": "j", "btn": "A", "label": "A", "col": 7, "row": 3 },
+    { "key": "k", "btn": "B", "label": "B", "col": 8, "row": 3 },
+    { "key": "l", "btn": "C", "label": "C", "col": 9, "row": 3 }
+  ],
+  "colors": {
+    "D_UP": "#4b5058", "D_DOWN": "#4b5058", "D_LEFT": "#4b5058", "D_RIGHT": "#4b5058",
+    "A": "#1f2226", "B": "#1f2226", "C": "#1f2226",
+    "START": "#c0392b"
+  }
+}

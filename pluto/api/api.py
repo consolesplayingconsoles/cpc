@@ -449,26 +449,31 @@ def _sync_batocera(roster):
     _new_message(sender, msg + ".")
 
 
-def _datalink_send(pi_cfg, text):
+def _datalink_post(pi_cfg, text):
     """Relay a command line to the genesis datalink Pico via the Pi hub's sync server
-    (POST /sync action=datalink); the hub writes it to the Pico's USB serial and the
-    Pico frames it onto the Mega Drive. Handler for '@megadrive text <msg>'. Success is
-    silent (it shows on the console); only failures surface in chat."""
+    (POST /sync action=datalink); the hub writes it to the Pico's USB serial and the Pico
+    frames it onto the Mega Drive. Returns the hub's JSON reply, or {"error": ...} if the
+    Pi is unconfigured / unreachable. Shared by the chat verb and the Control-tab sender."""
     import urllib.request
     host = (pi_cfg.get("HOST_IP") or "").strip()
     port = (pi_cfg.get("PI_SYNC_PORT") or "7721").strip()
     if not host:
-        _new_message("megadrive", "datalink: the Pi node has no HOST_IP set.")
-        return
+        return {"error": "the Pi node has no HOST_IP set"}
     url  = "http://%s:%s/sync" % (host, port)
     body = json.dumps({"action": "datalink", "text": text}).encode()
     try:
         req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
-        rep = json.loads(urllib.request.urlopen(req, timeout=5).read().decode())
-        if rep.get("error"):
-            _new_message("megadrive", "datalink: %s" % rep["error"])
+        return json.loads(urllib.request.urlopen(req, timeout=5).read().decode())
     except Exception as exc:
-        _new_message("megadrive", "datalink unreachable: %s" % exc)
+        return {"error": "datalink unreachable: %s" % exc}
+
+
+def _datalink_send(pi_cfg, text):
+    """Chat handler for '@megadrive text <msg>': relay via the hub. Success is silent (it
+    shows on the console); only failures surface in chat."""
+    rep = _datalink_post(pi_cfg, text)
+    if rep.get("error"):
+        _new_message("megadrive", "datalink: %s" % rep["error"])
 
 
 def _dropbox_dispatch(verb, text, roster, consoles_cfg):

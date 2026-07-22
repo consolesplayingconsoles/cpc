@@ -17,14 +17,10 @@ const router = createRouter({
     { path: '/', name: 'network', component: Blank, meta: { hashtag: '#consoles-connected-to-consoles' } },
     { path: '/command', name: 'command', component: Blank, meta: { hashtag: '#consoles-chatting-consoles' } },
     { path: '/chat', redirect: '/command' },   // back-compat: Chat -> Command (C2)
-    // Control surface: source (event producer) / target (output sink) / mapping
-    // (control scheme). All three ride the URL so a reload restores the selection
-    // instead of dropping to a default (the old reload-to-Disabled trap).
-    // sub is the TARGET's subtarget: a PURE APPEND after mapping (4th positional
-    // param) so existing /control/source/target/mapping links keep parsing. Its
-    // meaning is defined by the target -- which pico under 'pi', which roomba node
-    // under 'roomba'; targets without subtargets never fill it.
-    { path: '/control/:source?/:target?/:mapping?/:sub?', name: 'control', component: Blank, meta: { hashtag: '#anything-playing-anything' } },
+    // Control surface: host (which machine) / source (event producer) / target (output
+    // sink) / mapping (control scheme). All four ride the URL so a reload restores the
+    // whole selection instead of dropping to a default (the old reload-to-Disabled trap).
+    { path: '/control/:host?/:source?/:target?/:mapping?', name: 'control', component: Blank, meta: { hashtag: '#anything-playing-anything' } },
     // :ns is the project namespace (game + language) — rides the URL so a reload /
     // HMR / bookmark restores the open table instead of dropping to the picker.
     { path: '/translation/:ns?', name: 'translation', component: Blank, meta: { hashtag: '#consolas-traduciendo-consolas' } },
