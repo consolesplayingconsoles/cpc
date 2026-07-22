@@ -181,7 +181,9 @@ def _sync_server(cfg, stop):
                 target = (body.get("target") or "").strip()
                 dropbox_path = (body.get("dropbox_path") or "").strip()
                 text = body.get("text") or ""
-                reply = _handle_sync(action, target, cfg, dropbox_path=dropbox_path, text=text)
+                ctl_byte = body.get("byte")
+                reply = _handle_sync(action, target, cfg, dropbox_path=dropbox_path,
+                                     text=text, byte=ctl_byte)
             except Exception as exc:
                 reply = {"error": "sync handler crashed: %s" % exc}
             data = _json.dumps(reply).encode()
@@ -223,6 +225,23 @@ def _datalink_write(cfg, text):
     except Exception as exc:
         return {"error": "datalink write failed: %s" % exc}
     return {"message": "sent to genesis: %s" % text}
+
+
+def _datalink_write_byte(cfg, b):
+    """Write ONE raw control byte to the genesis Pico (controller mode): the pico reads each
+    raw byte as the whole 3-button state, latest-wins. No newline -- it's not a text line."""
+    ser = _GENESIS.get("ser")
+    if not ser:
+        return {"error": "datalink pico not connected"}
+    try:
+        b = int(b) & 0xFF
+    except (TypeError, ValueError):
+        return {"error": "control byte must be an int 0-255"}
+    try:
+        ser.write(bytes([b]))
+    except Exception as exc:
+        return {"error": "control write failed: %s" % exc}
+    return {"message": "genesis control: 0x%02X" % b}
 
 
 def _genesis_manager(cfg, stop):
@@ -280,10 +299,12 @@ def _genesis_health_server(cfg, stop):
     srv.server_close()
 
 
-def _handle_sync(action, target, cfg, dropbox_path="", text=""):
+def _handle_sync(action, target, cfg, dropbox_path="", text="", byte=None):
     """Dispatch a sync/list request. Returns {"message": ...} or {"error": ...}."""
     if action == "datalink":
         return _datalink_write(cfg, text)
+    if action == "control":
+        return _datalink_write_byte(cfg, byte)
     if not target:
         return {"error": "no target specified -- try @dropbox %s @vmu" % action}
     if target == "vmu":

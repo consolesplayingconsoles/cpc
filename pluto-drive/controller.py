@@ -477,6 +477,68 @@ class RoombaSink(Sink):
             pass
 
 
+class MegadriveSink(Sink):
+    """Drive the Mega Drive's genesis datalink pico in CONTROLLER mode. Holds the pressed
+    button set and, on every change, pushes ONE raw state byte to the Pi hub (POST /sync
+    action=control) -- latest-wins. The hub writes it to the pico's serial; the pico's TH
+    IRQ presents it to the console as a 3-button pad. Bits match the firmware:
+    D_UP=01 D_DOWN=02 D_LEFT=04 D_RIGHT=08 A=10 B=20 C=40 START=80.
+
+    Like NetworkSink, this sink's contract ends at the hub -- the console read is serviced
+    from the pico's local state (its IRQ), so the byte isn't on any timing-critical path;
+    the HTTP push just keeps the pico's latest state current. Pure stdlib, 3.6+, ASCII."""
+
+    _BITS = {"D_UP": 0x01, "D_DOWN": 0x02, "D_LEFT": 0x04, "D_RIGHT": 0x08,
+             "A": 0x10, "B": 0x20, "C": 0x40, "START": 0x80}
+
+    def __init__(self, host, port, timeout=4.0):
+        super(MegadriveSink, self).__init__()
+        self._url = "http://%s:%s/sync" % (host, port)
+        self._timeout = timeout
+        self._last = None                    # last byte sent, so we skip no-op pushes
+
+    def _push(self):
+        mask = 0
+        for b in self.held:
+            mask |= self._BITS.get(str(b).upper(), 0)
+        if mask == self._last:
+            return
+        self._last = mask
+        import json
+        import urllib.request
+        body = json.dumps({"action": "control", "byte": mask}).encode("ascii")
+        try:
+            req = urllib.request.Request(self._url, data=body,
+                                         headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=self._timeout).read()
+        except Exception:
+            pass                             # link gone; the engine watchdog will release_all
+
+    def press(self, btn):
+        super(MegadriveSink, self).press(btn)
+        self._push()
+
+    def release(self, btn):
+        super(MegadriveSink, self).release(btn)
+        self._push()
+
+    def pulse(self, btn, ms=120):
+        # A tap: hold for ms so a 60fps game samples it, then let go (each edge = one push).
+        import time
+        super(MegadriveSink, self).press(btn)
+        self._push()
+        time.sleep(max(ms, 1) / 1000.0)
+        super(MegadriveSink, self).release(btn)
+        self._push()
+
+    def keepalive(self):
+        pass                                 # stateless; the pico holds the latest byte
+
+    def release_all(self):
+        super(MegadriveSink, self).release_all()
+        self._push()                         # byte 0x00 = all released
+
+
 def mappings_dir(base=None):
     """The mapping store. Mappings are CONFIG/DATA, not engine code, so they live
     with Pluto (pluto/config/mappings), NOT inside this package. Pluto sets the
