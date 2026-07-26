@@ -46,6 +46,59 @@ def _scp_records(d):
     return out
 
 
+FWSP = b"\x81\x40"        # full-width space (Shift-JIS) -- right-pad for fixed-span fields
+
+
+def _choice_records(cmd):
+    """Find `2d f0 <u16 len> <text> 00 ff` option records inside a CMD blob (the shape the
+    `1ef0` choice command uses for its selectable lines -- same record format as ITEMTBL).
+    `len` counts the text PLUS the trailing `00 ff`, so textbytes = len - 2. Returns
+    {text_rel: textbytes}. Gated by a plausible length + a real `00 ff` terminator so it does
+    not false-match on arbitrary `2d f0` bytes in the command stream."""
+    out, q = {}, 0
+    while True:
+        q = cmd.find(b"\x2d\xf0", q)
+        if q < 0 or q + 4 > len(cmd):
+            break
+        ln = struct.unpack_from("<H", cmd, q + 2)[0]
+        if 4 <= ln <= 400 and q + 4 + ln <= len(cmd) and cmd[q + 2 + ln:q + 4 + ln] == b"\x00\xff":
+            out[q + 4] = ln - 2
+            q = q + 4 + ln
+        else:
+            q += 2
+    return out
+
+
+def _apply_choice_fields(cmd, cmd_abs, items, encode, st):
+    """Rewrite translated `2df0` choice options IN PLACE, size-preserving: Catalan encoded then
+    right-padded with full-width spaces to the record's own text length, so no option moves and
+    the choice layout stays byte-exact (no pagination, no dialogue clamp). Options whose Catalan
+    is longer than the record are collected in `st["choice_over"]` for the operator to condense
+    (never silently truncated, never left Japanese). Returns (new_cmd_bytes, {text_rel: textbytes}
+    for ALL choice records) so the caller can exclude them from the dialogue splice."""
+    spans = _choice_records(cmd)
+    if not spans:
+        return cmd, spans
+    cmd = bytearray(cmd)
+    for k, b in items:
+        rel = k - cmd_abs
+        tb = spans.get(rel)
+        if tb is None:
+            continue
+        ca = (b.get("ca") or "").strip()
+        if not ca:
+            continue
+        enc = encode(ca)
+        if len(enc) > tb:
+            st.setdefault("choice_over", []).append((k, len(enc), tb, ca))
+            continue
+        field = enc + FWSP * ((tb - len(enc)) // 2)
+        field += b"\x00" * (tb - len(field))                 # guard odd remainder
+        cmd[rel:rel + tb] = field
+        st["choice_placed"] = st.get("choice_placed", 0) + 1
+    return bytes(cmd), spans
+
+
 def budget(orig):
     """Static per-scenario fit budget for the box-budget UI (computed at EXTRACT time, not a
     live endpoint). Returns {"scenes": [{"scene": idx, "slack": bytes}], "starts": [offset,...]}.
@@ -163,6 +216,16 @@ def _newrun(ca, encode, width, run, height=3):
     return MID.join(LB.join(encode(l) for l in pg) for pg in pages) + tail
 
 
+def _is_menu_item(cmd, cs):
+    """A `14f0` menu-item command -- a selectable gadget/choice LABEL, shaped
+    `14f0 <id> 0100 ffff 00f0 <u32> <u16 len> 02ff <id> 03ff <id> <name> 01ff`. The game shows
+    these as one-line choices, so the name must stay a FLAT label (NOT paginated like dialogue)
+    and the `<len>` field (item bytes from the u32 onward = total-10) must track the new name."""
+    return (cmd[cs:cs + 2] == b"\x14\xf0" and cs + 24 <= len(cmd)
+            and cmd[cs + 8:cs + 10] == b"\x00\xf0"
+            and cmd[cs + 16:cs + 18] == b"\x02\xff" and cmd[cs + 20:cs + 22] == b"\x03\xff")
+
+
 def _rebuild_cmd(cmd, cmd_abs, local_by, encode, box):
     """Rebuild a CMD section with the Catalan spliced in + the table/markers repointed.
     `local_by`: {cmd-relative text offset -> block}. Returns (new_cmd_bytes, n_placed)."""
@@ -173,6 +236,18 @@ def _rebuild_cmd(cmd, cmd_abs, local_by, encode, box):
     new_cmds, placed = [], 0
     for i in range(ntbl):
         cs, ce = cstarts[i], cstarts[i + 1]
+        # 14f0 menu-item (gadget-choice label): rebuild as a FLAT label with a fixed `<len>` field,
+        # never the dialogue paginator (which breaks the menu -> dots + crash on select).
+        if _is_menu_item(cmd, cs):
+            hit = [r for r in local_by if cs <= r < ce]
+            b = local_by[hit[0]] if hit else None
+            if b and (b.get("ca") or "").strip():
+                item = bytearray(cmd[cs:cs + 24]) + encode(b["ca"]) + b"\x01\xff"
+                struct.pack_into("<H", item, 14, len(item) - 10)    # item length = bytes from u32 on
+                new_cmds.append(bytes(item)); placed += 1
+            else:
+                new_cmds.append(cmd[cs:ce])
+            continue
         rels = sorted(r for r in local_by if cs <= r < ce)     # ALL text runs in this command
         if not rels:
             new_cmds.append(cmd[cs:ce]); continue
@@ -240,9 +315,16 @@ def pack(orig, blocks, encode, box=13, grow=False, prefer=None):
         # the next command. Clamp jpBytes to (command end - rel) so we only touch this command.
         ntbl = (first - 8) // 4
         cb = sorted(struct.unpack_from("<%dI" % ntbl, cmd, 8)) + [len(cmd)]
+        # Choice options (2df0 records in a 1ef0 choice command) are fixed-width fields, not
+        # scrolling dialogue: rewrite them in place (size-preserving) here, and exclude them from
+        # the dialogue splice below -- otherwise the paginator shreds the record and the clamp
+        # truncates it on a spurious mid-option pointer (leaves a Japanese tail, hangs the menu).
+        cmd, choice_spans = _apply_choice_fields(cmd, cmd_abs, items[lo:hi], encode, st)
         local_by = {}
         for k, b in items[lo:hi]:
             rel = k - cmd_abs
+            if rel in choice_spans:                          # fixed-span choice option, done above
+                continue
             ce = cb[bisect.bisect_right(cb, rel)]            # next command boundary > rel
             bb = dict(b); bb["jpBytes"] = min(b["jpBytes"], ce - rel)
             local_by[rel] = bb

@@ -504,6 +504,7 @@ class MegadriveSink(Sink):
         if mask == self._last:
             return
         self._last = mask
+        print("  [megadrive] held=%s -> byte 0x%02X" % (sorted(self.held), mask))
         import json
         import urllib.request
         body = json.dumps({"action": "control", "byte": mask}).encode("ascii")

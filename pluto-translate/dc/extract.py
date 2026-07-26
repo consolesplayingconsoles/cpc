@@ -18,10 +18,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import sources                              # _load_config (typology + parser per kind)
-from parsers import nullsplit, lines, ptrtable, exemsg   # console-agnostic format strategies
+from parsers import nullsplit, lines, ptrtable, exemsg, itemtbl   # console-agnostic format strategies
 
 PARSERS = {"nullsplit": nullsplit.parse, "lines": lines.parse, "ptrtable": ptrtable.parse,
-           "exemsg": exemsg.parse}
+           "exemsg": exemsg.parse, "itemtbl": itemtbl.parse}
 
 
 def _has_gaiji(hexstr):
@@ -80,6 +80,11 @@ def main(cache_dir, safe):
             o = int(o, 16) if isinstance(o, str) else o
             blk["scene"] = max(0, bisect.bisect_right(starts, o) - 1)
         out["scenes"] = b["scenes"]
+    # ITEMTBL: the gadget NAMES share one item-area budget (they can't spill; a long name borrows
+    # a short one's slack). Ship it so the UI can aggregate caBytes against it, like a STORY box.
+    if parser == "itemtbl":
+        from parsers import itemtbl as _it
+        out["itemBudget"] = _it.budget(data)          # {"names": shared area, "desc": per-sector}
     print(json.dumps(out))
 
 

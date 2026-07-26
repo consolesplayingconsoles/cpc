@@ -20,14 +20,14 @@ import sys, os, json, urllib.request, urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # pluto-translate
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))                    # dc (fon_codec)
 import fon_codec
-from packers import ptrtable, nullsplit, exemsg, raw_strings, lines
+from packers import ptrtable, nullsplit, exemsg, raw_strings, lines, itemtbl
 
 # source key -> (on-disc relative path, packer, kwargs). box=full-width wrap width.
 PLAN = {
     # prefer: the New Year opening line's offset = where PLAY starts in that scenario (file order
     # != play order), so the scene the player sees first wins the slack. POC hint; see packers note.
     "STORY.PAC":          ("STORY.PAC",          "nullsplit", dict(box=15, grow=False, prefer=0xce514)),
-    "DOUGU_ITEMTBL.PAC":  ("DOUGU/ITEMTBL.PAC",  "ptrtable",  dict(box=20)),   # wrap long invention descriptions to 2 lines (short gadget NAMES <=20 stay on one line)
+    "DOUGU_ITEMTBL.PAC":  ("DOUGU/ITEMTBL.PAC",  "itemtbl",   dict(name_box=20)),   # names (pointer table) + sector-indexed descriptions; plain ptrtable destroys the descriptions
     "INFO_SECRET.TBL":    ("INFO/SECRET.TBL",    "ptrtable",  dict(box=12)),
     "INFO_DORADO.TBL":    ("INFO/DORADO.TBL",    "ptrtable",  dict(box=None)),   # Doraemon rank titles (same-size)
     # Dream Passport memory-card save/load dialogs -- newline INI, rewritten same-size in place
@@ -90,8 +90,12 @@ def main():
             if kind == "nullsplit":
                 out, s = nullsplit.pack(out, blocks, fon_codec.fw, **kw)
                 real = sum(1 for b in blocks if (b.get("ca") or "").strip())
-                note = "%d/%d lines (%d%%), %d->%dB" % (
-                    s["lines_placed"], real, 100 * s["lines_placed"] // max(1, real), len(orig), len(out))
+                cover = s.get("choice_over", [])
+                note = "%d/%d lines (%d%%), %d choices, %d->%dB" % (
+                    s["lines_placed"], real, 100 * s["lines_placed"] // max(1, real),
+                    s.get("choice_placed", 0), len(orig), len(out))
+                for off, got, bud, ca in cover:
+                    print("    CHOICE OVER @%#08x: %dB > %dB (condense)  %s" % (off, got, bud, ca[:40]))
             elif kind == "exemsg":
                 out = exemsg.pack(out, blocks, fon_codec.fw, **kw)
                 real = sum(1 for b in blocks if (b.get("ca") or "").strip())
@@ -100,6 +104,15 @@ def main():
                 out = raw_strings.pack(out, blocks, fon_codec.fw, **kw)
                 real = sum(1 for b in blocks if (b.get("ca") or "").strip())
                 note = "%d strings, %d->%dB (same-size)" % (real, len(orig), len(out))
+            elif kind == "itemtbl":
+                out, s = itemtbl.pack(out, blocks, fon_codec.fw, **kw)
+                note = "%d names (%d/%dB item area), %d descriptions, %d->%dB (same-size)" % (
+                    s["names_placed"], s["names_bytes"], s["item_area"], s["desc_placed"], len(orig), len(out))
+                if s["names_over"]:
+                    print("    NAMES OVER item-area budget by %d bytes -- names kept Japanese; "
+                          "trim gadget names to fit (aggregate meter in the UI)" % s["names_over"])
+                for sector, endpos in s["desc_over"]:
+                    print("    DESC OVER @sector %#x: record ends @+%#x > 0x800 (condense)" % (sector, endpos))
             elif kind == "lines":
                 out, s = lines.pack(out, blocks, fon_codec.fw, **kw)
                 note = "%d lines placed, %d skipped (over-budget), %d->%dB (same-size)" % (

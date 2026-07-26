@@ -292,6 +292,9 @@ class DriveEngine:
         """A /control/drive request body -> (http_code, response_dict). Mirrors the
         old _handle_drive dispatch exactly."""
         action = (body or {}).get("action")
+        if action != "keepalive":
+            print("  [drive] action=%s target=%s btn=%s" % (
+                action, (body or {}).get("target"), (body or {}).get("btn")))
         if action in ("pause", "stop"):
             self.stop()
             return 200, {"ok": True}
