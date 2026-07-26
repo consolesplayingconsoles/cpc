@@ -63,6 +63,22 @@ const sceneSlackByTab = ref<Record<string, Record<number, number>>>({})   // tab
 const sceneSlack = computed<Record<number, number>>(() => sceneSlackByTab.value[activeTab.value] || {})
 const sceneFill  = ref<Record<number, number>>({})        // scene -> real expansion bytes (packer)
 const blockExp   = ref<Record<string, number>>({})        // block offset -> real per-line expansion
+// ITEMTBL: the gadget NAMES share ONE item-area budget (they can't spill; a long name borrows a
+// short one's slack — one aggregate, like a STORY box). Descriptions each have their own sector.
+const itemBudgetByTab = ref<Record<string, { names: number; desc: number }>>({})   // tab -> budgets
+const itemBudget = computed(() => itemBudgetByTab.value[activeTab.value] || { names: 0, desc: 0 })
+const itemExp    = ref<Record<string, number>>({})        // item offset -> caBytes (debounced)
+// The item "scene" header total: the whole gadget-NAME group's usage vs the shared item area (there
+// is no dialogue-style measure for items, so this comes straight from itemExp -- never a skeleton).
+const itemNamesUsed = computed(() => {
+  let s = 0
+  for (const b of blocks.value) if (!b.desc) s += itemExp.value[b.offset] || 0
+  return s
+})
+const itemNamesState = computed<'ok' | 'over'>(() => {
+  const b = itemBudget.value.names
+  return (!b || itemNamesUsed.value <= b) ? 'ok' : 'over'   // hard limit (no spill): fits or overflows
+})
 // The meter's authoritative `used` comes from the PACKER, never a UI estimate (which ignores the
 // pagination/control bytes the build writes, and would under-report on already-tight slack). Posts
 // the tab's blocks to the box's /measure; debounced like the other badges so typing stays fast.
@@ -79,6 +95,14 @@ async function measureScenes() {
       blockExp.value = (data.line as Record<string, number>) || {}   // per-line, for the cumulative
     }
   } catch { /* keep the last numbers on a transient failure */ }
+}
+// ITEMS: sum caBytes of the gadget NAMES client-side (no pagination/control bytes to account for,
+// unlike dialogue), on the same debounce so typing stays fast. Descriptions (own sectors) are excluded.
+function recomputeItemFill() {
+  if (activeTabObj.value?.kind !== 'items') { itemExp.value = {}; return }
+  const m: Record<string, number> = {}
+  for (const b of blocks.value) m[b.offset] = caBytes(b.ca)   // names + descriptions
+  itemExp.value = m
 }
 function sceneStatus(scene: number): { used: number; slack: number; pct: number; state: 'ok' | 'warn' | 'over' } {
   const slack = sceneSlack.value[scene] ?? 0
@@ -371,6 +395,7 @@ async function openNs(ns: string) {
       curNs.value       = ns
       tabBlocks.value    = (data.sources as Record<string, Block[]>) || {}   // preload saved drafts
       sceneSlackByTab.value = (data.sceneBudget as Record<string, Record<number, number>>) || {}  // box budgets baked into state
+      itemBudgetByTab.value = (data.itemBudget as Record<string, { names: number; desc: number }>) || {}  // ITEMTBL shared/desc budgets, baked into state
       speakerNames.value = (data.speakers as Record<string, Record<number, string>>) || {}
       toneLinks.value    = (data.toneLinks as string) || ''
       blocks.value       = []
@@ -434,7 +459,7 @@ function bumpEdit() { editTick.value++; stateRev.value++; dirty.value = true; sa
 window.addEventListener('beforeunload', (e) => { if (dirty.value) { e.preventDefault(); e.returnValue = '' } })
 watch(editTick, () => {
   clearTimeout(statsTimer)
-  statsTimer = setTimeout(() => { recomputeStats(); recomputeTabPct(); measureScenes(); recomputeSceneInfo() }, 300)
+  statsTimer = setTimeout(() => { recomputeStats(); recomputeTabPct(); measureScenes(); recomputeItemFill(); recomputeSceneInfo() }, 300)
 })
 watch(activeTab, recomputeTabPct, { immediate: true })
 
@@ -521,6 +546,7 @@ const displayRows = computed<Disp[]>(() => {
       return a.scene - b.scene
     })
   }
+  const isItems = activeTabObj.value?.kind === 'items'
   const out: Disp[] = []
   for (const g of groups) {
     out.push({ kind: 'head', scene: g.scene, slack: g.slack, offset: g.offset })
@@ -528,8 +554,21 @@ const displayRows = computed<Disp[]>(() => {
       let cum = 0
       // running box usage in disc order, so each row shows how full the box is up to (and incl.) it
       for (const r of g.rows) {
-        cum += blockExp.value[r.block.offset] || 0
-        out.push({ kind: 'row', block: r.block, index: r.index, cum, slack: g.slack, runStart: r.runStart })
+        if (isItems) {
+          // ITEMS: gadget NAMES share the item-area budget (running cumulative -- a long name
+          // borrows a short one's slack). Each DESCRIPTION has its OWN sector budget, so it meters
+          // against that on its own (cum = just its own bytes). Both show the aggregate on the line.
+          if (r.block.desc) {
+            out.push({ kind: 'row', block: r.block, index: r.index,
+                       cum: itemExp.value[r.block.offset] || 0, slack: itemBudget.value.desc, runStart: r.runStart })
+          } else {
+            cum += itemExp.value[r.block.offset] || 0
+            out.push({ kind: 'row', block: r.block, index: r.index, cum, slack: itemBudget.value.names, runStart: r.runStart })
+          }
+        } else {
+          cum += blockExp.value[r.block.offset] || 0
+          out.push({ kind: 'row', block: r.block, index: r.index, cum, slack: g.slack, runStart: r.runStart })
+        }
       }
     }
   }
@@ -541,6 +580,7 @@ watch(activeTab, () => {
   if (scrollEl.value) scrollEl.value.scrollTop = 0
   sceneFill.value = {}                   // clear -> meters show "…" until the new measure lands
   measureScenes()                        // real per-scene budget for the newly active tab
+  recomputeItemFill()                    // ITEMS: shared item-area aggregate for the new tab
   recomputeSceneInfo()                   // header first/last lines are per-tab -- recompute or the new
   recomputeJpCounts()                    // tab shows the PREVIOUS tab's scene-0 line (the "tete" bug)
 })
@@ -648,7 +688,7 @@ watch([railOpen, activeTab], () => {
   // Best-effort background save; the manual Save draft is the one that reports success/failure.
   if (railOpen.value && curNs.value && activeTab.value && blocks.value.length) saveState().catch(() => {})
 })
-function mapBlocks(raw: { offset: number; jpBytes: number; hex: string; speaker: number; scene?: number }[]): Block[] {
+function mapBlocks(raw: { offset: number; jpBytes: number; hex: string; speaker: number; scene?: number; desc?: boolean }[]): Block[] {
   return (raw || []).map(b => ({
     offset:    formatOffset(b.offset),
     speakerId: b.speaker ?? 0,
@@ -656,6 +696,7 @@ function mapBlocks(raw: { offset: number; jpBytes: number; hex: string; speaker:
     jpBytes:   b.jpBytes,
     ca:        '',
     scene:     b.scene ?? 0,
+    desc:      b.desc ?? false,      // ITEMTBL: name vs description — drives which budget it aggregates against
   }))
 }
 
@@ -728,6 +769,11 @@ async function loadTab(safe: string) {
       const sl: Record<number, number> = {}
       for (const s of data.scenes as { scene: number; slack: number }[]) sl[s.scene] = s.slack
       sceneSlackByTab.value = { ...sceneSlackByTab.value, [safe]: sl }
+    }
+    // ITEMTBL: the shared name budget + the per-sector description budget the rows aggregate against.
+    const ib = (data as any).itemBudget
+    if (ib && typeof ib === 'object' && typeof ib.names === 'number') {
+      itemBudgetByTab.value = { ...itemBudgetByTab.value, [safe]: { names: ib.names, desc: ib.desc ?? 0 } }
     }
     tabState.value  = { ...tabState.value, [safe]: 'ready' }
     if (activeTab.value === safe) blocks.value = tabBlocks.value[safe]
@@ -1116,7 +1162,13 @@ onMounted(() => {
                 {{ sceneInfo(item.scene).firstCa }}<template v-if="sceneInfo(item.scene).lastCa && sceneInfo(item.scene).lastCa !== sceneInfo(item.scene).firstCa"> … {{ sceneInfo(item.scene).lastCa }}</template>
               </td>
               <td class="col-bytes">
-                <div class="bytes-cell" :class="sceneFill[item.scene] !== undefined ? sceneStatus(item.scene).state : ''">
+                <div v-if="activeTabObj?.kind === 'items'" class="bytes-cell" :class="itemNamesState"
+                     :title="`gadget names use ${itemNamesUsed.toLocaleString()} / ${itemBudget.names.toLocaleString()} B of the shared item area`">
+                  <span class="bytes-used">{{ itemNamesUsed.toLocaleString() }}</span>
+                  <span class="bytes-sep">/</span>
+                  <span class="bytes-budget">{{ itemBudget.names.toLocaleString() }}</span>
+                </div>
+                <div v-else class="bytes-cell" :class="sceneFill[item.scene] !== undefined ? sceneStatus(item.scene).state : ''">
                   <template v-if="sceneFill[item.scene] !== undefined">
                     <span class="bytes-used">{{ sceneStatus(item.scene).used.toLocaleString() }}</span>
                     <span class="bytes-sep">/</span>

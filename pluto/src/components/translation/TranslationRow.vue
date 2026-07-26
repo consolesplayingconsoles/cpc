@@ -19,21 +19,16 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ (e: 'commit'): void; (e: 'propagate'): void }>()
 
-// For items: color per-line based on glyph width. For dialogue: color based on cumulative box.
+// Color signal. Items: gadget NAMES color by the SHARED item-area aggregate (cum vs slack) — a
+// name isn't over on its own, the 156 of them share one budget; DESCRIPTIONS (slack 0) have their
+// own big sector, so they're fine once written. Dialogue: color by cumulative box fill.
 const lineStatus = computed<'pending' | 'ok' | 'warn' | 'over'>(() => {
-  // Items: individual carousel width check
   if (props.kind === 'items') {
-    const caText = props.block.ca
-    if (caText === '') return props.block.done ? 'ok' : 'pending'
-    const glyphs = Math.ceil(caBytes(caText) / 2)
-    const carousel = 20
-    if (glyphs <= carousel) return 'ok'
-    if (glyphs <= carousel * 1.3) return 'warn'
-    return 'over'
+    if (props.block.ca === '') return props.block.done ? 'ok' : 'pending'
+    if (props.slack <= 0) return 'ok'                    // a description: own sector, effectively unbounded
+    return props.cum <= props.slack ? 'ok' : 'over'      // hard limit (no spill): it fits or it doesn't
   }
-
-  // Dialogue/menu/ui: color based on cumulative box fill at THIS line
-  // (not the individual line's bytes vs jpBytes)
+  // Dialogue/menu/ui: color based on cumulative box fill at THIS line (not the line's own bytes)
   if (props.slack <= 0) return 'pending'
   if (props.cum <= props.slack) return 'ok'
   if (props.cum <= props.slack * 1.3) return 'warn'
@@ -73,10 +68,9 @@ const lineStatus = computed<'pending' | 'ok' | 'warn' | 'over'>(() => {
     <td class="col-bytes">
       <div class="bytes-cell" :class="lineStatus">
         <template v-if="kind === 'items'">
-          <!-- Items (gadget names): show glyph-width vs carousel width (~20 glyphs) -->
-          <span class="bytes-used">{{ Math.ceil(caBytes(block.ca) / 2) }}</span>
-          <span class="bytes-sep">/</span>
-          <span class="bytes-budget">20</span>
+          <!-- Items: this record's own bytes (the shared budget lives in the aggregate below) -->
+          <span class="bytes-used">{{ caBytes(block.ca) }}</span>
+          <span class="bytes-sep">B</span>
         </template>
         <template v-else>
           <!-- Dialogue/menu/ui: show bytes vs jp bytes -->
@@ -85,9 +79,15 @@ const lineStatus = computed<'pending' | 'ok' | 'warn' | 'over'>(() => {
           <span class="bytes-budget">{{ block.jpBytes }}</span>
         </template>
       </div>
-      <div v-if="kind !== 'items'" class="box-agg" :class="{ over: cum > slack }"
-           :title="`box used to here: ${cum.toLocaleString()} / ${slack.toLocaleString()} B`">
-        <span class="box-agg-label">Agg</span>
+      <!-- Aggregate on EVERY line, like a STORY box: names run cumulative vs the shared item area;
+           each description meters its own bytes vs its own sector. -->
+      <div v-if="kind !== 'items' || slack > 0" class="box-agg" :class="{ over: cum > slack }"
+           :title="kind !== 'items'
+             ? `box used to here: ${cum.toLocaleString()} / ${slack.toLocaleString()} B`
+             : block.desc
+               ? `description: ${cum.toLocaleString()} / ${slack.toLocaleString()} B of its sector`
+               : `gadget names use ${cum.toLocaleString()} / ${slack.toLocaleString()} B of the shared item area`">
+        <span class="box-agg-label">{{ kind !== 'items' ? 'Agg' : (block.desc ? 'Sector' : 'Item area') }}</span>
         <span class="box-progress">
           <span class="box-progress-fill"
                 :style="{ width: Math.min(100, slack ? cum / slack * 100 : 0) + '%' }"></span>

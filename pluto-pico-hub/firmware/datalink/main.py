@@ -4,45 +4,41 @@
 #
 # ONE firmware, TWO modes on the SAME 6 data lines (GP3-8) + TH (GP2) -- no re-wire:
 #
-#   DATALINK  -- our homebrew ROM reads the port raw and NEVER toggles TH. The pico
-#                self-clocks an opcode stream out (text -> NPC bubble, /g -> graphic).
-#   CONTROLLER-- a real game DRIVES TH every frame to read the 3-button matrix. The pico
-#                presents button state (fed from the Pi) synced to TH, active-low.
+#   DATALINK  -- our homebrew ROM reads the port raw and NEVER toggles TH. Python drives
+#                the 6 lines OPEN-DRAIN, self-clocking an opcode stream out (text/graphics).
+#   CONTROLLER-- a real game DRIVES TH every frame to read the 3-button matrix. This needs
+#                microsecond TH->data response, which interpreted MicroPython CANNOT hit
+#                (~18us/GPIO). So controller mode is done in the RP2040's PIO: a hardware
+#                state machine mirrors TH onto the data lines in nanoseconds. Python only
+#                feeds it the two precomputed line patterns (TH-high / TH-low) per button
+#                change; the console-facing timing is entirely PIO's.
 #
-# The mode is AUTO-DETECTED off TH itself, the same signal we already watch for health:
-# TH edges arriving (a game polling) -> CONTROLLER; TH static -> DATALINK. Boot Sonic and
-# it's a pad; boot the room ROM and it's the data channel. Zero config, zero extra wire.
-# (6-button needs microsecond TH-edge timing -> PIO/C; this is 3-button only, per plan.)
+# The mode is AUTO-DETECTED off TH: TH edges arriving (a game polling) -> CONTROLLER; TH
+# static -> DATALINK. Boot Sonic and it's a pad; boot the room ROM and it's the data
+# channel. On the switch we hand the 6 pins between Python (open-drain) and PIO (push-pull,
+# fine through the BSS138 shifters).
 #
-# From the Pi over USB-serial, interpreted BY MODE (auto-detected off TH):
+# From the Pi over USB-serial, interpreted BY MODE:
 #   DATALINK   -- newline-terminated text lines:
 #                   <text>   -> print it on the MD          (opcode 0x01)
 #                   /g <id>  -> render graphic <id>         (opcode 0x02)
-#   CONTROLLER -- ONE raw byte = the whole pad, latest-wins (no framing, no newline): the
-#                 current pressed-button mask (see BTN_* below). This is the TAStm32/
-#                 TASLink pattern -- the device holds the latest state and the console read
-#                 is serviced from it by the TH IRQ, so serial is NEVER in the console's
-#                 read path and the byte needs no low-latency framing; the IRQ is the fast
-#                 part. (Only 3-button here; 6-button's us-tight select-counting wants PIO/C.)
-#
-# Bus (open-drain, 1 = released/high, 0 = pressed/low). DATALINK roles: bits0-3 = GP3-GP6
-# payload nibble, bit4 = GP7 CTRL flag, bit5 = GP8 CLK (self-clocked). CONTROLLER roles:
-# those SAME pins are the DE-9 button lines (GP3=Up GP4=Down GP5=Left GP6=Right GP7=B/A
-# GP8=C/Start), multiplexed by TH. A datalink frame is
-#   START(CTRL=1,id=1) -> opcode byte -> payload bytes -> END(CTRL=1,id=2)
-# with each byte sent as two nibbles, high first.
+#   CONTROLLER -- ONE raw byte = the whole pad, latest-wins (no framing): the pressed-button
+#                 mask (see BTN_* below). Only 3-button (6-button's extra TH pulses later).
 import sys
 import select
 import time
+import rp2
 from machine import Pin
 
-# The 6 DE-9 data lines + TH. Open-drain outputs idle HIGH (= released / logic 1); the
-# console's pull-ups hold them there and we only ever drive LOW. Names carry the datalink
-# role; in controller mode GP7/GP8 are the pin6/pin9 button lines (B/A, C/Start).
+# TH (console output -> our input / PIO clock / mode tell).
+SELECT = Pin(2, Pin.IN)          # GP2 / DE-9 pin7
+
+# The 6 DE-9 data lines. In DATALINK mode these are Python open-drain outputs (idle HIGH =
+# released); in CONTROLLER mode the PIO owns them. Names carry the datalink role; in
+# controller mode GP3=Up GP4=Down GP5=Left GP6=Right GP7=B/A GP8=C/Start.
 PAYLOAD = [Pin(g, Pin.OPEN_DRAIN, value=1) for g in (3, 4, 5, 6)]
 CTRL = Pin(7, Pin.OPEN_DRAIN, value=1)
 CLK  = Pin(8, Pin.OPEN_DRAIN, value=1)
-SELECT = Pin(2, Pin.IN)          # GP2 / DE-9 pin7 TH -- console output; our clock/mode tell
 
 # ── mode auto-detect + health windows (ms) ──────────────────────────────────────────
 CTRL_IDLE_MS = 150   # no TH edge for this long -> back to datalink (game stopped polling)
@@ -79,43 +75,86 @@ def send(opcode, data):
     _xfer(True, CTRL_END)
 
 
-# ══ CONTROLLER (3-button) ════════════════════════════════════════════════════════════
-# Pressed-button mask from the Pi (one raw state byte, latest-wins). The Pi's controller
-# source maps its own buttons onto these bits; the pico just renders them onto the matrix per TH.
+# ══ CONTROLLER (3-button, PIO) ═══════════════════════════════════════════════════════
 BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT = 0x01, 0x02, 0x04, 0x08
 BTN_A, BTN_B, BTN_C, BTN_START        = 0x10, 0x20, 0x40, 0x80
 _btn = 0
 
 
-def _drive_pad(th):
-    """Present the 3-button matrix for the current TH level (active-low). TH high: L/R +
-    B/C; TH low: L/R forced 0 (the pad-detect signature) + A/Start. Up/Down are the same
-    in both halves. Called from the TH IRQ so it tracks the console's per-frame strobe."""
-    b = _btn
-    PAYLOAD[0].value(0 if b & BTN_UP else 1)        # GP3 = Up
-    PAYLOAD[1].value(0 if b & BTN_DOWN else 1)      # GP4 = Down
-    if th:
-        PAYLOAD[2].value(0 if b & BTN_LEFT else 1)  # GP5 = Left
-        PAYLOAD[3].value(0 if b & BTN_RIGHT else 1) # GP6 = Right
-        CTRL.value(0 if b & BTN_B else 1)           # GP7 = B
-        CLK.value(0 if b & BTN_C else 1)            # GP8 = C
-    else:
-        PAYLOAD[2].value(0)                         # GP5 = 0  (3-button detect)
-        PAYLOAD[3].value(0)                         # GP6 = 0  (3-button detect)
-        CTRL.value(0 if b & BTN_A else 1)           # GP7 = A
-        CLK.value(0 if b & BTN_START else 1)        # GP8 = Start
+# PIO program: hold the two 6-bit line patterns (X = TH-low, Y = TH-high), then loop
+# forever mirroring TH onto the data lines. `jmp pin` reads the state machine's jmp_pin
+# (= TH); each iteration is ~3 cycles @ 125MHz (~24ns), so the lines always reflect the
+# current TH long before the console samples them. Pattern bit i -> GP(3+i); 1 = released
+# (line high), 0 = pressed (line low).
+@rp2.asm_pio(out_init=(rp2.PIO.OUT_HIGH,) * 6)
+def _mdpad():
+    pull()                  # TH-low pattern -> OSR
+    mov(x, osr)
+    pull()                  # TH-high pattern -> OSR
+    mov(y, osr)
+    label("poll")
+    jmp(pin, "hi")          # TH high?
+    mov(pins, x)            # TH low  -> drive TH-low pattern
+    jmp("poll")
+    label("hi")
+    mov(pins, y)            # TH high -> drive TH-high pattern
+    jmp("poll")
 
 
-def _release_lines():
-    """Let all six data lines float high (released) -- hand the bus back to datalink."""
+_sm = None   # the PIO StateMachine while in controller mode; None in datalink mode
+
+
+def _patterns(b):
+    """The two 6-bit line patterns for button mask b (1 = released). TH-high exposes
+    L/R + B/C; TH-low forces L/R to 0 (the 3-button detect signature) and exposes A/Start.
+    Up/Down are the same in both halves."""
+    hi = 0x3F
+    if b & BTN_UP:    hi &= ~0x01
+    if b & BTN_DOWN:  hi &= ~0x02
+    if b & BTN_LEFT:  hi &= ~0x04
+    if b & BTN_RIGHT: hi &= ~0x08
+    if b & BTN_B:     hi &= ~0x10
+    if b & BTN_C:     hi &= ~0x20
+    lo = 0x3F & ~0x04 & ~0x08        # GP5/GP6 low = 3-button detect
+    if b & BTN_UP:    lo &= ~0x01
+    if b & BTN_DOWN:  lo &= ~0x02
+    if b & BTN_A:     lo &= ~0x10
+    if b & BTN_START: lo &= ~0x20
+    return lo, hi
+
+
+def _pio_feed():
+    """Push the current button state's patterns to the running PIO. restart FIRST (send the
+    SM back to its two opening pulls), THEN feed lo,hi -- so the pulls consume exactly those
+    two words and fall into the drive loop with an empty FIFO. Feeding before the restart
+    would leave a trailing pull that stalls the SM. ~us of glitch, invisible vs the frame."""
+    lo, hi = _patterns(_btn)
+    _sm.restart()
+    _sm.put(lo)
+    _sm.put(hi)
+
+
+def _enter_controller():
+    """Hand the 6 data pins to the PIO and start mirroring TH."""
+    global _sm
+    _sm = rp2.StateMachine(0, _mdpad, freq=125_000_000, out_base=Pin(3), jmp_pin=SELECT)
+    _sm.active(1)
+    _pio_feed()
+
+
+def _enter_datalink():
+    """Stop the PIO and reclaim the 6 pins for Python open-drain (datalink)."""
+    global _sm
+    if _sm is not None:
+        _sm.active(0)
+        _sm = None
     for p in PAYLOAD:
-        p.value(1)
-    CTRL.value(1)
-    CLK.value(1)
+        p.init(Pin.OPEN_DRAIN, value=1)
+    CTRL.init(Pin.OPEN_DRAIN, value=1)
+    CLK.init(Pin.OPEN_DRAIN, value=1)
 
 
-# ── TH edge IRQ: timestamp for mode-detect, and in controller mode drive the matrix the
-#    instant the console flips TH (the read follows within microseconds). ──────────────
+# TH IRQ: only timestamps edges for mode-detect now -- the PIO does the fast pad driving.
 _last_edge = time.ticks_ms()
 _mode = "datalink"
 
@@ -123,8 +162,6 @@ _mode = "datalink"
 def _th_irq(pin):
     global _last_edge
     _last_edge = time.ticks_ms()
-    if _mode == "controller":
-        _drive_pad(pin.value())
 
 
 SELECT.irq(handler=_th_irq, trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING)
@@ -146,8 +183,7 @@ def handle(line):
 
 
 # ── health push: emit md:on/md:off only on a flip so the Pi caches it without polling.
-#    On = TH seen high within ON_WINDOW (static-high datalink OR a polling game); off =
-#    TH stuck low. ──────────────────────────────────────────────────────────────────
+#    On = TH seen high within ON_WINDOW; off = TH stuck low. ──────────────────────────
 _md_on = None
 
 
@@ -158,7 +194,7 @@ def _push_health(on):
         print("md:on" if on else "md:off")
 
 
-print("datalink pico up: datalink + 3-button controller, mode auto-detected off TH")
+print("datalink pico up: datalink + PIO 3-button controller, mode auto-detected off TH")
 _stdin = sys.stdin.buffer              # binary: control masks reach 0x80 (Start), text stays ASCII
 _poll = select.poll()
 _poll.register(sys.stdin, select.POLLIN)
@@ -171,7 +207,7 @@ try:
             if ch:
                 if _mode == "controller":
                     _btn = ch[0]                       # one byte = the whole pad, latest-wins
-                    _drive_pad(SELECT.value())         # apply now; the TH IRQ tracks it after
+                    _pio_feed()                        # push the new patterns to the PIO
                 elif ch in (b"\n", b"\r"):
                     handle(_buf.decode("utf-8", "replace"))
                     _buf = b""
@@ -186,15 +222,15 @@ try:
         _push_health(time.ticks_diff(now, _last_high) < ON_WINDOW_MS)
 
         # Auto-detect: recent TH edges = a game polling = controller; else datalink. On the
-        # transition, take/hand-back the bus (drive the matrix / release the lines) and drop
-        # any half-typed datalink line.
+        # transition, hand the 6 pins between PIO and Python and drop any half-typed line.
         want = "controller" if time.ticks_diff(now, _last_edge) < CTRL_IDLE_MS else "datalink"
         if want != _mode:
             _mode = want
             if want == "controller":
                 _buf = b""
-                _drive_pad(SELECT.value())
+                _enter_controller()
             else:
-                _release_lines()
+                _enter_datalink()
 except KeyboardInterrupt:
+    _enter_datalink()
     print("datalink stopped")

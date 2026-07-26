@@ -4,7 +4,7 @@
   "minRatio": 0.45,
   "typology": [
     { "kind": "dialogue", "view": 0, "parser": "nullsplit", "match": ["STORY.PAC"], "force": true },
-    { "kind": "items",    "view": 2, "parser": "ptrtable",  "match": ["ITEMTBL"], "force": true },
+    { "kind": "items",    "view": 2, "parser": "itemtbl",   "match": ["ITEMTBL"], "force": true },
     { "kind": "secret",   "view": 5, "parser": "ptrtable",  "match": ["SECRET.TBL"], "force": true },
     { "kind": "screen",   "view": 1, "parser": "ptrtable",  "match": ["*.SCP"], "force": true },
     { "kind": "system",   "view": 7, "parser": "exemsg",    "match": ["1ST_READ.BIN"], "force": true },
