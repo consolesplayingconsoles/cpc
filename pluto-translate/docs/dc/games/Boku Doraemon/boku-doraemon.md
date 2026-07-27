@@ -234,30 +234,30 @@ RE community whose breadcrumbs made the hack possible (see
 
 ## Glossary
 
-| JP | Romaji | CA |
-|---|---|---|
-| ドラえもん | Doraemon | Doraemon |
-| のび太 | Nobita | Nobita |
-| しずか | Shizuka | Shizuka |
-| ジャイアン / 剛田武 | Gian / Takeshi | Gegant |
-| スネ夫 | Suneo | Suneo |
-| ドラミ | Dorami | Dorami |
-| ジャイ子 | Jaiko | Geganteta |
-| セワシ | Sewashi | Sewashi |
-| のび太のパパ | Nobita's dad | el pare del Nobita |
-| のび太のママ | Nobita's mum | la mare del Nobita |
-| お兄ちゃん | big brother (Dorami→Doraemon) | germà |
-| ドラやき | Dorayaki | dorayaki |
-| ひみつ道具 | secret gadget | artefacte secret |
-| 四次元ポケット | 4D pocket | butxaca quadridimensional |
-| タイムマシン | time machine | màquina del temps |
-| どこでもドア | Anywhere Door | **Porta màgica** |
-| タケコプター | Takecopter | **Casquet volador** |
+| JP | Romaji | CA                       |
+|---|---|--------------------------|
+| ドラえもん | Doraemon | Doraemon                 |
+| のび太 | Nobita | Nobita                   |
+| しずか | Shizuka | Shizuka                  |
+| ジャイアン / 剛田武 | Gian / Takeshi | Gegant                   |
+| スネ夫 | Suneo | Suneo                    |
+| ドラミ | Dorami | Dorami                   |
+| ジャイ子 | Jaiko | Geganteta                |
+| セワシ | Sewashi | Sewashi                  |
+| のび太のパパ | Nobita's dad | el pare del Nobita       |
+| のび太のママ | Nobita's mum | la mare del Nobita       |
+| お兄ちゃん | big brother (Dorami→Doraemon) | germà                    |
+| ドラやき | Dorayaki | dorayaki                 |
+| ひみつ道具 | secret gadget | artefacte secret         |
+| 四次元ポケット | 4D pocket | butxaca màgica           |
+| タイムマシン | time machine | màquina del temps        |
+| どこでもドア | Anywhere Door | **Porta màgica**         |
+| タケコプター | Takecopter | **Casquet volador**      |
 | タイムふろしき | Time cloth | **El mocador del temps** |
-| 通り抜けフープ | Pass-through hoop | **Cercle de pas** |
-| アンキパン | Memory bread | **Pa de la memòria** |
-| 空き地 | vacant lot | solar |
-| 未来 | future | futur |
+| 通り抜けフープ | Pass-through hoop | **Cercle de pas**        |
+| アンキパン | Memory bread | **Pa de la memòria**     |
+| 空き地 | vacant lot | solar                    |
+| 未来 | future | futur                    |
 
 Canonical gadget names come from the Catalan wiki *Llista d'aparells d'en
 Doraemon* (full list captured in memory `reference_doraemon_catalan_names`). The

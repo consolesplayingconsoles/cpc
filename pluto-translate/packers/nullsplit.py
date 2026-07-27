@@ -326,7 +326,21 @@ def pack(orig, blocks, encode, box=13, grow=False, prefer=None):
             if rel in choice_spans:                          # fixed-span choice option, done above
                 continue
             ce = cb[bisect.bisect_right(cb, rel)]            # next command boundary > rel
-            bb = dict(b); bb["jpBytes"] = min(b["jpBytes"], ce - rel)
+            jpb = min(b["jpBytes"], ce - rel)
+            # The parser over-reads a trailing NEXT-message control (e.g. 07ff <param>) when the
+            # param's high byte 00 is mistaken for a segment separator -> an ODD-length run (real
+            # dialogue is always even, full-width). Peel that stray control back to the last message
+            # -advance pair (01ff/04ff/00ff) so we replace only THIS message + its page-break and
+            # leave the control in place; otherwise the advance is dropped and the next (Japanese)
+            # message renders in the same box, after the Catalan.
+            if jpb % 2 == 1:
+                run = cmd[rel:rel + jpb]
+                e = jpb
+                while e >= 2 and run[e - 2:e] not in (LB, PB, b"\x00\xff"):
+                    e -= 1
+                if 2 <= e < jpb:
+                    jpb = e
+            bb = dict(b); bb["jpBytes"] = jpb
             local_by[rel] = bb
 
         if grow:

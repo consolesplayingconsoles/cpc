@@ -28,6 +28,11 @@ const lineStatus = computed<'pending' | 'ok' | 'warn' | 'over'>(() => {
     if (props.slack <= 0) return 'ok'                    // a description: own sector, effectively unbounded
     return props.cum <= props.slack ? 'ok' : 'over'      // hard limit (no spill): it fits or it doesn't
   }
+  // STORY.PAC 2df0 CHOICE option: a fixed record byte budget -- hard limit, must condense to fit.
+  if (props.block.choiceBudget != null) {
+    if (props.block.ca === '') return props.block.done ? 'ok' : 'pending'
+    return caBytes(props.block.ca) <= props.block.choiceBudget ? 'ok' : 'over'
+  }
   // Dialogue/menu/ui: color based on cumulative box fill at THIS line (not the line's own bytes)
   if (props.slack <= 0) return 'pending'
   if (props.cum <= props.slack) return 'ok'
@@ -72,6 +77,12 @@ const lineStatus = computed<'pending' | 'ok' | 'warn' | 'over'>(() => {
           <span class="bytes-used">{{ caBytes(block.ca) }}</span>
           <span class="bytes-sep">B</span>
         </template>
+        <template v-else-if="block.choiceBudget != null">
+          <!-- 2df0 choice option: bytes vs its FIXED record budget (must fit; red = condense) -->
+          <span class="bytes-used">{{ caBytes(block.ca) }}</span>
+          <span class="bytes-sep">/</span>
+          <span class="bytes-budget">{{ block.choiceBudget }}</span>
+        </template>
         <template v-else>
           <!-- Dialogue/menu/ui: show bytes vs jp bytes -->
           <span class="bytes-used">{{ caBytes(block.ca) }}</span>
@@ -81,7 +92,7 @@ const lineStatus = computed<'pending' | 'ok' | 'warn' | 'over'>(() => {
       </div>
       <!-- Aggregate on EVERY line, like a STORY box: names run cumulative vs the shared item area;
            each description meters its own bytes vs its own sector. -->
-      <div v-if="kind !== 'items' || slack > 0" class="box-agg" :class="{ over: cum > slack }"
+      <div v-if="block.choiceBudget == null && (kind !== 'items' || slack > 0)" class="box-agg" :class="{ over: cum > slack }"
            :title="kind !== 'items'
              ? `box used to here: ${cum.toLocaleString()} / ${slack.toLocaleString()} B`
              : block.desc
