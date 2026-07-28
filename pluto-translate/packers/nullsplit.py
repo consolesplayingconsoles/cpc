@@ -335,11 +335,11 @@ def pack(orig, blocks, encode, box=13, grow=False, prefer=None):
             # message renders in the same box, after the Catalan.
             if jpb % 2 == 1:
                 run = cmd[rel:rel + jpb]
-                e = jpb
-                while e >= 2 and run[e - 2:e] not in (LB, PB, b"\x00\xff"):
-                    e -= 1
-                if 2 <= e < jpb:
-                    jpb = e
+                pe = jpb                                      # local: peel end (NOT the scenario end `e`)
+                while pe >= 2 and run[pe - 2:pe] not in (LB, PB, b"\x00\xff"):
+                    pe -= 1
+                if 2 <= pe < jpb:
+                    jpb = pe
             bb = dict(b); bb["jpBytes"] = jpb
             local_by[rel] = bb
 
