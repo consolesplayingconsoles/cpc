@@ -58,6 +58,17 @@ def load_state(arg, api_base):
         return json.load(r)
 
 
+def _lang(state):
+    """Target language for the font encoder, read from the state; defaults to Catalan."""
+    return (state.get("lang") or "ca").strip() or "ca"
+
+
+def _encoder(lang):
+    """Language-bound encoder handed to the packers (str -> bytes). lang='ca' is byte-for-byte the
+    original fon_codec.fw (Catalan builds unchanged); a new language just passes its own lang."""
+    return lambda s: fon_codec.fw(s, lang)
+
+
 def main():
     if len(sys.argv) < 4:
         print("usage: build_patch.py <game-name | state.json> <original-root> <patch-root> [api_base]")
@@ -65,6 +76,9 @@ def main():
     state_arg, orig_root, patch_root = sys.argv[1], sys.argv[2], sys.argv[3]
     api_base = sys.argv[4] if len(sys.argv) > 4 else "http://localhost:7700"
     st = load_state(state_arg, api_base)
+    lang = _lang(st)
+    encode = _encoder(lang)
+    print("  lang: %s (font encoder)" % lang)
 
     # Group by output file to handle multiple sources patching the same file
     by_output = {}
@@ -88,7 +102,7 @@ def main():
         # Apply patches in order
         for key, kind, kw, blocks in patches:
             if kind == "nullsplit":
-                out, s = nullsplit.pack(out, blocks, fon_codec.fw, **kw)
+                out, s = nullsplit.pack(out, blocks, encode, **kw)
                 real = sum(1 for b in blocks if (b.get("ca") or "").strip())
                 cover = s.get("choice_over", [])
                 note = "%d/%d lines (%d%%), %d choices, %d->%dB" % (
@@ -97,15 +111,15 @@ def main():
                 for off, got, bud, ca in cover:
                     print("    CHOICE OVER @%#08x: %dB > %dB (condense)  %s" % (off, got, bud, ca[:40]))
             elif kind == "exemsg":
-                out = exemsg.pack(out, blocks, fon_codec.fw, **kw)
+                out = exemsg.pack(out, blocks, encode, **kw)
                 real = sum(1 for b in blocks if (b.get("ca") or "").strip())
                 note = "%d runs, %d->%dB (same-size)" % (real, len(orig), len(out))
             elif kind == "raw_strings":
-                out = raw_strings.pack(out, blocks, fon_codec.fw, **kw)
+                out = raw_strings.pack(out, blocks, encode, **kw)
                 real = sum(1 for b in blocks if (b.get("ca") or "").strip())
                 note = "%d strings, %d->%dB (same-size)" % (real, len(orig), len(out))
             elif kind == "itemtbl":
-                out, s = itemtbl.pack(out, blocks, fon_codec.fw, **kw)
+                out, s = itemtbl.pack(out, blocks, encode, **kw)
                 note = "%d names (%d/%dB item area), %d descriptions, %d->%dB (same-size)" % (
                     s["names_placed"], s["names_bytes"], s["item_area"], s["desc_placed"], len(orig), len(out))
                 if s["names_over"]:
@@ -114,13 +128,13 @@ def main():
                 for sector, endpos in s["desc_over"]:
                     print("    DESC OVER @sector %#x: record ends @+%#x > 0x800 (condense)" % (sector, endpos))
             elif kind == "lines":
-                out, s = lines.pack(out, blocks, fon_codec.fw, **kw)
+                out, s = lines.pack(out, blocks, encode, **kw)
                 note = "%d lines placed, %d skipped (over-budget), %d->%dB (same-size)" % (
                     s["placed"], s["skipped"], len(orig), len(out))
                 for off, got, bud, ca in s["over_budget"]:
                     print("    OVER @%s: %dB > %dB  %s" % (off, got, bud, ca[:40]))
             else:
-                out = ptrtable.pack(out, blocks, fon_codec.fw, **kw)
+                out = ptrtable.pack(out, blocks, encode, **kw)
                 real = sum(1 for b in blocks if (b.get("ca") or "").strip())
                 note = "%d records, %d->%dB" % (real, len(orig), len(out))
             print("  %-20s [%s] -> %s  (%s)" % (key, kind, rel, note))

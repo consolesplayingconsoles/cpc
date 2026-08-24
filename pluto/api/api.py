@@ -37,6 +37,7 @@ from modules.dreame import session as dreame_session
 from modules.dreame import commands as vacuum
 from modules.substack import sender as substack
 from modules.google import scanner as google_scanner
+from modules.vmu import vmufs
 
 
 def open_path(path):
@@ -201,6 +202,65 @@ _SAVES_ROOT   = "/saves"
 _LEDGER_NAME  = "_cpc.json"
 
 
+# Minted access token + the epoch it stops being usable. Module-level: every sync
+# and chat verb shares one token rather than each minting its own.
+_dropbox_token_cache = {"token": "", "expires": 0.0}
+
+
+class DropboxAuthError(Exception):
+    """Couldn't obtain a usable access token (bad refresh trio, or nothing configured)."""
+
+
+def _dropbox_access_token(roster):
+    """Return a usable Dropbox access token, minting one if needed.
+
+    Dropbox has no durable API key -- unlike the GOOGLE_API_KEY next door, it is OAuth 2
+    only. The App Console's button issues a SHORT-LIVED token ('sl.' prefix, ~4h) and
+    long-lived tokens were withdrawn in 2021, so a pasted token is always a few hours
+    from breaking every cloud feature at once. The refresh trio (app key + secret +
+    refresh token, obtained once via scripts/dropbox_auth.py) is the only setup that
+    survives unattended.
+
+    Falls back to a pasted DROPBOX_TOKEN when the trio isn't configured, so an existing
+    .env keeps working until you migrate. Raises DropboxAuthError rather than returning
+    an empty string on a FAILED refresh -- "nothing configured" and "refresh rejected"
+    are different problems and must not report the same way.
+    """
+    cfg     = (roster or {}).get("dropbox") or {}
+    refresh = (cfg.get("DROPBOX_REFRESH_TOKEN") or "").strip()
+    key     = (cfg.get("DROPBOX_APP_KEY") or "").strip()
+    secret  = (cfg.get("DROPBOX_APP_SECRET") or "").strip()
+    if not (refresh and key and secret):
+        return (cfg.get("DROPBOX_TOKEN") or "").strip()
+
+    now = time.time()
+    if _dropbox_token_cache["token"] and now < _dropbox_token_cache["expires"]:
+        return _dropbox_token_cache["token"]
+    data = urllib.parse.urlencode({"grant_type":    "refresh_token",
+                                   "refresh_token": refresh,
+                                   "client_id":     key,
+                                   "client_secret": secret}).encode()
+    req = Request("https://api.dropbox.com/oauth2/token", data=data,
+                  headers={"Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        rep = json.loads(urlopen(req, timeout=30).read().decode())
+    except HTTPError as exc:
+        body = ""
+        try:    body = exc.read().decode("utf-8", "replace").strip()[:160]
+        except Exception: pass
+        raise DropboxAuthError("refresh rejected (HTTP %d)%s -- re-run scripts/dropbox_auth.py"
+                               % (exc.code, (": " + body) if body else ""))
+    except Exception as exc:
+        raise DropboxAuthError("couldn't reach Dropbox to refresh the token: %s" % exc)
+    token = (rep.get("access_token") or "").strip()
+    if not token:
+        raise DropboxAuthError("refresh returned no access_token")
+    # Re-mint a minute early so a long sync can't have its token expire mid-run.
+    _dropbox_token_cache["token"]   = token
+    _dropbox_token_cache["expires"] = now + max(0, int(rep.get("expires_in", 14400)) - 60)
+    return token
+
+
 def _dropbox_api(token, endpoint, body):
     """POST to the Dropbox v2 HTTP API (no SDK -- stdlib urllib, 3.6-safe). Returns
     the decoded JSON dict; raises HTTPError so callers can map codes to UX."""
@@ -216,7 +276,8 @@ def _dropbox_cloud_list(console, token):
     """@dropbox cloud <console> list -> live list of that console's saves in the
     cloud. Missing folder is not an error (lazy namespace) -> reports empty."""
     if not token:
-        _new_message("dropbox", "no DROPBOX_TOKEN set -- add it to nodes/cloud/dropbox/.env.")
+        _new_message("dropbox", "no Dropbox credentials -- set the refresh trio "
+                                "(or DROPBOX_TOKEN) in nodes/cloud/dropbox/.env.")
         return
     path = "%s/%s" % (_SAVES_ROOT, console)
     try:
@@ -332,6 +393,90 @@ def _load_ledger(token, path):
         return {}
 
 
+# Anything a real clock wrote is >= 2000. The Dreamcast has NO clock battery, so every
+# save a physical VMU writes is stamped 1998-11-27 forever -- setting the clock cannot
+# fix it, it resets. Those stamps are not "old", they are UNKNOWN, and treating them as
+# old would let a stale emulator copy overwrite live hardware progress.
+_TS_FLOOR = "2000-01-01T00:00:00Z"
+
+
+def _plausible_ts(ts):
+    return bool(ts) and ts >= _TS_FLOOR
+
+
+def _effective_saved(own_ts, prev, summ, now):
+    """Best estimate of WHEN a save was made -- the basis for "the cloud keeps the latest".
+
+    Uses the save's own timestamp when the device that wrote it had a working clock
+    (batocera does). Otherwise falls back to when we FIRST saw this exact content: the
+    VMU is synced regularly, so that closely bounds the real save time and compares
+    sanely against batocera's real dates. Unchanged content keeps its original estimate
+    rather than drifting forward on every sync, so re-syncing never fakes freshness.
+    """
+    if _plausible_ts(own_ts):
+        return own_ts
+    if prev and prev.get("sum") == summ and prev.get("saved"):
+        return prev["saved"]
+    return now
+
+
+def _collect_save_items(system, sysdir):
+    """Walk one console's save dir -> the logical entries it contributes to the cloud.
+
+    Normally one file is one entry. Dreamcast is the exception: batocera stores its
+    saves as whole 128KB VMU IMAGES, while a real VMU holds individual files -- so the
+    same save reaches the cloud twice under two unrelated names (T23001D_50.A1.bin vs
+    SW_EP1_RACER) and the two can never be reconciled. Decomposing the image here gives
+    both nodes the SAME key, the save's own 12-char VMU name, which is precisely what
+    lets conflict detection treat them as one save.
+
+    An image that will not parse passes through WHOLE rather than being dropped: a
+    backup that silently skips what it cannot read is worth nothing. An image that
+    parses but is empty contributes nothing, which is correct -- it holds no saves.
+
+    Slot collisions (the same save present in .A1 and .B1) resolve on the timestamp the
+    GAME wrote when it saved: newest wins. Returns dicts so the caller keeps both the
+    cloud key and the on-disk file it came from.
+    """
+    items, stamps = {}, {}
+    for base, _dirs, files in os.walk(sysdir):
+        for fn in sorted(files):
+            if fn.lower().endswith(_SYNC_SKIP_EXTS):
+                continue
+            fp  = os.path.join(base, fn)
+            rel = os.path.relpath(fp, sysdir)          # ledger key within the console
+            try:
+                with open(fp, "rb") as f:
+                    data = f.read()
+            except Exception:
+                continue
+            decomposed = None
+            if system == _VMU_CONSOLE and fn.lower().endswith(".bin"):
+                try:
+                    decomposed = vmufs.read_saves(data)
+                except vmufs.VmuError as exc:
+                    _sync_audit(event="undecomposable", console=system, file=rel, error=str(exc))
+            if decomposed is None:
+                try:    mtime = datetime.utcfromtimestamp(os.path.getmtime(fp)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                except Exception: mtime = ""
+                items[rel] = {"key": rel, "data": data, "cls": _save_class(fn),
+                              "display": _display_name(rel), "source": rel, "saved": mtime}
+                continue
+            for sv in decomposed:
+                key = sv["name"]
+                if key in _VMU_SKIP:
+                    continue
+                ts = sv["timestamp"] or ""
+                if key in items and stamps.get(key, "") >= ts:
+                    _sync_audit(event="slot_superseded", console=system, file=key,
+                                skipped=rel, kept=items[key]["source"])
+                    continue
+                items[key]  = {"key": key, "data": sv["data"], "cls": "save",
+                               "display": key, "source": rel, "saved": ts}
+                stamps[key] = ts
+    return [items[k] for k in sorted(items)]
+
+
 def _sync_batocera(roster):
     """MVP Sync (Pluto-orchestrated): mirror batocera's /userdata/saves -> Dropbox in
     TWO trees by whether a file can travel to real hardware:
@@ -343,9 +488,12 @@ def _sync_batocera(roster):
     different checksum -- are FLAGGED and never overwritten (start firing once VMU writes
     the same console). Overrides snapshot to /backups first. Reports to the chat feed."""
     sender = "dropbox"
-    token = ((roster or {}).get("dropbox") or {}).get("DROPBOX_TOKEN", "").strip()
+    try:
+        token = _dropbox_access_token(roster)
+    except DropboxAuthError as exc:
+        _new_message(sender, "sync: %s." % exc); return
     if not token:
-        _new_message(sender, "sync: no DROPBOX_TOKEN set."); return
+        _new_message(sender, "sync: no Dropbox credentials -- set the refresh trio (or DROPBOX_TOKEN) in nodes/cloud/dropbox/.env."); return
     bato = (roster or {}).get("batocera") or {}
     tgt  = bato.get("CUSTOM_SSH_ALIAS", "").strip() or bato.get("HOST_IP", "").strip()
     if not tgt:
@@ -378,58 +526,60 @@ def _sync_batocera(roster):
         states_lp   = "/states/%s/batocera/%s" % (system, _LEDGER_NAME)
         saves_prev  = _load_ledger(token, saves_lp)
         states_prev = _load_ledger(token, states_lp)
-        saves_new, states_new = {}, {}
-        for base, _dirs, files in os.walk(sysdir):
-            for fn in files:
-                if fn.lower().endswith(_SYNC_SKIP_EXTS):
-                    continue
-                fp  = os.path.join(base, fn)
-                rel = os.path.relpath(fp, sysdir)          # ledger key within the console
-                try:
-                    with open(fp, "rb") as f: data = f.read()
-                except Exception:
-                    continue
-                summ = format(zlib.crc32(data) & 0xffffffff, "08x")
-                cls  = _save_class(fn)
-                # Route by class: saves are shared+canonical, states are node-siloed.
-                if cls == "save":
-                    cloud_path, prev, new_l = "%s/%s/%s" % (_SAVES_ROOT, system, rel), saves_prev.get(rel), saves_new
-                    # conflict (saves only): cloud copy last written by a DIFFERENT node and differs
-                    if prev and prev.get("node") not in (None, "batocera") and prev.get("sum") != summ:
-                        conflicts += 1
-                        conflict_names.append("%s/%s" % (system, rel))
-                        new_l[rel] = prev                  # keep theirs, flag, don't clobber
-                        _sync_audit(event="conflict", console=system, file=rel,
-                                    cloud_node=prev.get("node"), cloud_sum=prev.get("sum"), local_sum=summ)
-                        continue
-                else:
-                    cloud_path, prev, new_l = "/states/%s/batocera/%s" % (system, rel), states_prev.get(rel), states_new
-                if prev and prev.get("sum") == summ:
-                    unchanged += 1
+        # Saves: START from the existing ledger. This namespace is SHARED -- the vmu
+        # writes dreamcast saves too -- so rebuilding it from what batocera happens to
+        # hold on disk silently deletes every entry another node owns. States are
+        # node-siloed (/states/<console>/batocera), so rebuilding those is correct and
+        # also prunes savestates you have since deleted.
+        saves_new, states_new = dict(saves_prev), {}
+        for item in _collect_save_items(system, sysdir):
+            rel, data, cls = item["key"], item["data"], item["cls"]
+            summ = format(zlib.crc32(data) & 0xffffffff, "08x")
+            # Route by class: saves are shared+canonical, states are node-siloed.
+            saved = _effective_saved(item.get("saved"), None, summ, now)
+            if cls == "save":
+                cloud_path, prev, new_l = "%s/%s/%s" % (_SAVES_ROOT, system, rel), saves_prev.get(rel), saves_new
+                # The cloud keeps the LATEST copy. Hardware is protected by never being
+                # written to, not by freezing the cloud -- so a newer save wins here
+                # whichever node it came from, and an older one simply doesn't upload.
+                # Entries written before 'saved' existed fall back to when they were
+                # synced, so a legacy ledger self-heals instead of losing every contest.
+                prev_saved = prev.get("saved") or prev.get("updated") or "" if prev else ""
+                if prev and prev.get("sum") != summ and prev_saved and saved <= prev_saved:
+                    conflicts += 1
+                    conflict_names.append("%s/%s" % (system, rel))
                     new_l[rel] = prev
+                    _sync_audit(event="stale", console=system, file=rel, cloud_node=prev.get("node"),
+                                cloud_saved=prev_saved, local_saved=saved)
                     continue
-                # override -> snapshot the current cloud copy to /backups first (recoverable)
-                if prev:
-                    bak = "/backups%s@%s" % (cloud_path, stamp)
-                    try:
-                        _dropbox_copy(token, cloud_path, bak)
-                        overrides += 1
-                        _sync_audit(event="backup", console=system, file=rel,
-                                    backup=bak, old_sum=prev.get("sum"))
-                    except Exception as exc:
-                        _sync_audit(event="backup_failed", console=system, file=rel, error=str(exc))
+            else:
+                cloud_path, prev, new_l = "/states/%s/batocera/%s" % (system, rel), states_prev.get(rel), states_new
+            if prev and prev.get("sum") == summ:
+                unchanged += 1
+                new_l[rel] = prev
+                continue
+            # override -> snapshot the current cloud copy to /backups first (recoverable)
+            if prev:
+                bak = "/backups%s@%s" % (cloud_path, stamp)
                 try:
-                    _dropbox_upload(token, cloud_path, data)
+                    _dropbox_copy(token, cloud_path, bak)
+                    overrides += 1
+                    _sync_audit(event="backup", console=system, file=rel,
+                                backup=bak, old_sum=prev.get("sum"))
                 except Exception as exc:
-                    _sync_audit(event="upload_failed", console=system, file=rel, error=str(exc))
-                    _new_message(sender, "sync: upload failed for %s/%s (%s)" % (system, rel, exc))
-                    continue
-                up += 1
-                _sync_audit(event="upload", console=system, file=rel, sum=summ,
-                            kind=("override" if prev else "new"), cls=cls)
-                names = dict((prev or {}).get("names", {})); names["batocera"] = rel
-                new_l[rel] = {"name": _display_name(rel), "updated": now, "node": "batocera",
-                              "sum": summ, "class": cls, "names": names}
+                    _sync_audit(event="backup_failed", console=system, file=rel, error=str(exc))
+            try:
+                _dropbox_upload(token, cloud_path, data)
+            except Exception as exc:
+                _sync_audit(event="upload_failed", console=system, file=rel, error=str(exc))
+                _new_message(sender, "sync: upload failed for %s/%s (%s)" % (system, rel, exc))
+                continue
+            up += 1
+            _sync_audit(event="upload", console=system, file=rel, sum=summ,
+                        kind=("override" if prev else "new"), cls=cls)
+            names = dict((prev or {}).get("names", {})); names["batocera"] = item["source"]
+            new_l[rel] = {"name": item["display"], "updated": now, "saved": saved,
+                          "node": "batocera", "sum": summ, "class": cls, "names": names}
         if saves_new:
             body = json.dumps({"console": system, "saves": saves_new}, indent=2).encode()
             try:    _dropbox_upload(token, saves_lp, body)
@@ -446,6 +596,196 @@ def _sync_batocera(roster):
         msg += " (%d override(s) backed up to /backups)" % overrides
     if conflicts:
         msg += ", %d CONFLICT(s) flagged (kept cloud copy): %s" % (conflicts, ", ".join(conflict_names[:6]))
+    _new_message(sender, msg + ".")
+
+
+# VMU saves ARE Dreamcast saves, so they share the canonical console namespace rather
+# than getting a silo -- one save, one place, whichever node wrote it last.
+_VMU_CONSOLE = "dreamcast"
+_VMU_SKIP    = ("ICONDATA_VMS",)   # the unit's custom icon: device dressing, not progress
+
+
+def _vmu_read_image(pi_cfg):
+    """Ask the Pi hub for the raw 128KB VMU image -> (bytes, None) or (None, error).
+
+    The VMU is an image behind a USB reader, so unlike batocera there is nothing for
+    rsync to walk; the hub reads it read-only and hands the bytes over. The md5 the hub
+    reports is checked here, because a silently truncated image would look to the parser
+    like saves that no longer exist.
+    """
+    import base64 as _b64, hashlib as _hashlib
+    host = (pi_cfg.get("HOST_IP") or "").strip()
+    port = (pi_cfg.get("PI_SYNC_PORT") or "7721").strip()
+    if not host:
+        return None, "the Pi node has no HOST_IP set"
+    url  = "http://%s:%s/sync" % (host, port)
+    body = json.dumps({"action": "read-image", "target": "vmu"}).encode()
+    try:
+        req = Request(url, data=body, headers={"Content-Type": "application/json"})
+        rep = json.loads(urlopen(req, timeout=60).read().decode())
+    except Exception as exc:
+        return None, "Pi hub unreachable: %s" % exc
+    if rep.get("error"):
+        return None, rep["error"]
+    try:
+        raw = _b64.b64decode(rep.get("image") or "")
+    except Exception as exc:
+        return None, "bad image payload: %s" % exc
+    if rep.get("md5") and _hashlib.md5(raw).hexdigest() != rep["md5"]:
+        return None, "image checksum mismatch in transit"
+    return raw, None
+
+
+def _dropbox_error_hint(exc):
+    """Turn a failure into something actionable in the chat feed.
+
+    401 gets named explicitly because it is the RECURRING one, not an exotic one: these
+    are short-lived scoped tokens and there is no refresh flow, so an expired token is
+    the normal way this breaks.
+    """
+    if isinstance(exc, HTTPError):
+        if exc.code == 401:
+            return ("Dropbox rejected the token (401). A pasted DROPBOX_TOKEN only lasts "
+                    "~4h -- run scripts/dropbox_auth.py once to switch to the refresh trio "
+                    "and stop this recurring")
+        try:
+            body = exc.read().decode("utf-8", "replace").strip()[:160]
+        except Exception:
+            body = ""
+        return "Dropbox HTTP %d%s" % (exc.code, (" -- " + body) if body else "")
+    return "%s: %s" % (exc.__class__.__name__, exc)
+
+
+def _sync_vmu_to_cloud(roster):
+    """Thread entrypoint: run the backup, and make sure ANY failure reaches the feed.
+
+    A background sync that dies on an unhandled exception is worse than one that simply
+    fails: the click echoes "started" and nothing ever contradicts it. That is exactly
+    what an expired token did here -- _dropbox_download re-raises everything but 409, so
+    the ledger fetch's 401 propagated out and the daemon thread vanished in silence.
+    """
+    try:
+        _sync_vmu_run(roster)
+    except Exception as exc:
+        detail = _dropbox_error_hint(exc)
+        _sync_audit(event="sync_failed", node="vmu", error=detail)
+        _new_message("dropbox", "vmu sync failed: %s." % detail)
+
+
+def _sync_vmu_run(roster):
+    """BACKUP the physical VMU -> Dropbox /saves/dreamcast, one cloud object per save.
+
+    UPLOAD ONLY. Nothing in this path writes to the VMU: the card is the source of
+    truth, and a backup must not be able to damage the thing it is backing up. Restoring
+    a save to hardware stays a deliberate, separate act.
+
+    The Pi hands over the raw image, Pluto does the filesystem work, checksums each save
+    and diffs it against the same _cpc.json ledger the batocera sync uses -- so one
+    Dreamcast save is tracked in one place no matter which node last wrote it. The token
+    and the ledger logic stay here rather than being copied onto the Pi.
+
+    Conflicts (a cloud entry last written by ANOTHER node whose checksum differs) are
+    reported and skipped. Nothing is overwritten in either direction.
+    """
+    # Reports as @dropbox, not @vmu: the news here is what happened in the CLOUD
+    # (uploads, ledger, what lost to a newer copy), so the cloud connector speaks for
+    # every sync whichever node was read. Same voice as the batocera sync.
+    sender = "dropbox"
+    try:
+        token = _dropbox_access_token(roster)
+    except DropboxAuthError as exc:
+        _new_message(sender, "sync: %s." % exc); return
+    if not token:
+        _new_message(sender, "sync: no Dropbox credentials -- set the refresh trio (or DROPBOX_TOKEN) in nodes/cloud/dropbox/.env."); return
+    pi_cfg = (roster or {}).get("pi") or {}
+
+    raw, err = _vmu_read_image(pi_cfg)
+    if err:
+        _sync_audit(event="read_failed", node="vmu", error=err)
+        _new_message(sender, "sync: couldn't read the VMU (%s)." % err); return
+    try:
+        saves = vmufs.read_saves(raw)
+    except vmufs.VmuError as exc:
+        _sync_audit(event="parse_failed", node="vmu", error=str(exc))
+        _new_message(sender, "sync: unreadable VMU image (%s)." % exc); return
+
+    now   = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamp = now.replace(":", "").replace("-", "")          # path-safe ts for /backups
+    ledger_path = "%s/%s/%s" % (_SAVES_ROOT, _VMU_CONSOLE, _LEDGER_NAME)
+    prev_all = _load_ledger(token, ledger_path)
+    # Start from the existing ledger instead of rebuilding it: the VMU holds a SUBSET of
+    # this console's saves, so a rebuild would silently drop every entry batocera owns.
+    new_all = dict(prev_all)
+
+    up = unchanged = conflicts = overrides = skipped = 0
+    conflict_names = []
+    _sync_audit(event="sync_start", node="vmu", console=_VMU_CONSOLE, files=len(saves))
+
+    for save in saves:
+        name = save["name"]
+        if name in _VMU_SKIP:
+            skipped += 1
+            continue
+        data = save["data"]
+        summ = format(zlib.crc32(data) & 0xffffffff, "08x")
+        prev = prev_all.get(name)
+        cloud_path = "%s/%s/%s" % (_SAVES_ROOT, _VMU_CONSOLE, name)
+
+        if prev and prev.get("sum") == summ:
+            unchanged += 1
+            continue
+        # A VMU save's own stamp is always 1998 (no clock battery), so _effective_saved
+        # falls back to when this content was first seen. The cloud keeps the LATEST; the
+        # card itself is protected by the fact that nothing here ever writes to it.
+        saved = _effective_saved(save.get("timestamp"), prev, summ, now)
+        prev_saved = (prev.get("saved") or prev.get("updated") or "") if prev else ""
+        if prev and prev_saved and saved <= prev_saved:
+            conflicts += 1
+            conflict_names.append(name)
+            new_all[name] = prev
+            _sync_audit(event="stale", console=_VMU_CONSOLE, file=name, cloud_node=prev.get("node"),
+                        cloud_saved=prev_saved, local_saved=saved)
+            continue
+        # override -> snapshot the current cloud copy to /backups first (recoverable)
+        if prev:
+            bak = "/backups%s@%s" % (cloud_path, stamp)
+            try:
+                _dropbox_copy(token, cloud_path, bak)
+                overrides += 1
+                _sync_audit(event="backup", console=_VMU_CONSOLE, file=name,
+                            backup=bak, old_sum=prev.get("sum"))
+            except Exception as exc:
+                _sync_audit(event="backup_failed", console=_VMU_CONSOLE, file=name, error=str(exc))
+        try:
+            _dropbox_upload(token, cloud_path, data)
+        except Exception as exc:
+            _sync_audit(event="upload_failed", console=_VMU_CONSOLE, file=name, error=str(exc))
+            _new_message(sender, "sync: upload failed for %s (%s)" % (name, exc))
+            continue
+        up += 1
+        _sync_audit(event="upload", console=_VMU_CONSOLE, file=name, sum=summ,
+                    kind=("override" if prev else "new"), cls="save")
+        # The VMU's own 12-char name IS the key, so a decomposed batocera image will
+        # later land on the same entry rather than a duplicate.
+        names = dict((prev or {}).get("names", {})); names["vmu"] = name
+        new_all[name] = {"name": name, "updated": now, "saved": saved, "node": "vmu",
+                         "sum": summ, "class": "save", "names": names}
+
+    if up or overrides:
+        try:
+            body = json.dumps({"console": _VMU_CONSOLE, "saves": new_all}, indent=2).encode()
+            _dropbox_upload(token, ledger_path, body)
+        except Exception as exc:
+            _new_message(sender, "sync: ledger write failed (%s)" % exc)
+
+    msg = "vmu: %d uploaded, %d unchanged" % (up, unchanged)
+    if overrides:
+        msg += ", %d override(s) backed up to /backups" % overrides
+    if skipped:
+        msg += ", %d skipped (%s)" % (skipped, ", ".join(_VMU_SKIP))
+    if conflicts:
+        msg += ", %d not newer than the cloud (skipped): %s" % (
+            conflicts, ", ".join(conflict_names[:6]))
     _new_message(sender, msg + ".")
 
 
@@ -488,7 +828,10 @@ def _dropbox_dispatch(verb, text, roster, consoles_cfg):
     cfg      = consoles_cfg or {}
     consoles = cfg.get("consoles", [])
     node_map = cfg.get("nodeConsoles", {})
-    token    = ((roster or {}).get("dropbox") or {}).get("DROPBOX_TOKEN", "").strip()
+    try:
+        token = _dropbox_access_token(roster)
+    except DropboxAuthError as exc:
+        _new_message("dropbox", "%s." % exc); return
 
     low  = text.lower().split()
     rest = low[low.index(verb) + 1:] if verb in low else []
@@ -1954,9 +2297,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # ── Existing handlers (unchanged) ─────────────────────────────────────────
 
     def _handle_sync(self, node_id):
-        """Sync button (node drawer). Batocera is wired (Pluto-orchestrated mirror ->
-        Dropbox + ledger, reported to chat); every other node honestly reports it's not
-        built yet -- the button shows everywhere, the API gates per node."""
+        """Sync button (node drawer). Two nodes are wired, both Pluto-orchestrated and
+        both reporting to chat: batocera (mirror of /userdata/saves -> Dropbox + ledger)
+        and vmu (BACKUP ONLY -- reads the card via the Pi hub and uploads its saves; it
+        never writes to the VMU). Every other node honestly reports it's not built yet --
+        the button shows everywhere, the API gates per node."""
         if node_id == "batocera":
             # Immediate echo so the click has feedback in the feed (the mirror runs in
             # the background and posts its summary when done).
@@ -1964,6 +2309,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             threading.Thread(target=_sync_batocera, args=(self.__class__.node_roster,),
                              daemon=True).start()
             self._send(200, {"ok": True, "message": "batocera sync started -- watch the chat feed."})
+        elif node_id == "vmu":
+            # Same shape as batocera: echo now, the backup posts its summary when done.
+            _new_message("dropbox", "reading the VMU and backing it up to cloud...")
+            threading.Thread(target=_sync_vmu_to_cloud, args=(self.__class__.node_roster,),
+                             daemon=True).start()
+            self._send(200, {"ok": True, "message": "vmu backup started -- watch the chat feed."})
         else:
             # Honest gate: the button shows on every node; unbuilt ones say so in chat
             # (same "the chat message IS the UX" model the other node replies use).
@@ -3002,6 +3353,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "smb":        None,
                     "deploy":     False,
                     "folder":     False,
+                    # A cloud connector lives on the web, so "go look at it" is a URL
+                    # rather than a share or an SSH target. Optional: blank -> no button.
+                    "web":        (console_cfg.get("WEB_URL") or "").strip() or None,
                     "os":         None,
                 }
                 continue

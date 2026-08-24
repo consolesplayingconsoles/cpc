@@ -736,10 +736,17 @@ async function loadSources(path: string) {
     .sort((a, b) => a.loadOrder - b.loadOrder)
     .filter(s => s.safe !== primary?.safe && tabState.value[s.safe] !== 'ready')
     .map(s => loadTab(s.safe))
-  Promise.all(rest).then(() => {
+  Promise.all(rest).then(async () => {
     // Everything's in: compute the real stats NOW so they're fresh the instant the skeleton lifts.
     recomputeStats(); recomputeTabPct(); recomputeSceneInfo(); recomputeJpCounts(); measureScenes()
-    if (curNs.value) persistTotal()
+    if (!curNs.value) return
+    // MATERIALISE the extraction: persist EVERY loaded source, not just `total`. Without this a
+    // freshly created project keeps only the primary tab on disk (the rest load into memory here but
+    // never get written), so state.json is incomplete until you hand-edit each tab. saveState skips
+    // unloaded/empty tabs and the API deep-merges by source key, so this never wipes work or clobbers
+    // other sources -- it self-heals partial projects (closes the "prepopulate at creation" gap).
+    try { await saveState() } catch { /* offline -- sources stay in memory, retried on next save */ }
+    persistTotal()
   })
 }
 

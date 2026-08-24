@@ -202,19 +202,8 @@ _CLEAN = [
 _CLSLOT = {seq: _FREE[len(_CSPEC) + len(_COMPOSE) + i]
            for i, (seq, _, _) in enumerate(_CLEAN)}
 
-def build_patched_font(src_bytes):
-    """Return font bytes with the 20 Catalan accent glyphs authored into Greek slots."""
-    data = bytearray(src_bytes)
-    for ch, (bhi, blo, acc, clr, shi, slo) in ACCENT_SPEC.items():
-        rec = bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE])
-        g = decode(rec)
-        if clr: _cleartop(g, clr)
-        acc(g, ch.isupper())
-        rec[BMP:BMP+ROWS*BPR] = encode(g)
-        jhi, jlo = sjis2jis(shi, slo)
-        rec[0], rec[1] = jlo, jhi
-        off = jis_index(jhi, jlo)*STRIDE
-        data[off:off+STRIDE] = rec
+# ── bespoke-bitmap extras (glyphs drawn from scratch, not composed) -- per profile ──
+def _author_hyphen(data):
     # standalone hyphen (no glyph in stock font) -> Greek slot 0x83C9, mid-row bar
     rec = bytearray(data[jis_index(0x23,0x61)*STRIDE:][:STRIDE])   # borrow 'a' header
     g = [[0]*W for _ in range(ROWS)]
@@ -222,6 +211,8 @@ def build_patched_font(src_bytes):
     rec[BMP:BMP+ROWS*BPR] = encode(g)
     jhi, jlo = sjis2jis(0x83, 0xC9); rec[0], rec[1] = jlo, jhi
     hoff = jis_index(jhi,jlo)*STRIDE; data[hoff:hoff+STRIDE] = rec
+
+def _author_middot(data):
     # middot glyph (for l·l geminate) -> Greek slot 0x83D1 (NOT 0x83CA: that slot is the 'il' digraph
     # in _CLSLOT, which was overwriting the dot -> l·l rendered as an 'il' ligature, no dot). Bold 4x4
     # block: a 2px dot gets eaten by the game's 2bpp blit.
@@ -232,34 +223,8 @@ def build_patched_font(src_bytes):
     rec[BMP:BMP+ROWS*BPR] = encode(g)
     jhi, jlo = sjis2jis(0x83, 0xD1); rec[0], rec[1] = jlo, jhi
     doff = jis_index(jhi,jlo)*STRIDE; data[doff:doff+STRIDE] = rec
-    # contraction combo-glyphs into the free Greek slots
-    for seq, ch, kind in _CSPEC:
-        bhi, blo = _basejis(ch)
-        g = decode(bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE]))
-        if   kind == 'r':  g = _apos_r(g, False)
-        elif kind == 'rq': g = _apos_r(g, True)
-        rec = bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE])   # borrow base header
-        rec[BMP:BMP+ROWS*BPR] = encode(g)
-        code = _CSLOT[seq]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
-        rec[0], rec[1] = jlo, jhi
-        off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
-    # two-letter composition glyphs (menu Sí/No, ?!) into the next free slots
-    for name, lsj, rsj, lw, rw in _COMPOSE:
-        g = _compose(_glyph(data, lsj >> 8, lsj & 0xFF),
-                     _glyph(data, rsj >> 8, rsj & 0xFF), lw, rw)
-        rec = bytearray(data[jis_index(0x23, 0x61)*STRIDE:][:STRIDE])   # borrow 'a' header
-        rec[BMP:BMP+ROWS*BPR] = encode(g)
-        code = _OSLOT[name]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
-        rec[0], rec[1] = jlo, jhi
-        off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
-    # clean glyph pairs (digraphs + narrow pairs), composed from their two letters
-    for seq, lsj, rsj in _CLEAN:
-        g = _compose(_glyph(data, lsj >> 8, lsj & 0xFF), _glyph(data, rsj >> 8, rsj & 0xFF))
-        rec = bytearray(data[jis_index(0x23, 0x61)*STRIDE:][:STRIDE])
-        rec[BMP:BMP+ROWS*BPR] = encode(g)
-        code = _CLSLOT[seq]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
-        rec[0], rec[1] = jlo, jhi
-        off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
+
+def _author_ellipsis(data):
     # baseline ellipsis into a cannibalised archaic-kana slot ヴ (0x8394). NOT reusing the JP ellipsis
     # 0x8163 — that one is STILL used by the game for intertitle-style Japanese, so redrawing it broke
     # those. `fw` encodes "..." -> 0x8394 (2B, 1 cell) with 3 solid dots at the BASELINE (a Latin
@@ -272,9 +237,8 @@ def build_patched_font(src_bytes):
             for c in (cx, cx+1, cx+2): g[r][c] = 3
     rec[BMP:BMP+ROWS*BPR] = encode(g)
     data[ell:ell + STRIDE] = rec
-    return bytes(data)
 
-# ── text encoder: Catalan -> full-width / Greek-slot SJIS (codec-free) ──────────
+# ── text encoder: language-neutral punctuation (shared by every profile) ─────────
 _PUNCT = {" ":0x8140, ".":0x8144, ",":0x8143, "!":0x8149, "?":0x8148,
          ":":0x8146, ";":0x8147, "(":0x8169, ")":0x816a, "'":0x8166, "’":0x8166, "/":0x815e,
          "%":0x8193,   # ASCII % -> the full-width ％ the JP already uses (せいかいりつ１００％)
@@ -283,34 +247,141 @@ _ACCENTS = {ch: (shi<<8)|slo for ch,(_,_,_,_,shi,slo) in ACCENT_SPEC.items()}
 _ACCENTS["-"] = 0x83C9   # authored hyphen (enclitics: Ves-te'n, ajudar-lo)
 _ACCENTS["·"] = 0x83D1  # authored middot (geminates: l·l → col·lecció). 0x83CA is taken by 'il' digraph.
 
-def fw(s):
-    """Catalan text -> Shift-JIS bytes the patched font renders (accents + contractions)."""
+
+# ── language profiles: a language is DATA (glyph sets + slots + extras), the ──────
+# engines below are generic over it. Adding a language NEVER edits the engines or another
+# language's data. `_CA` wraps the module-level Catalan globals so the existing globals + tests
+# keep working; `lang="ca"` is byte-for-byte the original (locked by test_fon_codec golden MD5s).
+class _Profile:
+    def __init__(self, accent_spec, cspec, cslot, compose, oslot, clean, clslot,
+                 accents, extras, ellipsis_code):
+        self.accent_spec = accent_spec            # {char: (baseHi, baseLo, drawFn, clearRows, slotHi, slotLo)}
+        self.cspec, self.cslot = cspec, cslot     # contraction combos + their slots
+        self.compose, self.oslot = compose, oslot # two-letter composition glyphs + slots
+        self.clean, self.clslot = clean, clslot   # digraph/narrow pairs + slots
+        self.accents = accents                    # encoder: char -> code (accents + authored hyphen/middot)
+        self.extras = extras                      # bespoke-bitmap authors (hyphen/middot/ellipsis/...)
+        self.ellipsis_code = ellipsis_code        # code fw emits for "..."
+
+_CA = _Profile(ACCENT_SPEC, _CSPEC, _CSLOT, _COMPOSE, _OSLOT, _CLEAN, _CLSLOT,
+               _ACCENTS, [_author_hyphen, _author_middot, _author_ellipsis], 0x8394)
+# ── English profile (en): base Latin A-Z/a-z is already in the stock font, so the ONLY authored ─
+# glyphs are the alphabet-wide `<letter>'` right-apostrophe combos (one cell each, same proven
+# technique as Catalan) -- so contractions AND possessive 's render after ANY letter -- plus the
+# shared hyphen + baseline ellipsis. No accents, no digraphs, so the whole Greek block is free.
+# The full alphabet is authored now; prune the unused combos against the real English text later.
+_EN_WIDE = set("mnw")                        # widest lowercase letters -> squeezed right-apostrophe
+_EN_CSPEC = ([("I'", "I", "r")] +            # I'm / I'll / I've / I'd (the one common capital combo)
+             [(chr(c) + "'", chr(c), "rq" if chr(c) in _EN_WIDE else "r")
+              for c in range(ord('a'), ord('z') + 1)])
+# free slots for en: the whole Greek block MINUS the authored-hyphen slot (0x83C9), + kana reserve.
+_EN_FREE = [c for c in range(0x839F, 0x83D7)
+            if 0x40 <= (c & 0xFF) <= 0xFC and (c & 0xFF) != 0x7F and c != 0x83C9] \
+           + [0x838e, 0x8390, 0x8391, 0x8395, 0x8361]
+_EN_CSLOT = {seq: _EN_FREE[i] for i, (seq, _, _) in enumerate(_EN_CSPEC)}
+# multi-punctuation composed into one cell (English uses !! ?! !? heavily) -> 2B not 4B.
+_EN_COMPOSE = [("?!", 0x8148, 0x8149, None, None), ("!?", 0x8149, 0x8148, None, None),
+               ("!!", 0x8149, 0x8149, None, None)]
+_EN_OSLOT = {name: _EN_FREE[len(_EN_CSPEC) + i] for i, (name, *_) in enumerate(_EN_COMPOSE)}
+for _n in _EN_OSLOT:
+    _EN_CSLOT[_n] = _EN_OSLOT[_n]             # encoder emits the one-cell glyph for the pair
+_EN_ACCENTS = {"-": 0x83C9}                   # authored hyphen; English has no accents/middot
+
+_EN = _Profile({}, _EN_CSPEC, _EN_CSLOT, _EN_COMPOSE, _EN_OSLOT, [], {},
+               _EN_ACCENTS, [_author_hyphen, _author_ellipsis], 0x8394)
+
+_PROFILES = {"ca": _CA, "en": _EN}
+LANGS = tuple(sorted(_PROFILES))
+
+
+# ── generic engines (parameterised by a _Profile) ───────────────────────────────
+def _build(src_bytes, prof):
+    """Author `prof`'s glyphs into the stock font. Generic -- the language lives entirely in `prof`."""
+    data = bytearray(src_bytes)
+    for ch, (bhi, blo, acc, clr, shi, slo) in prof.accent_spec.items():
+        rec = bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE])
+        g = decode(rec)
+        if clr: _cleartop(g, clr)
+        acc(g, ch.isupper())
+        rec[BMP:BMP+ROWS*BPR] = encode(g)
+        jhi, jlo = sjis2jis(shi, slo)
+        rec[0], rec[1] = jlo, jhi
+        off = jis_index(jhi, jlo)*STRIDE
+        data[off:off+STRIDE] = rec
+    for author in prof.extras:                        # hyphen / middot / ellipsis (bespoke bitmaps)
+        author(data)
+    # contraction combo-glyphs into the free Greek slots
+    for seq, ch, kind in prof.cspec:
+        bhi, blo = _basejis(ch)
+        g = decode(bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE]))
+        if   kind == 'r':  g = _apos_r(g, False)
+        elif kind == 'rq': g = _apos_r(g, True)
+        rec = bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE])   # borrow base header
+        rec[BMP:BMP+ROWS*BPR] = encode(g)
+        code = prof.cslot[seq]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
+        rec[0], rec[1] = jlo, jhi
+        off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
+    # two-letter composition glyphs (menu Sí/No, ?!) into the next free slots
+    for name, lsj, rsj, lw, rw in prof.compose:
+        g = _compose(_glyph(data, lsj >> 8, lsj & 0xFF),
+                     _glyph(data, rsj >> 8, rsj & 0xFF), lw, rw)
+        rec = bytearray(data[jis_index(0x23, 0x61)*STRIDE:][:STRIDE])   # borrow 'a' header
+        rec[BMP:BMP+ROWS*BPR] = encode(g)
+        code = prof.oslot[name]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
+        rec[0], rec[1] = jlo, jhi
+        off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
+    # clean glyph pairs (digraphs + narrow pairs), composed from their two letters
+    for seq, lsj, rsj in prof.clean:
+        g = _compose(_glyph(data, lsj >> 8, lsj & 0xFF), _glyph(data, rsj >> 8, rsj & 0xFF))
+        rec = bytearray(data[jis_index(0x23, 0x61)*STRIDE:][:STRIDE])
+        rec[BMP:BMP+ROWS*BPR] = encode(g)
+        code = prof.clslot[seq]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
+        rec[0], rec[1] = jlo, jhi
+        off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
+    return bytes(data)
+
+def _encode(s, prof):
+    """Text -> Shift-JIS bytes the patched font renders, using `prof`'s glyph set. Generic."""
     s = s.replace("’", "’")                                     # curly apostrophe -> straight
     o = bytearray(); i = 0; n = len(s)
     while i < n:
-        if s[i:i+3] == "...":   # ellipsis -> baseline-dots glyph in the ヴ slot (2B, 1 cell)
-            o += (0x8394).to_bytes(2,"big"); i += 3; continue
+        if s[i:i+3] == "...":   # ellipsis -> baseline-dots glyph (2B, 1 cell)
+            o += prof.ellipsis_code.to_bytes(2,"big"); i += 3; continue
         two = s[i:i+2]
-        if two in _CSLOT:       # contraction or ?! combo -> one glyph, 2B not 4B
-            o += _CSLOT[two].to_bytes(2,"big"); i += 2; continue
-        if two in _CLSLOT and not (two[1] == "." and s[i+2:i+3] == "."):
-            o += _CLSLOT[two].to_bytes(2,"big"); i += 2; continue   # digraph/combo (but let "t..." be t+…)
+        if two in prof.cslot:       # contraction or ?! combo -> one glyph, 2B not 4B
+            o += prof.cslot[two].to_bytes(2,"big"); i += 2; continue
+        if two in prof.clslot and not (two[1] == "." and s[i+2:i+3] == "."):
+            o += prof.clslot[two].to_bytes(2,"big"); i += 2; continue   # digraph/combo (but let "t..." be t+…)
         ch = s[i]; c = ord(ch)
-        if ch in _ACCENTS:      o += _ACCENTS[ch].to_bytes(2,"big")
+        if ch in prof.accents:  o += prof.accents[ch].to_bytes(2,"big")
         elif 0x41 <= c <= 0x5a: o += (0x8260+c-0x41).to_bytes(2,"big")
         elif 0x61 <= c <= 0x7a: o += (0x8281+c-0x61).to_bytes(2,"big")
         elif 0x30 <= c <= 0x39: o += (0x824f+c-0x30).to_bytes(2,"big")
         elif ch in _PUNCT:      o += _PUNCT[ch].to_bytes(2,"big")
-        else: o += (0x8148).to_bytes(2,"big")   # ESCAPING: any glyph-less char -> full-width ？ (never crash the encoder / byte count)
+        else: o += (0x8148).to_bytes(2,"big")   # ESCAPING: any glyph-less char -> full-width ？ (never crash the encoder)
         i += 1
     return bytes(o)
 
 
+# ── public API: language-selected, default Catalan (backwards-compatible) ────────
+def build_patched_font(src_bytes, lang="ca"):
+    """Author the patched S18RM04.FON for `lang` (default Catalan). `lang` picks the glyph profile;
+    lang='ca' is byte-for-byte the original output (locked by test_fon_codec golden-MD5 tests)."""
+    if lang not in _PROFILES:
+        raise ValueError("no font profile for lang %r (have: %s)" % (lang, ", ".join(LANGS)))
+    return _build(src_bytes, _PROFILES[lang])
+
+def fw(s, lang="ca"):
+    """Encode text -> Shift-JIS bytes the patched font renders, using `lang`'s glyph set (default ca)."""
+    if lang not in _PROFILES:
+        raise ValueError("no encoder for lang %r (have: %s)" % (lang, ", ".join(LANGS)))
+    return _encode(s, _PROFILES[lang])
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("usage: fon_codec.py <orig.FON> <patched.FON>"); sys.exit(1)
-    out = build_patched_font(open(sys.argv[1], "rb").read())
+    if len(sys.argv) not in (3, 4):
+        print("usage: fon_codec.py <orig.FON> <patched.FON> [lang=ca]"); sys.exit(1)
+    lang = sys.argv[3] if len(sys.argv) == 4 else "ca"
+    out = build_patched_font(open(sys.argv[1], "rb").read(), lang)
     open(sys.argv[2], "wb").write(out)
-    extra = len(_CSPEC) + len(_COMPOSE) + len(_CLEAN)
-    print("wrote %s (%d accents + %d glyphs: contractions, ?!)"
-          % (sys.argv[2], len(ACCENT_SPEC), extra))
+    print("wrote %s (lang=%s, %d bytes)" % (sys.argv[2], lang, len(out)))

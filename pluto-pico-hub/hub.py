@@ -179,11 +179,9 @@ def _sync_server(cfg, stop):
                 body = _json.loads(self.rfile.read(length).decode()) if length else {}
                 action = (body.get("action") or "sync").strip()
                 target = (body.get("target") or "").strip()
-                dropbox_path = (body.get("dropbox_path") or "").strip()
                 text = body.get("text") or ""
                 ctl_byte = body.get("byte")
-                reply = _handle_sync(action, target, cfg, dropbox_path=dropbox_path,
-                                     text=text, byte=ctl_byte)
+                reply = _handle_sync(action, target, cfg, text=text, byte=ctl_byte)
             except Exception as exc:
                 reply = {"error": "sync handler crashed: %s" % exc}
             data = _json.dumps(reply).encode()
@@ -299,7 +297,7 @@ def _genesis_health_server(cfg, stop):
     srv.server_close()
 
 
-def _handle_sync(action, target, cfg, dropbox_path="", text="", byte=None):
+def _handle_sync(action, target, cfg, text="", byte=None):
     """Dispatch a sync/list request. Returns {"message": ...} or {"error": ...}."""
     if action == "datalink":
         return _datalink_write(cfg, text)
@@ -310,7 +308,9 @@ def _handle_sync(action, target, cfg, dropbox_path="", text="", byte=None):
     if target == "vmu":
         if action == "console-list":
             return _console_list_vmu()
-        return _sync_vmu(cfg, dropbox_path=dropbox_path)
+        if action == "read-image":
+            return _read_vmu_image()
+        return {"error": "unknown vmu action '%s' -- try console-list or read-image" % action}
     return {"error": "target '%s' is not implemented yet." % target}
 
 
@@ -454,29 +454,43 @@ def _discover_vmu():
         return False
 
 
-def _sync_vmu(cfg, dropbox_path=""):
-    """Sync VMU data to Dropbox. dropbox_path is passed in from the Pluto request."""
-    if not dropbox_path:
-        return {"error": "no dropbox_path in request -- Pluto must provide it."}
+def _read_vmu_image():
+    """Hand Pluto the raw 128KB VMU image so it can do the filesystem work.
 
-    results = []
+    rsync cannot read a VMU -- it is an image behind a USB reader, not a directory --
+    so the batocera pattern (Pluto rsyncs, Pluto parses, Pluto uploads) needs this one
+    extra hop. Everything after it stays on Pluto: the Dropbox token and the whole
+    /saves ledger live there and are not duplicated onto the Pi.
 
-    # -- VMU via USB reader ---------------------------------------------------
-    vmu_dev = _discover_vmu()
-    if vmu_dev:
-        try:
-            out_dir = os.path.join(dropbox_path, "dc", "vmu")
-            os.makedirs(out_dir, exist_ok=True)
-            results.append("VMU: not implemented yet (device: %s)." % vmu_dev)
-        except Exception as exc:
-            results.append("VMU: error -- %s" % exc)
-    else:
-        results.append("VMU: no USB block device found, skipped.")
-
-    # -- DreamShell / DreamPi -------------------------------------------------
-    results.append("DreamShell: not implemented yet.")
-
-    return {"message": " | ".join(results)}
+    READ ONLY. Mounted -o ro and never written; backing progress up must not be able
+    to damage the card it is backing up. Reading a whole VMU takes about 3 seconds.
+    """
+    import base64 as _b64, glob as _glob, hashlib as _hashlib, os as _os, subprocess as _sp
+    if not _discover_vmu():
+        return {"error": "VMU not found -- is the DreamPicoPort plugged in?"}
+    candidates = sorted(_glob.glob("/dev/sd?"))
+    if not candidates:
+        return {"error": "DreamPicoPort on bus but no block device found."}
+    dev = candidates[0]
+    mnt = "/tmp/cpc-vmu"
+    try:
+        _os.makedirs(mnt, exist_ok=True)
+        r = _sp.run(["sudo", "mount", "-t", "vfat", "-o", "ro", dev, mnt],
+                    capture_output=True, text=True, timeout=10)
+        if r.returncode != 0:
+            return {"error": "mount failed: %s" % r.stderr.strip()}
+        path = _os.path.join(mnt, "VMU0.BIN")
+        if not _os.path.exists(path):
+            return {"error": "VMU0.BIN not found at %s" % path}
+        with open(path, "rb") as vf:
+            raw = vf.read()
+        return {"image": _b64.b64encode(raw).decode("ascii"),
+                "bytes": len(raw),
+                "md5":   _hashlib.md5(raw).hexdigest()}
+    except Exception as exc:
+        return {"error": "VMU read failed: %s" % exc}
+    finally:
+        _sp.run(["sudo", "umount", dev], timeout=5, capture_output=True)
 
 
 def serve(cfg):

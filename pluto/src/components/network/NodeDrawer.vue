@@ -85,6 +85,11 @@ const instanceHasOps = computed(() => showDeploy.value || showLabConfig.value)
 // Non-instance nodes keep the flat layout: their infra actions + chat commands.
 const hasInfra = computed(() => props.node.deploy || props.node.folder)
 
+// Cloud connectors have no SSH or SMB to offer -- their one useful action is "open
+// the thing on the web", declared per node as WEB_URL. Trimmed to a string so the
+// template can guard and pass it without a non-null assertion.
+const webUrl = computed(() => (props.node.web ?? '').trim())
+
 // The Wii is two machines in one: a Linux node (Wii-Linux: SSH deploy + SMB files) AND
 // a native console (Homebrew/Nintendont: .dol flash + game library). Deploy/Files mean
 // different things in each, so its drawer shows BOTH as separate sections rather than
@@ -234,8 +239,14 @@ function postCommand(text: string) {
         </section>
       </template>
 
-      <section v-else-if="isVacuum || hasInfra" class="nd__sec">
+      <section v-else-if="isVacuum || hasInfra || webUrl" class="nd__sec">
         <p class="nd__lbl">Actions</p>
+
+        <UiActionRow v-if="webUrl" @click="openExternal(webUrl)">
+          <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>
+          <span>Open {{ node.name }}</span>
+          <span class="nd__ext">&#8599;</span>
+        </UiActionRow>
 
         <UiActionRow v-if="isVacuum" @click="emit('open-tab')">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 8h9M19 8h1M4 16h5M15 16h5"/><circle cx="15" cy="8" r="2"/><circle cx="11" cy="16" r="2"/></svg>

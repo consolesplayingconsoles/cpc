@@ -27,7 +27,6 @@ LAB_API="${LAB_API:-http://192.168.68.51:7700}"     # the Mac's Pluto API (live 
 
 case "$TAG" in
   T-Cat) LANGNAME=Català; LANG2=ca ;;
-  T-Esp) LANGNAME=Español; LANG2=es ;;
   T-Eng) LANGNAME=English; LANG2=en ;;
   *)     LANGNAME="$TAG";  LANG2="$TAG" ;;
 esac
@@ -64,7 +63,7 @@ PY
 
 echo "[2/5] build patched files from live state ($GAME_KEY @ $LAB_API)"
 python3 "$HERE/dc/build_patch.py" "$GAME_KEY" "$EXTRACT" "$PATCH" "$LAB_API"
-python3 "$HERE/dc/fon_codec.py" "$EXTRACT/S18RM04.FON" "$PATCH/S18RM04.FON"
+python3 "$HERE/dc/fon_codec.py" "$EXTRACT/S18RM04.FON" "$PATCH/S18RM04.FON" "$LANG2"
 
 echo "[3/5] copy GDI -> $DEST (track05 real, rest linked)"
 mkdir -p "$OUT_SYSDIR"
