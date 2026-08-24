@@ -17,8 +17,7 @@
       { "verb": "stop",   "desc": "stop / park in place" }
     ],
     "dropbox": [
-      { "verb": "cloud", "desc": "list cloud saves for a console", "pick": "console" },
-      { "verb": "node",  "desc": "list saves on a node",           "pick": "node" }
+      { "verb": "cloud", "desc": "list cloud saves for a console", "pick": "console" }
     ],
     "substack": [
       { "verb": "post", "desc": "write & broadcast to substack", "multiline": true }
