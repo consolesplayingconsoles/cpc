@@ -10,6 +10,7 @@ import os
 import sys
 import json
 import zlib
+import base64
 import tempfile
 import platform
 import subprocess
@@ -358,11 +359,32 @@ def _sync_audit(**entry):
         pass
 
 
+# Format knowledge lives in config/consoles.json (saveFormats), not in this file --
+# adding a console's quirk should not need a code change. These are the FALLBACKS, used
+# verbatim when the config is missing or lacks a key, so an absent config degrades to
+# exactly the old hardcoded behaviour rather than misclassifying everything.
+_FORMATS = {
+    "stateContains": [".state"],
+    "stateSuffixes": [".ppst", ".png"],
+    "skipDirs":      ["flatpak", "dolphin-emu"],
+    "skipExts":      [".cfg", ".txt"],
+}
+
+
+def _load_save_formats(consoles_cfg):
+    """Merge config/consoles.json's saveFormats over the fallbacks. Called once at boot."""
+    for key, val in ((consoles_cfg or {}).get("saveFormats") or {}).items():
+        if key in _FORMATS and isinstance(val, list) and val:
+            _FORMATS[key] = [str(v).lower() for v in val]
+
+
 def _save_class(name):
     """Classify a save-dir file: 'state' (emulator savestate + its .png thumb, cloud-
     only, emulator-locked) vs 'save' (battery/memory save a real console could load)."""
     low = name.lower()
-    if ".state" in low or low.endswith((".ppst", ".png")):
+    if any(t in low for t in _FORMATS["stateContains"]):
+        return "state"
+    if low.endswith(tuple(_FORMATS["stateSuffixes"])):
         return "state"
     return "save"
 
@@ -378,8 +400,7 @@ def _display_name(rel):
     return os.path.splitext(base)[0]
 
 
-_SYNC_SKIP_DIRS = ("flatpak", "dolphin-emu")   # not save data
-_SYNC_SKIP_EXTS = (".cfg", ".txt")
+
 
 
 def _load_ledger(token, path):
@@ -480,7 +501,7 @@ def _collect_save_items(system, sysdir):
     items, stamps = {}, {}
     for base, _dirs, files in os.walk(sysdir):
         for fn in sorted(files):
-            if fn.lower().endswith(_SYNC_SKIP_EXTS):
+            if fn.lower().endswith(tuple(_FORMATS["skipExts"])):
                 continue
             fp  = os.path.join(base, fn)
             rel = os.path.relpath(fp, sysdir)          # ledger key within the console
@@ -542,7 +563,7 @@ def _sync_batocera(roster):
     # everything after is a local file walk (crc/classify/diff) + targeted uploads.
     scratch  = os.path.join(tempfile.gettempdir(), "cpc-sync-batocera")
     excludes = []
-    for d in _SYNC_SKIP_DIRS:
+    for d in _FORMATS["skipDirs"]:
         excludes += ["--exclude", d + "/"]
     try:
         subprocess.run(["rsync", "-a", "--timeout=30"] + excludes +
@@ -823,6 +844,128 @@ def _sync_vmu_run(roster):
         msg += ", %d not newer than the cloud (skipped): %s" % (
             conflicts, ", ".join(conflict_names[:6]))
     _new_message(sender, msg + ".")
+
+
+def _sd_backup(node_id, roster, consoles_cfg):
+    """BACKUP a console's SD/flash card -> Dropbox. Upload only, like every other backup.
+
+    The card is physically in the Pi hub, not in the console: everything is (or will be)
+    wired to the Pi, so a short card swap beats engineering a copy path over serial. The
+    Pi stays generic -- Pluto owns the config and passes down the card's LABEL plus the
+    patterns to match, so the hub never needs to know which console this is.
+
+    Patterns come from config/consoles.json and are either an extension (".srm") or an
+    exact filename ("ss_save.bin"): SAROO forced the latter, since its saves are .bin and
+    so are 117GB of disc images sitting on the same card.
+    """
+    sender = "dropbox"
+    cfg   = (roster or {}).get(node_id) or {}
+    label = (cfg.get("SD_LABEL") or "").strip()
+    if not label:
+        _new_message(sender, "%s has no SD_LABEL set." % node_id); return
+    ccfg     = consoles_cfg or {}
+    consoles = (ccfg.get("nodeConsoles") or {}).get(node_id) or []
+    consoles = [c for c in consoles if c != "*"]
+    if not consoles:
+        _new_message(sender, "%s maps to no console (see config/consoles.json)." % node_id); return
+
+    try:
+        token = _dropbox_access_token(roster)
+    except DropboxAuthError as exc:
+        _new_message(sender, "backup: %s." % exc); return
+    if not token:
+        _new_message(sender, "backup: no Dropbox credentials -- set the refresh trio (or DROPBOX_TOKEN) in nodes/cloud/dropbox/.env."); return
+
+    saves_pat  = ccfg.get("savePatterns")  or {}
+    states_pat = ccfg.get("statePatterns") or {}
+    now   = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamp = now.replace(":", "").replace("-", "")
+    up = unchanged = skipped_old = 0
+    notes = []
+
+    for console in consoles:
+        want_save  = [p.lower() for p in (saves_pat.get(console)  or [])]
+        want_state = [p.lower() for p in (states_pat.get(console) or [])]
+        if not (want_save or want_state):
+            notes.append("%s: no patterns configured" % console); continue
+        rep = _pi_sd_collect(roster, label, want_save + want_state)
+        if rep.get("error"):
+            _sync_audit(event="sd_read_failed", node=node_id, label=label, error=rep["error"])
+            _new_message(sender, "backup: %s." % rep["error"]); return
+
+        saves_lp   = "%s/%s/%s" % (_SAVES_ROOT, console, _LEDGER_NAME)
+        states_lp  = "/states/%s/%s/%s" % (console, node_id, _LEDGER_NAME)
+        saves_prev, states_prev = _load_ledger(token, saves_lp), _load_ledger(token, states_lp)
+        saves_new,  states_new  = dict(saves_prev), dict(states_prev)
+
+        for f in rep.get("files", []):
+            on_card = f["path"]
+            key     = os.path.basename(on_card)           # the card's dir layout is its own business
+            data    = base64.b64decode(f["data"])
+            summ    = format(zlib.crc32(data) & 0xffffffff, "08x")
+            low     = key.lower()
+            is_state = (low in want_state) or (os.path.splitext(low)[1] in want_state)
+            if is_state:
+                # States never interchange, so they silo per node: /states/<console>/<node>/
+                cloud_path, prev, new_l = "/states/%s/%s/%s" % (console, node_id, key), states_prev.get(key), states_new
+                verdict = "unchanged" if (prev and prev.get("sum") == summ) else "upload"
+                saved   = now
+            else:
+                cloud_path, prev, new_l = "%s/%s/%s" % (_SAVES_ROOT, console, key), saves_prev.get(key), saves_new
+                verdict, saved = _sync_verdict(node_id, summ, "", prev, now)
+            if verdict == "unchanged":
+                unchanged += 1; new_l[key] = _with_seen(prev, node_id, summ); continue
+            if verdict == "skip":
+                skipped_old += 1; new_l[key] = _with_seen(prev, node_id, summ)
+                _sync_audit(event="not_newer", console=console, file=key, node=node_id); continue
+            if prev:
+                try:
+                    _dropbox_copy(token, cloud_path, "/backups%s@%s" % (cloud_path, stamp))
+                except Exception as exc:
+                    _sync_audit(event="backup_failed", console=console, file=key, error=str(exc))
+            try:
+                _dropbox_upload(token, cloud_path, data)
+            except Exception as exc:
+                _sync_audit(event="upload_failed", console=console, file=key, error=str(exc))
+                _new_message(sender, "backup: upload failed for %s (%s)" % (key, exc)); continue
+            up += 1
+            _sync_audit(event="upload", console=console, file=key, sum=summ, node=node_id,
+                        cls=("state" if is_state else "save"), card=on_card)
+            names = dict((prev or {}).get("names", {})); names[node_id] = on_card
+            new_l[key] = _with_seen({"name": key, "updated": now, "saved": saved, "node": node_id,
+                                     "sum": summ, "class": ("state" if is_state else "save"),
+                                     "names": names, "seen": (prev or {}).get("seen")},
+                                    node_id, summ)
+        for lp, body_map, prev_map in ((saves_lp, saves_new, saves_prev),
+                                       (states_lp, states_new, states_prev)):
+            if body_map and body_map != prev_map:
+                try:
+                    _dropbox_upload(token, lp, json.dumps(
+                        {"console": console, "saves": body_map}, indent=2).encode())
+                except Exception as exc:
+                    _new_message(sender, "backup: ledger write failed (%s)" % exc)
+
+    msg = "%s SD (%s): %d uploaded, %d unchanged" % (node_id, label, up, unchanged)
+    if skipped_old: msg += ", %d not newer than the cloud" % skipped_old
+    if notes:       msg += " -- " + "; ".join(notes)
+    _new_message(sender, msg + ".")
+
+
+def _pi_sd_collect(roster, label, patterns):
+    """Ask the Pi hub for every file on LABEL matching these patterns."""
+    pi_cfg = (roster or {}).get("pi") or {}
+    host = (pi_cfg.get("HOST_IP") or "").strip()
+    port = (pi_cfg.get("PI_SYNC_PORT") or "7721").strip()
+    if not host:
+        return {"error": "the Pi node has no HOST_IP set"}
+    body = json.dumps({"action": "collect", "target": "sd",
+                       "label": label, "exts": patterns}).encode()
+    try:
+        req = Request("http://%s:%s/sync" % (host, port), data=body,
+                      headers={"Content-Type": "application/json"})
+        return json.loads(urlopen(req, timeout=180).read().decode())
+    except Exception as exc:
+        return {"error": "Pi hub unreachable: %s" % exc}
 
 
 def _datalink_post(pi_cfg, text):
@@ -1992,6 +2135,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("POST", "/control/capture/grab"), ("POST", "/control/google/lens"),
         ("POST", "/control/google/translate"), ("POST", "/control/google/translate-last"),
         ("POST", "/workspace/{node}"), ("POST", "/config/open"), ("POST", "/native/{node}/{action}"),
+        ("POST", "/sd/{node}"),
         ("POST", "/translate/run"), ("POST", "/translate/open"), ("POST", "/translate/delete"),
         ("POST", "/translate/upload"), ("POST", "/translate/{game}"),
         ("PUT", "/translate/{game}"),
@@ -2140,6 +2284,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_open_config()
         elif len(parts) == 2 and parts[0] == "sync":
             self._handle_sync(parts[1])
+        elif len(parts) == 2 and parts[0] == "sd":
+            self._handle_sd_backup(parts[1])
         elif len(parts) == 3 and parts[0] == "native":
             self._handle_native(parts[1], parts[2])
         elif parsed.path == "/translate/run":
@@ -2342,6 +2488,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # (same "the chat message IS the UX" model the other node replies use).
             _new_message(node_id, "backup is not wired for %s yet." % node_id)
             self._send(200, {"ok": True, "message": "not implemented"})
+
+    def _handle_sd_backup(self, node_id):
+        """SD back-up button -- separate from 'Back up saves' on purpose: different
+        precondition (the card must be in the Pi) and a different failure mode."""
+        cfg = self.__class__.node_roster.get(node_id) or {}
+        if not (cfg.get("SD_LABEL") or "").strip():
+            self._send(200, {"ok": False, "error": "%s has no SD_LABEL" % node_id}); return
+        _new_message("dropbox", "reading %s's SD card and backing it up to cloud..." % node_id)
+        threading.Thread(target=_sd_backup,
+                         args=(node_id, self.__class__.node_roster, self.__class__.consoles_config),
+                         daemon=True).start()
+        self._send(200, {"ok": True, "message": "%s SD backup started -- watch the chat feed." % node_id})
 
     def _handle_native(self, node_id, action):
         """A node's NATIVE-system action (e.g. the Wii's homebrew flash / game library),
@@ -3423,6 +3581,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "smb":    smb,
                 "deploy": deployable,
                 "folder": bool(smb),
+                # Set = this console's saves live on a card read via the Pi hub.
+                "sd":     (console_cfg.get("SD_LABEL") or "").strip() or None,
                 "code":   has_code,
                 # Precedence: .env OS= override > known-by-definition > probe TTL.
                 # (e.g. OS=native on a Wii homebrew build to drop the Tux.)
@@ -3545,6 +3705,7 @@ def run():
     try:
         with open(consoles_path) as f:
             Handler.consoles_config = json.load(f)
+        _load_save_formats(Handler.consoles_config)
         print("  consoles.json: %d consoles" % len(Handler.consoles_config.get("consoles", [])))
     except Exception as exc:
         print("  consoles.json: not loaded (%s)" % exc)
