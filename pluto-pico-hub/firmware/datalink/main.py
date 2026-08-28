@@ -105,14 +105,10 @@ def _bus_listen():
 
 
 def _bus_drive():
-    global _clk
     for p in PAYLOAD:
         p.init(Pin.OPEN_DRAIN, value=1)
     CTRL.init(Pin.OPEN_DRAIN, value=1)
     CLK.init(Pin.OPEN_DRAIN, value=1)
-    _clk = 1                # match the idle-HIGH line so the first _xfer toggles it LOW =
-                            # a clean START edge. Without this the first edge is a coin-flip
-                            # (carried-over parity), the ROM misses START, whole frame lost.
 
 
 def _read_bus():
@@ -193,45 +189,6 @@ def send_list(names_line):
     _bus_listen()
 
 
-# ── SN76489 PSG, step-1 audio bring-up: prove pitched sound comes out of the chip
-#    over the datalink before we stream a whole VGM. OP_PSG payload = raw chip bytes,
-#    written straight to the PSG port by the ROM. A note is three bytes:
-#      tone latch  1 cc 0 dddd   (low 4 bits of the 10-bit period)
-#      tone data   0 0 dddddd    (high 6 bits of the period)
-#      volume      1 cc 1 vvvv   (attenuation, 0 = loudest, 15 = off)
-SN_CLOCK = 3579545
-
-
-def _psg_period(freq):
-    p = round(SN_CLOCK / (32 * freq))
-    return 1 if p < 1 else (1023 if p > 1023 else p)
-
-
-def psg_note(chan, freq, atten=0):
-    p = _psg_period(freq)
-    send(OP_PSG, bytes([0x80 | (chan << 5) | (p & 0x0F),
-                        (p >> 4) & 0x3F,
-                        0x80 | (chan << 5) | 0x10 | (atten & 0x0F)]))
-
-
-def psg_off(chan):
-    send(OP_PSG, bytes([0x80 | (chan << 5) | 0x1F]))   # volume = 15 (silent)
-
-
-def psg_demo():
-    for f in (261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, 523.25):
-        psg_note(0, f)                 # a C-major scale on channel 0
-        time.sleep_ms(180)
-    psg_off(0)
-    time.sleep_ms(120)
-    psg_note(0, 261.63)                # a 3-channel C-major chord
-    psg_note(1, 329.63)
-    psg_note(2, 392.0)
-    time.sleep_ms(700)
-    for c in range(3):
-        psg_off(c)
-
-
 # ── fast path for streaming real music (VGM) ──────────────────────────────────────────
 # The demo's send() holds 40ms/transfer for the 60fps ROM. Music needs hundreds of writes/s
 # (Green Hill Zone peaks ~345/s), so the ROM has a tight psg_stream() loop and we clock as
@@ -242,11 +199,8 @@ def _xfer_fast(is_ctrl, nib):
     for i in range(4):
         PAYLOAD[i].value((nib >> i) & 1)
     CTRL.value(1 if is_ctrl else 0)
-    time.sleep_us(20)          # settle: data stable before the clock edge
     _clk ^= 1
     CLK.value(_clk)
-    time.sleep_us(120)         # HOLD data stable AFTER the edge so the ROM reads it before
-                               # the next transfer changes the lines (this was the desync)
 
 
 def _byte_fast(b):
@@ -393,8 +347,6 @@ def _dispatch(line):
         psg_stream()                    # live VGM stream follows on stdin (hex, 'X' ends)
     elif line.startswith("/mdlist "):
         send_list(line[8:])             # reply to the ROM's REQ_LIST with the track names
-    elif line.startswith("/psg"):
-        psg_demo()
     elif line.startswith("/g"):
         try:
             gid = int(line[2:].strip() or "0")
