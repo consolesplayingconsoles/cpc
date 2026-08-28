@@ -51,7 +51,10 @@ function fire(arg?: string) {
       <span class="cmd__label">{{ label }}</span>
       <span v-if="sent" class="cmd__sent">sent &check;</span>
     </div>
-    <textarea v-model="text" class="cmd__text" :placeholder="cmd.desc || 'Write…'" rows="3"></textarea>
+    <!-- Cmd/Ctrl+Enter sends (plain Enter stays free for multiline). -->
+    <textarea v-model="text" class="cmd__text" :placeholder="cmd.desc || 'Write… (⌘/Ctrl+Enter to send)'" rows="3"
+              @keydown.enter.meta.prevent="text.trim() && fire(text.trim())"
+              @keydown.enter.ctrl.prevent="text.trim() && fire(text.trim())"></textarea>
     <UiButton variant="primary" class="cmd__send" :disabled="!text.trim()" @click="fire(text.trim())">Send</UiButton>
   </div>
 

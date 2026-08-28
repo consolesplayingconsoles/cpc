@@ -205,7 +205,10 @@ def _sync_server(cfg, stop):
 # genesis datalink: hold the Pico serial open, CACHE the MD liveness it PUSHES (the Pico
 # watches SELECT and emits md:on/md:off on change, so the hub never polls), and own the
 # write handle for commands. _genesis_health_server serves the cache on its own port.
-_GENESIS = {"ser": None, "md_on": False}
+# mode tracks the last MODE: we sent the Pico so we only switch on a real transition (opening
+# the Control tab, or going back to chat) -- never in the streaming hot path. Cleared on
+# (re)connect so a freshly-booted Pico (which boots to DATA) gets re-synced on the next write.
+_GENESIS = {"ser": None, "md_on": False, "mode": None, "streaming": False}
 
 
 def _datalink_chip(cfg):
@@ -215,13 +218,22 @@ def _datalink_chip(cfg):
     return None
 
 
+def _ensure_mode(ser, desired):
+    """Send MODE:<desired> only if the Pico isn't already there. The action type IS the tab
+    intent: datalink writes -> DATA, control writes -> CTRL."""
+    if _GENESIS.get("mode") != desired:
+        ser.write(("MODE:%s\n" % desired).encode())
+        _GENESIS["mode"] = desired
+
+
 def _datalink_write(cfg, text):
-    """Write a command line to the genesis Pico via the held-open serial; the Pico reads
-    it off stdin and frames it onto the Mega Drive."""
+    """Write a datalink command line to the genesis Pico via the held-open serial; the Pico
+    reads it off stdin and frames it onto the Mega Drive. Ensures DATA mode first."""
     ser = _GENESIS.get("ser")
     if not ser:
         return {"error": "datalink pico not connected"}
     try:
+        _ensure_mode(ser, "DATA")
         ser.write((text + "\n").encode("utf-8", "replace"))
     except Exception as exc:
         return {"error": "datalink write failed: %s" % exc}
@@ -229,8 +241,9 @@ def _datalink_write(cfg, text):
 
 
 def _datalink_write_byte(cfg, b):
-    """Write ONE raw control byte to the genesis Pico (controller mode): the pico reads each
-    raw byte as the whole 3-button state, latest-wins. No newline -- it's not a text line."""
+    """Write ONE control byte to the genesis Pico (controller mode) as a hex line, latest-wins.
+    Ensures CTRL mode first (idempotent, so only the first byte after a tab switch costs the
+    MODE: line -- the rest are just the pad state)."""
     ser = _GENESIS.get("ser")
     if not ser:
         return {"error": "datalink pico not connected"}
@@ -239,15 +252,137 @@ def _datalink_write_byte(cfg, b):
     except (TypeError, ValueError):
         return {"error": "control byte must be an int 0-255"}
     try:
-        ser.write(bytes([b]))
+        _ensure_mode(ser, "CTRL")
+        ser.write(("%02X\n" % b).encode())
     except Exception as exc:
         return {"error": "control write failed: %s" % exc}
     return {"message": "genesis control: 0x%02X" % b}
 
 
+def _vgm_psg_events(path):
+    """Parse a .vgm/.vgz into [(delay_samples_before, psg_byte), ...] -- just the SN76489
+    (PSG) writes, with the VGM's own inter-write timing (44100 samples/sec). Pure stdlib."""
+    import gzip
+    d = open(path, "rb").read()
+    if d[:2] == b"\x1f\x8b":
+        d = gzip.decompress(d)
+    if d[:4] != b"Vgm ":
+        return None
+    ver = int.from_bytes(d[8:12], "little")
+    dat = 0x40
+    if ver >= 0x150:
+        rel = int.from_bytes(d[0x34:0x38], "little")
+        dat = 0x34 + rel if rel else 0x40
+    i = dat; n = len(d); pending = 0; ev = []
+    while i < n:
+        c = d[i]
+        if c == 0x50:                              # SN76489 write
+            ev.append((pending, d[i + 1])); pending = 0; i += 2
+        elif c == 0x61:                            # wait NN samples
+            pending += int.from_bytes(d[i + 1:i + 3], "little"); i += 3
+        elif c == 0x62: pending += 735; i += 1     # wait 1/60s
+        elif c == 0x63: pending += 882; i += 1     # wait 1/50s
+        elif 0x70 <= c <= 0x7f: pending += (c & 0xf) + 1; i += 1
+        elif c == 0x66: break                      # end of data
+        elif c in (0x52, 0x53, 0x54): i += 3       # YM2612/YM2151 (skipped: PSG only)
+        elif c == 0x67:                            # data block
+            sz = int.from_bytes(d[i + 3:i + 7], "little"); i += 7 + sz
+        elif 0x51 <= c <= 0x5f: i += 3
+        elif 0xa0 <= c <= 0xbf: i += 3
+        elif 0x80 <= c <= 0x8f: i += 1
+        else: i += 1
+    return ev
+
+
+def _psg_stream_file(cfg, name):
+    """Stream a VGM's PSG track to the genesis Pico, paced to the VGM's own timing. The Pico
+    opens one OP_PSG frame and the ROM's tight loop writes each byte to the chip. Runs in a
+    background thread (a song is ~20s+) with an absolute timeline so it doesn't drift."""
+    ser = _GENESIS.get("ser")
+    if not ser:
+        return {"error": "datalink pico not connected"}
+    if _GENESIS.get("streaming"):
+        return {"error": "already streaming -- one song at a time"}
+    music_dir = (cfg.get("MUSIC_DIR") or "/opt/cpc/music-lib").strip()
+    path = name if os.path.isabs(name) else os.path.join(music_dir, name)
+    if not os.path.exists(path):
+        return {"error": "no such song: %s" % path}
+    try:
+        ev = _vgm_psg_events(path)
+    except Exception as exc:
+        return {"error": "vgm parse failed: %s" % exc}
+    if not ev:
+        return {"error": "no PSG data in %s" % os.path.basename(path)}
+
+    def run():
+        _GENESIS["streaming"] = True
+        try:
+            _ensure_mode(ser, "DATA")
+            ser.write(b"/psgstream\n")
+            time.sleep(0.05)
+            t0 = time.monotonic(); samples = 0
+            for delay, b in ev:
+                samples += delay
+                target = t0 + samples / 44100.0
+                dt = target - time.monotonic()
+                if dt > 0:
+                    time.sleep(dt)
+                ser.write(("%02X" % b).encode())
+            ser.write(b"X")             # end the stream -> ROM closes the frame
+        except Exception as exc:
+            print("psgstream: %s" % exc)
+        finally:
+            _GENESIS["streaming"] = False
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"message": "streaming %d PSG writes from %s" % (len(ev), os.path.basename(path))}
+
+
+def _song_files(cfg):
+    """(music_dir, sorted [filenames]) of the playable tracks. The sort order is the index
+    the ROM's REQ_PLAY refers to, so listing and playing must use this same order."""
+    music_dir = (cfg.get("MUSIC_DIR") or "/opt/cpc/music-lib").strip()
+    try:
+        files = sorted(f for f in os.listdir(music_dir)
+                       if f.lower().endswith((".vgz", ".vgm")))
+    except OSError:
+        files = []
+    return music_dir, files
+
+
+def _display_name(fn):
+    """A filename -> a short track title for the MD menu: drop the extension and any
+    'Artist - NN - ' prefix, keeping the last ' - ' segment."""
+    base = fn.rsplit(".", 1)[0]
+    parts = base.split(" - ")
+    return parts[-1] if len(parts) >= 2 else base
+
+
+def _handle_md_cmd(cfg, line):
+    """A command the ROM drove back to us (relayed by the Pico over USB). MD:LIST -> reply
+    with the track names; MD:PLAY:<n> -> stream the n-th track."""
+    ser = _GENESIS.get("ser")
+    if not ser:
+        return
+    if line == "MD:LIST":
+        _, files = _song_files(cfg)
+        names = "|".join(_display_name(f) for f in files)
+        ser.write(("/mdlist %s\n" % names).encode("utf-8", "replace"))
+        print("genesis: sent list (%d tracks)" % len(files))
+    elif line.startswith("MD:PLAY:"):
+        try:
+            idx = int(line[len("MD:PLAY:"):])
+        except ValueError:
+            return
+        _, files = _song_files(cfg)
+        if 0 <= idx < len(files):
+            print("genesis: MD play #%d -> %s" % (idx, files[idx]))
+            _psg_stream_file(cfg, files[idx])
+
+
 def _genesis_manager(cfg, stop):
-    """Hold the genesis Pico's serial open: cache the md:on/md:off it pushes, own the
-    write handle, reconnect if the board drops. Chip id -> /dev/serial/by-id symlink."""
+    """Hold the genesis Pico's serial open: cache the md:on/md:off it pushes, relay the
+    MD's REQ_LIST/REQ_PLAY commands, reconnect if the board drops."""
     import glob as _glob
     chip = _datalink_chip(cfg)
     if not chip:
@@ -255,13 +390,13 @@ def _genesis_manager(cfg, stop):
     while not stop["flag"]:
         hits = _glob.glob("/dev/serial/by-id/*%s*" % chip)
         if not hits:
-            _GENESIS["ser"] = None; _GENESIS["md_on"] = False
+            _GENESIS["ser"] = None; _GENESIS["md_on"] = False; _GENESIS["mode"] = None
             time.sleep(2); continue
         dev = os.path.realpath(hits[0])
         try:
             import serial
             ser = serial.Serial(dev, 115200, timeout=1)
-            _GENESIS["ser"] = ser
+            _GENESIS["ser"] = ser; _GENESIS["mode"] = None   # re-sync mode on the next write
             print("genesis datalink: %s open, watching MD liveness" % dev)
             while not stop["flag"]:
                 line = ser.readline().decode("utf-8", "replace").strip()
@@ -269,10 +404,12 @@ def _genesis_manager(cfg, stop):
                     _GENESIS["md_on"] = True
                 elif line == "md:off":
                     _GENESIS["md_on"] = False
+                elif line.startswith("MD:"):
+                    _handle_md_cmd(cfg, line)
         except Exception as exc:
             print("genesis datalink: serial dropped (%s), retrying" % exc)
         finally:
-            _GENESIS["ser"] = None; _GENESIS["md_on"] = False
+            _GENESIS["ser"] = None; _GENESIS["md_on"] = False; _GENESIS["mode"] = None
         time.sleep(2)
 
 
@@ -306,6 +443,8 @@ def _handle_sync(action, target, cfg, text="", byte=None, label="", sub_path="",
         return _datalink_write(cfg, text)
     if action == "control":
         return _datalink_write_byte(cfg, byte)
+    if action == "psgstream":
+        return _psg_stream_file(cfg, text or label)
     if not target:
         return {"error": "no target specified -- try @dropbox %s @vmu" % action}
     if target == "sd":

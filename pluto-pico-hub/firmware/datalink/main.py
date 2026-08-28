@@ -13,25 +13,33 @@
 #                feeds it the two precomputed line patterns (TH-high / TH-low) per button
 #                change; the console-facing timing is entirely PIO's.
 #
-# The mode is AUTO-DETECTED off TH: TH edges arriving (a game polling) -> CONTROLLER; TH
-# static -> DATALINK. Boot Sonic and it's a pad; boot the room ROM and it's the data
-# channel. On the switch we hand the 6 pins between Python (open-drain) and PIO (push-pull,
-# fine through the BSS138 shifters).
+# The mode is SET EXPLICITLY by the hub -- no TH sniffing (that scheme false-triggered off
+# our own CLK toggling and never cleanly handed the lines back). The hub knows the intent
+# from which Pluto surface is driving: the chat/network drawer sends datalink events (DATA);
+# the Control tab streams controller ops (CONTROLLER). It sends MODE:DATA / MODE:CTRL and the
+# pico switches, handing the 6 pins between Python (open-drain) and the PIO (push-pull, fine
+# through the BSS138 shifters). Boot default = DATA.
 #
-# From the Pi over USB-serial, interpreted BY MODE:
-#   DATALINK   -- newline-terminated text lines:
-#                   <text>   -> print it on the MD          (opcode 0x01)
-#                   /g <id>  -> render graphic <id>         (opcode 0x02)
-#   CONTROLLER -- ONE raw byte = the whole pad, latest-wins (no framing): the pressed-button
-#                 mask (see BTN_* below). Only 3-button (6-button's extra TH pulses later).
+# All hub->pico traffic is newline-terminated LINES, so MODE: is understood in either mode.
+# Framing the serial costs controller mode nothing: its real-time is entirely in the PIO;
+# Python only feeds the PIO a new pattern when a button CHANGES, never per console poll.
+#   MODE:DATA / MODE:CTRL  -> switch mode (idempotent; the hub sends it only on a transition)
+#   DATA lines:
+#     <text>   -> print it on the MD          (opcode 0x01)
+#     /g <id>  -> render graphic <id>         (opcode 0x02)
+#     /psg     -> audio bring-up test         (opcode 0x03, PSG bytes)
+#   CTRL lines:
+#     <hex>    -> button mask, e.g. '80' = Start (see BTN_* below), latest-wins
 import sys
 import select
 import time
 import rp2
 from machine import Pin
 
-# TH (console output -> our input / PIO clock / mode tell).
-SELECT = Pin(2, Pin.IN)          # GP2 / DE-9 pin7
+# TH / GP2 / DE-9 pin7. In CONTROLLER mode this is the PIO's clock input (the console drives
+# it push-pull every frame). It's also sampled for md:on/off liveness. Nothing reads it to
+# choose the mode any more -- the hub commands that explicitly.
+SELECT = Pin(2, Pin.IN)   # GP2 / DE-9 pin7
 
 # The 6 DE-9 data lines. In DATALINK mode these are Python open-drain outputs (idle HIGH =
 # released); in CONTROLLER mode the PIO owns them. Names carry the datalink role; in
@@ -40,14 +48,16 @@ PAYLOAD = [Pin(g, Pin.OPEN_DRAIN, value=1) for g in (3, 4, 5, 6)]
 CTRL = Pin(7, Pin.OPEN_DRAIN, value=1)
 CLK  = Pin(8, Pin.OPEN_DRAIN, value=1)
 
-# ── mode auto-detect + health windows (ms) ──────────────────────────────────────────
-CTRL_IDLE_MS = 150   # no TH edge for this long -> back to datalink (game stopped polling)
+# ── health window (ms) ───────────────────────────────────────────────────────────────
 ON_WINDOW_MS = 500   # TH seen high within this long -> console is powered (covers a game
-                     # that holds TH low for part of each frame; static-low = off)
+                     # that holds TH low for part of each frame; static-low = off). Liveness
+                     # only now -- not used to pick the mode.
 
 # ══ DATALINK ═════════════════════════════════════════════════════════════════════════
 CTRL_START, CTRL_END = 0x1, 0x2
-OP_PRINT, OP_RENDER = 0x01, 0x02
+OP_PRINT, OP_RENDER, OP_PSG = 0x01, 0x02, 0x03
+OP_LIST = 0x20                      # Pico -> MD: track names, '\n' separated
+REQ_LIST, REQ_PLAY = 0x10, 0x11     # MD -> Pico: the autonomous player's commands
 _clk = 1
 
 
@@ -68,11 +78,210 @@ def _byte(b):
 
 
 def send(opcode, data):
+    _bus_drive()
     _xfer(True, CTRL_START)
     _byte(opcode)
     for b in data:
         _byte(b)
     _xfer(True, CTRL_END)
+    _bus_listen()
+
+
+# ══ half-duplex: LISTEN for MD-driven frames, DRIVE our replies ════════════════════════
+# In data mode the six lines default to LISTEN (inputs, pulled high) so the autonomous
+# player ROM can drive command frames back to us. To reply (list / audio / debug text) we
+# briefly DRIVE (open-drain) then hand the bus back. The MD and Pico never drive at once:
+# the ROM sends a command, flips to input, and waits for our reply.
+_rx_clk = 1
+
+
+def _bus_listen():
+    global _rx_clk
+    for p in PAYLOAD:
+        p.init(Pin.IN, Pin.PULL_UP)
+    CTRL.init(Pin.IN, Pin.PULL_UP)
+    CLK.init(Pin.IN, Pin.PULL_UP)
+    _rx_clk = CLK.value()
+
+
+def _bus_drive():
+    global _clk
+    for p in PAYLOAD:
+        p.init(Pin.OPEN_DRAIN, value=1)
+    CTRL.init(Pin.OPEN_DRAIN, value=1)
+    CLK.init(Pin.OPEN_DRAIN, value=1)
+    _clk = 1                # match the idle-HIGH line so the first _xfer toggles it LOW =
+                            # a clean START edge. Without this the first edge is a coin-flip
+                            # (carried-over parity), the ROM misses START, whole frame lost.
+
+
+def _read_bus():
+    return ((CLK.value() << 5) | (CTRL.value() << 4)
+            | PAYLOAD[0].value() | (PAYLOAD[1].value() << 1)
+            | (PAYLOAD[2].value() << 2) | (PAYLOAD[3].value() << 3))
+
+
+def _recv_md_frame():
+    """We just saw a CLK edge; read this MD-driven frame to END (or a watchdog abort) and
+    relay it to the Pi. Idle/stray edges read id=0xF, never a valid START, so they no-op."""
+    last = CLK.value()
+    started = have_hi = got_op = False
+    hi = opcode = 0
+    payload = bytearray()
+    first = True
+    idle = 0
+    while True:
+        if first:
+            first = False
+            v = _read_bus()
+        else:
+            clk = CLK.value()
+            if clk == last:
+                idle += 1
+                if idle > 40000:            # MD went quiet mid-frame -> give up
+                    return
+                continue
+            last = clk
+            idle = 0
+            v = _read_bus()
+        if (v >> 4) & 1:                     # CTRL
+            nib = v & 0x0F
+            if nib == CTRL_START:
+                started = True; have_hi = got_op = False; payload = bytearray()
+            elif nib == CTRL_END and started:
+                _relay_md(opcode, payload)
+                return
+        elif started:
+            nib = v & 0x0F
+            if not have_hi:
+                hi = nib; have_hi = True
+            else:
+                b = (hi << 4) | nib; have_hi = False
+                if not got_op:
+                    opcode = b; got_op = True
+                else:
+                    payload.append(b)
+
+
+def _relay_md(opcode, payload):
+    """Forward an MD command to the Pi over USB (the hub answers on the same serial)."""
+    if opcode == REQ_LIST:
+        print("MD:LIST")
+    elif opcode == REQ_PLAY and len(payload) >= 1:
+        print("MD:PLAY:%d" % payload[0])
+
+
+def _md_poll():
+    """One idle tick: if the MD drove a CLK edge, receive + relay the whole frame."""
+    global _rx_clk
+    clk = CLK.value()
+    if clk == _rx_clk:
+        return
+    _recv_md_frame()
+    _rx_clk = CLK.value()
+
+
+def send_list(names_line):
+    """Drive an OP_LIST frame (track names, '\\n' separated) to the MD, at speed."""
+    payload = names_line.replace("|", "\n").encode()
+    _bus_drive()
+    _xfer_fast(True, CTRL_START)
+    _byte_fast(OP_LIST)
+    for b in payload:
+        _byte_fast(b)
+    _xfer_fast(True, CTRL_END)
+    _bus_listen()
+
+
+# ── SN76489 PSG, step-1 audio bring-up: prove pitched sound comes out of the chip
+#    over the datalink before we stream a whole VGM. OP_PSG payload = raw chip bytes,
+#    written straight to the PSG port by the ROM. A note is three bytes:
+#      tone latch  1 cc 0 dddd   (low 4 bits of the 10-bit period)
+#      tone data   0 0 dddddd    (high 6 bits of the period)
+#      volume      1 cc 1 vvvv   (attenuation, 0 = loudest, 15 = off)
+SN_CLOCK = 3579545
+
+
+def _psg_period(freq):
+    p = round(SN_CLOCK / (32 * freq))
+    return 1 if p < 1 else (1023 if p > 1023 else p)
+
+
+def psg_note(chan, freq, atten=0):
+    p = _psg_period(freq)
+    send(OP_PSG, bytes([0x80 | (chan << 5) | (p & 0x0F),
+                        (p >> 4) & 0x3F,
+                        0x80 | (chan << 5) | 0x10 | (atten & 0x0F)]))
+
+
+def psg_off(chan):
+    send(OP_PSG, bytes([0x80 | (chan << 5) | 0x1F]))   # volume = 15 (silent)
+
+
+def psg_demo():
+    for f in (261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, 523.25):
+        psg_note(0, f)                 # a C-major scale on channel 0
+        time.sleep_ms(180)
+    psg_off(0)
+    time.sleep_ms(120)
+    psg_note(0, 261.63)                # a 3-channel C-major chord
+    psg_note(1, 329.63)
+    psg_note(2, 392.0)
+    time.sleep_ms(700)
+    for c in range(3):
+        psg_off(c)
+
+
+# ── fast path for streaming real music (VGM) ──────────────────────────────────────────
+# The demo's send() holds 40ms/transfer for the 60fps ROM. Music needs hundreds of writes/s
+# (Green Hill Zone peaks ~345/s), so the ROM has a tight psg_stream() loop and we clock as
+# fast as MicroPython will: no sleeps -- setting the 4 data + CTRL pins (~tens of us) is
+# itself the settle before CLK toggles, and the ROM polls far tighter than that.
+def _xfer_fast(is_ctrl, nib):
+    global _clk
+    for i in range(4):
+        PAYLOAD[i].value((nib >> i) & 1)
+    CTRL.value(1 if is_ctrl else 0)
+    time.sleep_us(20)          # settle: data stable before the clock edge
+    _clk ^= 1
+    CLK.value(_clk)
+    time.sleep_us(120)         # HOLD data stable AFTER the edge so the ROM reads it before
+                               # the next transfer changes the lines (this was the desync)
+
+
+def _byte_fast(b):
+    _xfer_fast(False, (b >> 4) & 0xF)
+    _xfer_fast(False, b & 0xF)
+
+
+def psg_stream():
+    """Open one OP_PSG frame (ROM drops into its tight loop) and relay a LIVE stream of PSG
+    bytes from the Pi: 2 hex chars = one byte, forwarded immediately; 'X' ends it. The Pi
+    paces the bytes to the VGM's own timing, so we just forward + self-clock. A 2s idle
+    watchdog closes the frame if the Pi stops mid-stream, so the ROM never wedges."""
+    _bus_drive()
+    _xfer_fast(True, CTRL_START)
+    _byte_fast(OP_PSG)
+    si = sys.stdin.buffer
+    p = select.poll()
+    p.register(sys.stdin, select.POLLIN)
+    hexbuf = ""
+    while True:
+        if not p.poll(2000):
+            break
+        ch = si.read(1)
+        if not ch:
+            continue
+        c = chr(ch[0])
+        if c in "0123456789abcdefABCDEF":
+            hexbuf += c
+            if len(hexbuf) == 2:
+                _byte_fast(int(hexbuf, 16))
+                hexbuf = ""
+        elif c == "X":
+            break
+    _xfer_fast(True, CTRL_END)
+    _bus_listen()
 
 
 # ══ CONTROLLER (3-button, PIO) ═══════════════════════════════════════════════════════
@@ -143,36 +352,50 @@ def _enter_controller():
 
 
 def _enter_datalink():
-    """Stop the PIO and reclaim the 6 pins for Python open-drain (datalink)."""
+    """Stop the PIO and hand the 6 pins to the datalink. Idle state is LISTEN (inputs), so
+    the autonomous player ROM can drive command frames back; a reply DRIVEs then re-listens."""
     global _sm
     if _sm is not None:
         _sm.active(0)
         _sm = None
-    for p in PAYLOAD:
-        p.init(Pin.OPEN_DRAIN, value=1)
-    CTRL.init(Pin.OPEN_DRAIN, value=1)
-    CLK.init(Pin.OPEN_DRAIN, value=1)
+    _bus_listen()
 
 
-# TH IRQ: only timestamps edges for mode-detect now -- the PIO does the fast pad driving.
-_last_edge = time.ticks_ms()
-_mode = "datalink"
+_mode = "data"   # boot default: Python owns the lines open-drain, so a datalink ROM works
+                 # immediately; a game just sees an idle pad until the hub sends MODE:CTRL.
 
 
-def _th_irq(pin):
-    global _last_edge
-    _last_edge = time.ticks_ms()
-
-
-SELECT.irq(handler=_th_irq, trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING)
-
-
-# ══ datalink command handling (data mode only; control bytes are handled in the loop) ══
-def handle(line):
+# ══ line dispatch: MODE: switches, everything else is routed by the current mode ═══════
+def _dispatch(line):
+    global _mode, _btn
     line = line.rstrip("\r\n")
     if not line:
         return
-    if line.startswith("/g"):
+    if line == "MODE:CTRL":
+        if _mode != "controller":
+            _enter_controller()
+            _mode = "controller"
+        return
+    if line == "MODE:DATA":
+        if _mode != "data":
+            _enter_datalink()
+            _mode = "data"
+        return
+    if _mode == "controller":
+        try:
+            _btn = int(line, 16) & 0xFF     # hex button mask, latest-wins
+        except ValueError:
+            return
+        _pio_feed()                         # push the new patterns to the PIO
+        return
+    # data mode: datalink opcode stream
+    if line == "/psgstream":
+        psg_stream()                    # live VGM stream follows on stdin (hex, 'X' ends)
+    elif line.startswith("/mdlist "):
+        send_list(line[8:])             # reply to the ROM's REQ_LIST with the track names
+    elif line.startswith("/psg"):
+        psg_demo()
+    elif line.startswith("/g"):
         try:
             gid = int(line[2:].strip() or "0")
         except ValueError:
@@ -194,43 +417,35 @@ def _push_health(on):
         print("md:on" if on else "md:off")
 
 
-print("datalink pico up: datalink + PIO 3-button controller, mode auto-detected off TH")
-_stdin = sys.stdin.buffer              # binary: control masks reach 0x80 (Start), text stays ASCII
+print("datalink pico up: hub-commanded mode (MODE:DATA / MODE:CTRL), boot = DATA")
+_stdin = sys.stdin.buffer              # binary read; lines are ASCII either way
 _poll = select.poll()
 _poll.register(sys.stdin, select.POLLIN)
 _buf = b""
 _last_high = time.ticks_add(time.ticks_ms(), -ON_WINDOW_MS - 1)   # start reporting 'off'
+_bus_listen()                          # data-mode idle = listen for the ROM's command frames
 try:
     while True:
-        if _poll.poll(5):
+        # MD -> Pico: the autonomous player drives REQ_LIST / REQ_PLAY back to us. Poll every
+        # spin (non-blocking on USB below) so we never miss the ROM's ~2ms-held CLK edges.
+        if _mode == "data":
+            _md_poll()
+
+        # Pi -> Pico over USB, non-blocking so the port keeps getting polled.
+        if _poll.poll(0):
             ch = _stdin.read(1)
             if ch:
-                if _mode == "controller":
-                    _btn = ch[0]                       # one byte = the whole pad, latest-wins
-                    _pio_feed()                        # push the new patterns to the PIO
-                elif ch in (b"\n", b"\r"):
-                    handle(_buf.decode("utf-8", "replace"))
-                    _buf = b""
+                if ch in (b"\n", b"\r"):
+                    if _buf:
+                        _dispatch(_buf.decode("utf-8", "replace"))
+                        _buf = b""
                 else:
                     _buf += ch
-        else:
-            time.sleep_ms(2)               # yield so mpremote can break in
 
         now = time.ticks_ms()
         if SELECT.value():
             _last_high = now
         _push_health(time.ticks_diff(now, _last_high) < ON_WINDOW_MS)
-
-        # Auto-detect: recent TH edges = a game polling = controller; else datalink. On the
-        # transition, hand the 6 pins between PIO and Python and drop any half-typed line.
-        want = "controller" if time.ticks_diff(now, _last_edge) < CTRL_IDLE_MS else "datalink"
-        if want != _mode:
-            _mode = want
-            if want == "controller":
-                _buf = b""
-                _enter_controller()
-            else:
-                _enter_datalink()
 except KeyboardInterrupt:
     _enter_datalink()
     print("datalink stopped")
