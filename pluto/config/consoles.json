@@ -15,6 +15,37 @@
     "nds",
     "n64"
   ],
+  "_statePatternsComment": "Savestate extensions per console, for cards that write them. Kept SEPARATE from savePatterns because the two go to different places: saves are canonical and shared (/saves/<console>), states are emulator/hardware-locked and never interchange, so they are siloed per node (/states/<console>/<node>). A console listed here with an empty array means 'this card may write states but we have not yet seen one' -- fill it in from a real `scan` of the card rather than guessing, the way the save extensions were derived from batocera's actual output.",
+  "statePatterns": {
+    "gb":  [],
+    "gbc": [],
+    "gba": []
+  },
+  "_saveFormatsComment": "How a file in a node's save dir is CLASSIFIED, lifted out of api.py (was hardcoded there). 'state*' = emulator savestates: hardware-locked, never interchange, so they go to /states/<console>/<node>/ instead of the canonical /saves. stateContains is a SUBSTRING test because batocera numbers them .state1/.state2/...; stateSuffixes is an endswith test (.png = a savestate's thumbnail). skipDirs/skipExts are not save data at all and never leave the node.",
+  "saveFormats": {
+    "stateContains": [".state"],
+    "stateSuffixes": [".ppst", ".png"],
+    "skipDirs":      ["flatpak", "dolphin-emu"],
+    "skipExts":      [".cfg", ".txt"]
+  },
+  "_savePatternsComment": "File extensions that ARE a save, per console -- derived from what batocera actually produced in /saves (surveyed 2026-08-24), not guessed. Used to pull saves off a whole SD card by pattern instead of hard-coding each card's directory layout: walk the card, take what matches, wherever it lives. A pattern is EITHER an extension ('.srm') or an exact filename ('ss_save.bin', matched case-insensitively) -- SAROO forced the latter: its saves are SS_SAVE.BIN (internal backup RAM) and SS_MEMS.BIN (the emulated 8MB cartridge), both observed on the real card 2026-08-24, while '.bin' on that same card is also 3962 disc images totalling 117GB plus the firmware blobs. DELIBERATELY OMITTED: '.bin' as a bare extension. It is a real save extension inside batocera's saves dir (saturn yabasanshiro/backup.bin) but on a raw SD card '.bin' is also what disc images are called, so matching it there would drag in whole games. Add a card-specific extension here once a scan of that card shows what it really writes. Dreamcast is absent on purpose: its saves arrive per-file from the VMU reader and carry no extension.",
+  "savePatterns": {
+    "saturn":     [".bkr", ".bcr", ".smpc", ".brm", "ss_save.bin", "ss_mems.bin"],
+    "megadrive":  [".srm"],
+    "gb":         [".sav", ".srm"],
+    "gbc":        [".sav", ".srm"],
+    "gba":        [".sav", ".srm"],
+    "megacd":     [".bkr", ".bcr", ".smpc", ".brm"],
+    "snes":       [".srm"],
+    "psx":        [".srm"],
+    "pcenginecd": [".srm"],
+    "sufami":     [".srm"],
+    "wswan":      [".srm"],
+    "wswanc":     [".srm"],
+    "n64":        [".fla", ".eep", ".sra", ".mpk"],
+    "nds":        [".dsv"],
+    "mame":       [".nv"]
+  },
   "nodeConsoles": {
     "dc":        ["dreamcast"],
     "vmu":       ["dreamcast"],

@@ -99,6 +99,17 @@ paths:
       summary: Open a node's workspace
       parameters: [{ name: node, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: OK } }
+  /sd/{node}:
+    post:
+      tags: [nodes]
+      summary: Back up a node's SD/flash card to the cloud (upload only)
+      description: >
+        Reads the card whose volume label is the node's SD_LABEL, via the Pi hub, and
+        uploads matching files to /saves/<console> (and /states/<console>/<node> for
+        savestates). Separate from /sync/{node} because it needs the card physically in
+        the hub. Nothing is ever written back to the card.
+      parameters: [{ name: node, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
   /native/{node}/{action}:
     post:
       tags: [nodes]

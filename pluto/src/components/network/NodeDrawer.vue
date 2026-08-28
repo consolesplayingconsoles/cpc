@@ -42,6 +42,17 @@ const emit = defineEmits<{
 const syncing = ref(false)
 function doSync() { emit('sync'); syncing.value = true; setTimeout(() => { syncing.value = false }, 2000) }
 
+// SD back-up is its OWN button, not part of "Back up saves": it needs the card to be
+// physically in the Pi hub, so it has a different precondition and a different failure
+// mode. Shown only when the node declares an SD_LABEL.
+const sdBacking = ref(false)
+function doSdBackup() {
+  sdBacking.value = true
+  fetch(`${API_BASE}/sd/${props.id}`, { method: 'POST' })
+    .catch(() => { /* the chat feed reports the outcome either way */ })
+    .finally(() => setTimeout(() => { sdBacking.value = false }, 2000)) 
+}
+
 // Files (SMB) need the node reachable. DEPLOY does not: it's a dev action (SSH push or
 // USB flash) that may target an offline box on purpose — let it run and surface any
 // error in the console rather than pre-disabling it.
@@ -271,6 +282,11 @@ function postCommand(text: string) {
            rest as unbuilt. -->
       <section v-if="!node.cloud" class="nd__sec">
         <p class="nd__lbl">Saves</p>
+        <UiActionRow v-if="node.sd" :disabled="sdBacking" @click="doSdBackup">
+          <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M9 3v5h4"/></svg>
+          <span>Back up SD card ({{ node.sd }})</span>
+          <span v-if="sdBacking" class="nd__act-note">Started…</span>
+        </UiActionRow>
         <UiActionRow :disabled="syncing" @click="doSync">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v6h-6"/></svg>
           <span>Back up saves</span>

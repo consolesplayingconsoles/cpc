@@ -181,7 +181,10 @@ def _sync_server(cfg, stop):
                 target = (body.get("target") or "").strip()
                 text = body.get("text") or ""
                 ctl_byte = body.get("byte")
-                reply = _handle_sync(action, target, cfg, text=text, byte=ctl_byte)
+                reply = _handle_sync(action, target, cfg, text=text, byte=ctl_byte,
+                                     label=(body.get("label") or "").strip(),
+                                     sub_path=(body.get("path") or "").strip(),
+                                     exts=body.get("exts"))
             except Exception as exc:
                 reply = {"error": "sync handler crashed: %s" % exc}
             data = _json.dumps(reply).encode()
@@ -297,7 +300,7 @@ def _genesis_health_server(cfg, stop):
     srv.server_close()
 
 
-def _handle_sync(action, target, cfg, text="", byte=None):
+def _handle_sync(action, target, cfg, text="", byte=None, label="", sub_path="", exts=None):
     """Dispatch a sync/list request. Returns {"message": ...} or {"error": ...}."""
     if action == "datalink":
         return _datalink_write(cfg, text)
@@ -305,6 +308,16 @@ def _handle_sync(action, target, cfg, text="", byte=None):
         return _datalink_write_byte(cfg, byte)
     if not target:
         return {"error": "no target specified -- try @dropbox %s @vmu" % action}
+    if target == "sd":
+        if action == "labels":
+            return _sd_labels()
+        if action == "scan":
+            return _sd_scan(label)
+        if action == "collect":
+            return _sd_collect(label, exts)
+        if action == "eject":
+            return _sd_eject(label)
+        return _sd_inspect(label, sub_path)
     if target == "vmu":
         if action == "console-list":
             return _console_list_vmu()
@@ -452,6 +465,287 @@ def _discover_vmu():
         return "DreamPicoPort" in out
     except Exception:
         return False
+
+
+def _blkid_labels():
+    """{label: device} for every attached volume, straight from blkid.
+
+    /dev/disk/by-label is NOT sufficient on its own: udev only makes a symlink for a
+    proper volume-label directory entry, so a card carrying only a FAT BOOT-SECTOR label
+    (blkid reports it as LABEL_FATBOOT -- a real GDEMU card does exactly this) is
+    completely invisible there while being perfectly readable. Ask blkid, which is what
+    udev derives from, and accept either spelling.
+    """
+    import subprocess as _sp
+    out = {}
+    try:
+        r = _sp.run(["sudo", "blkid", "-o", "export"], capture_output=True, text=True, timeout=15)
+    except Exception:
+        return out
+    dev, label = "", ""
+    for line in (r.stdout or "").split("\n"):
+        line = line.strip()
+        if not line:
+            if dev and label:
+                out.setdefault(label, dev)
+            dev, label = "", ""
+            continue
+        k, _, v = line.partition("=")
+        if k == "DEVNAME":
+            dev = v
+        elif k in ("LABEL", "LABEL_FATBOOT") and not label:
+            label = v
+    if dev and label:
+        out.setdefault(label, dev)
+    return out
+
+
+def _sd_labels():
+    """Every labelled volume currently attached, so a wrong SD_LABEL is DIAGNOSABLE.
+
+    Without this a typo'd label and an unplugged card look identical from Pluto: both
+    just say "not there". Listing what IS present turns a confusing evening into an
+    obvious one.
+    """
+    return {"labels": sorted(_blkid_labels().keys())}
+
+
+# Cards mount HERE and stay mounted, rather than under /tmp for the life of one call:
+# the dir is exported over SMB, so a card you plugged in is browsable from your desktop
+# instead of appearing only for the fraction of a second an action holds it.
+_SD_MOUNT_ROOT = "/mnt/cpc-sd"
+
+
+def _sd_mount(label):
+    """Attach the volume with this LABEL read-only -> (mountpoint, we_mounted_it, error).
+
+    Pluto owns the node config and passes the label down, so the Pi never needs to know
+    which console this is, nor which /dev the card landed on -- udev maintains
+    /dev/disk/by-label and the symlink appears/disappears with the card, so its existence
+    IS the "is it plugged in" test.
+
+    READ ONLY, always: a backup must never be able to alter the card it reads. If
+    something already mounted it, reuse that mountpoint (a second mount just fails) and
+    leave it alone afterwards.
+    """
+    import os as _os, subprocess as _sp
+    if not label:
+        return None, False, {"error": "no label given -- Pluto must pass the node's SD_LABEL"}
+    # by-label first (cheap), then blkid, which also sees boot-sector-only labels.
+    link = "/dev/disk/by-label/" + label
+    dev = _os.path.realpath(link) if _os.path.exists(link) else ""
+    if not dev:
+        found = _blkid_labels()
+        dev = found.get(label) or next(
+            (d for l, d in found.items() if l.lower() == label.lower()), "")
+    if not dev:
+        seen = sorted(_blkid_labels().keys())
+        return None, False, {"present": False, "label": label, "labels_seen": seen,
+                             "error": "no volume labelled '%s' attached (seen: %s)"
+                                      % (label, ", ".join(seen) or "none")}
+    existing = ""
+    try:
+        with open("/proc/mounts") as mf:
+            for line in mf:
+                parts = line.split()
+                if len(parts) > 1 and parts[0] == dev:
+                    existing = parts[1].replace("\\040", " ")
+                    break
+    except Exception:
+        pass
+    if existing:
+        return existing, False, None
+    mnt = _SD_MOUNT_ROOT + "/" + "".join(c for c in label if c.isalnum() or c in "-_")
+    try:
+        _sp.run(["sudo", "mkdir", "-p", mnt], timeout=10, capture_output=True)
+        r = _sp.run(["sudo", "mount", "-o", "ro", dev, mnt],
+                    capture_output=True, text=True, timeout=15)
+        if r.returncode != 0:
+            return None, False, {"error": "mount failed for %s (%s): %s"
+                                          % (label, dev, r.stderr.strip())}
+    except Exception as exc:
+        return None, False, {"error": "mount failed for %s: %s" % (label, exc)}
+    return mnt, True, None
+
+
+def _sd_unmount(mnt, ours):
+    """Deliberately does NOTHING for a card we mounted.
+
+    Cards are left mounted (read-only) so the SMB share is useful and the next action
+    reuses the mount instead of re-mounting. Use the explicit 'eject' action before
+    pulling a card. Kept as a function so the call sites still read honestly.
+    """
+    return
+
+
+def _sd_eject(label):
+    """Unmount a card so it can be pulled. Read-only mounts make this a tidiness step,
+    not a data-safety one, but a stale mountpoint confuses everything that follows."""
+    import os as _os, subprocess as _sp
+    if not label:
+        return {"error": "no label given"}
+    mnt = _SD_MOUNT_ROOT + "/" + "".join(c for c in label if c.isalnum() or c in "-_")
+    if not _os.path.ismount(mnt):
+        return {"message": "%s is not mounted." % label}
+    r = _sp.run(["sudo", "umount", mnt], timeout=15, capture_output=True, text=True)
+    if r.returncode != 0:
+        return {"error": "eject failed: %s" % r.stderr.strip()}
+    return {"message": "%s unmounted -- safe to pull." % label}
+
+
+def _sd_inspect(label, sub_path=""):
+    """One directory of the card, read-only. Use 'scan' to see the whole thing."""
+    import os as _os
+    mnt, ours, err = _sd_mount(label)
+    if err:
+        return err
+    try:
+        base = _os.path.normpath(_os.path.join(mnt, sub_path.lstrip("/"))) if sub_path else mnt
+        if not base.startswith(mnt):
+            return {"error": "path escapes the card"}
+        if not _os.path.exists(base):
+            return {"error": "%s not found on %s" % (sub_path, label)}
+        entries = []
+        for name in sorted(_os.listdir(base)):
+            fp = _os.path.join(base, name)
+            try:
+                entries.append({"name": name, "dir": _os.path.isdir(fp),
+                                "size": (0 if _os.path.isdir(fp) else _os.path.getsize(fp))})
+            except Exception:
+                continue
+        return {"present": True, "label": label, "path": sub_path or "/", "entries": entries}
+    except Exception as exc:
+        return {"error": "SD read failed: %s" % exc}
+    finally:
+        _sd_unmount(mnt, ours)
+
+
+_SD_SCAN_CAP = 40000
+
+
+def _sd_scan(label, small_bytes=262144):
+    """Walk the WHOLE card and describe its shape, so its layout can be DEFINED.
+
+    A single directory listing is not enough: these cards have many directories and the
+    interesting part is which file TYPES live where. Returns per-directory totals and an
+    extension inventory rather than every filename, because a card is mostly ROMs and the
+    saves we are hunting are the small files hiding among them -- hence `small` samples,
+    which is where save data actually shows up.
+    """
+    import os as _os
+    mnt, ours, err = _sd_mount(label)
+    if err:
+        return err
+    try:
+        dirs, exts, small = {}, {}, []
+        total_files = total_bytes = small_total = 0
+        truncated = False
+        for base, _sub, files in _os.walk(mnt):
+            rel = _os.path.relpath(base, mnt)
+            rel = "/" if rel == "." else "/" + rel.replace("\\", "/")
+            d_count = d_bytes = 0
+            for fn in files:
+                if total_files >= _SD_SCAN_CAP:
+                    truncated = True
+                    break
+                fp = _os.path.join(base, fn)
+                try:
+                    sz = _os.path.getsize(fp)
+                except Exception:
+                    continue
+                total_files += 1; total_bytes += sz
+                d_count += 1; d_bytes += sz
+                ext = (_os.path.splitext(fn)[1] or "(none)").lower()
+                e = exts.setdefault(ext, {"count": 0, "bytes": 0, "examples": []})
+                e["count"] += 1; e["bytes"] += sz
+                if len(e["examples"]) < 3:
+                    e["examples"].append((rel.rstrip("/") + "/" + fn).replace("//", "/"))
+                if sz <= small_bytes:
+                    small_total += 1
+                    if len(small) < 400:
+                        small.append({"path": (rel.rstrip("/") + "/" + fn).replace("//", "/"),
+                                      "size": sz})
+            dirs[rel] = {"files": d_count, "bytes": d_bytes}
+            if truncated:
+                break
+        return {"present": True, "label": label,
+                "totals": {"files": total_files, "bytes": total_bytes,
+                           "dirs": len(dirs), "truncated": truncated},
+                "dirs": dirs,
+                "extensions": dict((k, v) for k, v in sorted(
+                    exts.items(), key=lambda kv: -kv[1]["bytes"])),
+                # A sampled list that silently stops at 400 reads as "that is all of
+                # them", so say how many actually matched.
+                "small_files": sorted(small, key=lambda x: x["path"]),
+                "small_matched": small_total,
+                "small_truncated": small_total > len(small)}
+    except Exception as exc:
+        return {"error": "SD scan failed: %s" % exc}
+    finally:
+        _sd_unmount(mnt, ours)
+
+
+_SD_COLLECT_CAP = 64 * 1024 * 1024      # a save set is small; this is a runaway guard
+
+
+def _sd_collect(label, exts):
+    """Recursively take every file on the card matching these extensions.
+
+    No per-card layout knowledge is needed: we know what a console's save files LOOK
+    like, so walk the whole card and take whatever matches, wherever it happens to live.
+    Pluto passes the pattern set down (it owns the console config), so the Pi stays
+    generic and works the same for the next card.
+
+    Read-only. Skips rather than truncating silently once the match set gets implausibly
+    large, which would mean the patterns are too broad (matching ROMs, not saves).
+    """
+    import base64 as _b64, os as _os
+    # A pattern is either an EXTENSION (".srm") or an exact FILENAME ("SS_SAVE.BIN").
+    # Extensions alone cannot express SAROO: its saves are SS_SAVE.BIN / SS_MEMS.BIN,
+    # while ".bin" is also every disc image on the card and its firmware blobs.
+    pats = [str(e).lower() for e in (exts or []) if str(e).strip()]
+    want_ext  = set(e for e in pats if e.startswith("."))
+    want_name = set(e for e in pats if not e.startswith("."))
+    if not (want_ext or want_name):
+        return {"error": "no patterns given -- Pluto must pass the console's save patterns"}
+    mnt, ours, err = _sd_mount(label)
+    if err:
+        return err
+    try:
+        out, total, skipped = [], 0, 0
+        for base, _sub, files in _os.walk(mnt):
+            for fn in sorted(files):
+                low = fn.lower()
+                # macOS leaves AppleDouble twins next to real files; they are not saves.
+                if low.startswith("._"):
+                    continue
+                if low not in want_name and _os.path.splitext(low)[1] not in want_ext:
+                    continue
+                fp = _os.path.join(base, fn)
+                try:
+                    sz = _os.path.getsize(fp)
+                except Exception:
+                    continue
+                if total + sz > _SD_COLLECT_CAP:
+                    skipped += 1
+                    continue
+                try:
+                    with open(fp, "rb") as f:
+                        data = f.read()
+                except Exception:
+                    skipped += 1
+                    continue
+                rel = _os.path.relpath(fp, mnt).replace("\\", "/")
+                out.append({"path": rel, "size": sz,
+                            "data": _b64.b64encode(data).decode("ascii")})
+                total += sz
+        return {"present": True, "label": label, "matched": len(out),
+                "bytes": total, "skipped": skipped,
+                "patterns": sorted(want_ext | want_name), "files": out}
+    except Exception as exc:
+        return {"error": "SD collect failed: %s" % exc}
+    finally:
+        _sd_unmount(mnt, ours)
 
 
 def _read_vmu_image():
