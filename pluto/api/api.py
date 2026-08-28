@@ -2398,11 +2398,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     pi_cfg = self.__class__.node_roster.get("pi", {})
                     threading.Thread(target=_datalink_send, args=(pi_cfg, content), daemon=True).start()
                 return
-            if node_id == "megadrive" and hit == "audio":
-                # step-1 PSG bring-up: relay the datalink /psg command (scale + chord).
-                pi_cfg = self.__class__.node_roster.get("pi", {})
-                threading.Thread(target=_datalink_send, args=(pi_cfg, "/psg"), daemon=True).start()
-                return
             if node_id == "dropbox" and hit == "cloud":
                 threading.Thread(target=_dropbox_dispatch,
                                  args=(hit, text, self.__class__.node_roster,
