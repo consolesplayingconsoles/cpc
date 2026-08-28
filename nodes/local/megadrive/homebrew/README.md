@@ -75,17 +75,18 @@ it transmits. Type plain text to print it, or `/g 0` / `/g 1` to render a graphi
 
 ## Build and run
 
-Build any ROM with the SGDK Docker image (no local toolchain needed):
+Build any ROM with `build.sh` (SGDK Docker image, no local toolchain):
 
 ```
-cd datalink
-docker run --rm -v "$PWD":/src ghcr.io/stephane-d/sgdk
+./build.sh                             # the usual: -> datalink/out/cpc-player.bin
+./build.sh room                        # another ROM: -> room/out/room.bin
 ```
 
-SGDK writes `out/rom.bin`. Copy it to a descriptive name before it hits the SD
-card (everything on the card is a ROM), e.g. `cp out/rom.bin out/datalink.bin`.
-Build under this repo path: Docker file sharing does not reach the system temp
-directory.
+It starts Colima if the Docker daemon is down, runs the build, and stamps the
+descriptive copy (SGDK's makefile always emits `out/rom.bin`; the named copy is
+what goes on the SD, since everything on the card is a ROM). The output name
+defaults to the ROM-dir name. Build under this repo path: Docker file sharing
+does not reach the system temp directory.
 
 Then run the Pico sender and type:
 
