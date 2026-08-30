@@ -1,0 +1,3 @@
+[submodule "nodes/local/megadrive/homebrew/mods/sonic1/s1disasm"]
+	path = nodes/local/megadrive/homebrew/mods/sonic1/s1disasm
+	url = https://github.com/consolesplayingconsoles/s1disasm.git

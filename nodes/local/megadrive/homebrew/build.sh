@@ -3,16 +3,22 @@
 # SGDK's makefile always emits out/rom.bin; this stamps a descriptive copy so the file on
 # the SD says what it is (everything on the card is a ROM), and can't drift out of date.
 #
-# Usage (from anywhere):  ./build.sh [rom-dir] [output-name.bin]
-#   ./build.sh                 -> datalink/out/cpc-player.bin  (the usual, zero args)
-#   ./build.sh room            -> room/out/room.bin
-#   ./build.sh datalink x.bin  -> datalink/out/x.bin
+# SGDK projects live under games/ (homebrew) and tools/ (infrastructure); this resolves a
+# project by name across both. ROM hacks under mods/ are NOT SGDK -- each has its own build.sh.
+#
+# Usage (from anywhere):  ./build.sh [project] [output-name.bin]
+#   ./build.sh                 -> tools/datalink/out/cpc-player.bin  (the usual, zero args)
+#   ./build.sh room            -> games/room/out/room.bin
+#   ./build.sh datalink x.bin  -> tools/datalink/out/x.bin
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 rom="${1:-datalink}"                       # default: the ROM we iterate on
-dir="$here/$rom"
-[ -d "$dir/src" ] || { echo "no ROM at $dir (expected a src/ dir)"; exit 1; }
+dir=""
+for parent in games tools; do              # SGDK projects live under these
+  [ -d "$here/$parent/$rom/src" ] && dir="$here/$parent/$rom" && break
+done
+[ -n "$dir" ] || { echo "no SGDK project '$rom' under games/ or tools/ (mods/ build themselves)"; exit 1; }
 if   [ -n "${2:-}" ];          then out="$2"
 elif [ "$rom" = "datalink" ];  then out="cpc-player.bin"   # its canonical SD name
 else                                out="$rom.bin"
