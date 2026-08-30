@@ -28,7 +28,7 @@ BossMarble_SineCounter:	equ objoff_3F				; sine counter for bobbing motion
 ; it as the flame-gun reload counter. (objoff_34 aliases the boss self-pointer
 ; ParentObj and was NOT a reliable zero, hence an earlier no-fire bug.)
 mz_fire_reload:		equ obSubtype				; post-shot freeze counter (no move + no fire)
-mz_reload_frames:	equ 120					; 2s frozen after each shot: real commitment, and hides the render seams
+mz_reload_frames:	equ 48					; 0.8s frozen after each shot (snappy: fire's away, back in the fight)
 ; ===========================================================================
 
 BossMarble_ObjData:
