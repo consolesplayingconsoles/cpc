@@ -1,99 +1,45 @@
 # Mega Drive Homebrew
 
-Homebrew ROMs for the Mega Drive node. The headline use is the **data channel**:
-the console's controller port is repurposed as a parallel data bus so a Pico can
-stream data into a running ROM. Port 2 is the permanent data port (port 1 stays
-free for a real pad).
+Mega Drive ROMs for the Mega Drive node: from-scratch homebrew, ROM hacks of
+existing games, and the tooling that supports them. Everything that lands on the
+SD card is a ROM, named descriptively so the file says what it is.
 
-## Hardware
-
-A Pico drives the DE-9 controller lines through two BSS138 level shifters. Both
-shifter references must be powered: HV rail from the console's +5V (pin 5), LV
-rail from the Pico's 3V3. Ground is common (pin 8 to Pico GND).
-
-Confirmed GPIO to port mapping (verified with `porttest`):
-
-| Pico GPIO | DE-9 pin | Console read bit | Role in data channel |
-|-----------|----------|------------------|----------------------|
-| GP3 | 1 | bit0 | payload bit 0 |
-| GP4 | 2 | bit1 | payload bit 1 |
-| GP5 | 3 | bit2 | payload bit 2 |
-| GP6 | 4 | bit3 | payload bit 3 |
-| GP7 | 6 | bit4 | CTRL flag |
-| GP8 | 9 | bit5 | CLK (self-clock) |
-| GP2 | 7 | bit6 | SELECT (console output, unused in v0) |
-
-The ROM reads port 2 at `0xA10005` (data) and `0xA1000B` (direction). A line
-pulled low reads as 0, released (high) reads as 1, so the Pico sets each bit
-directly (no inversion).
-
-Wire colors are non-standard and specific to this cable. Trust the GPIO to bit
-mapping, not the colors.
-
-## Protocol (v0)
-
-Self-clocked: the Pico toggles CLK (bit5) on every transfer. The ROM latches the
-other bits on each CLK edge. One transfer carries a 4-bit payload plus the CTRL
-flag.
-
-Per transfer:
-* CTRL = 1: framing symbol. Payload id `0x1` = START, `0x2` = END.
-* CTRL = 0: data nibble. Two nibbles (high first) rebuild one byte.
-
-Message frame:
+## Layout
 
 ```
-START  ->  [opcode byte]  ->  [payload bytes...]  ->  END
+games/    from-scratch homebrew (SGDK)
+mods/     ROM hacks of existing games (each owns its base + build)
+tools/    shared tooling / infrastructure
 ```
 
-The first byte after START is the **opcode** (instruction id), so the format
-expands without touching the transport. Defined so far:
+- **games/** — [`room/`](games/room), a walkable room built with SGDK.
+- **mods/** — [`sonic1/`](mods/sonic1), Sonic 1 ROM hacks over a shared
+  disassembly. First hack: **Random Green Hill** (endless, seed-randomised Green
+  Hill with infinite lives and a drop-a-badnik double jump).
+- **tools/** — [`datalink/`](tools/datalink), the **data channel**: the console's
+  controller port repurposed as a parallel data bus so a Pico can stream data into
+  a running ROM. This is the transport the homebrew builds on.
 
-| Opcode | Meaning | Payload |
-|--------|---------|---------|
-| 0x01 | print text | ASCII bytes |
-| 0x02 | render graphic | 1 id byte (0 = smiley, 1 = heart) |
+## Building
 
-Pace is roughly 40 ms per transfer, slow enough that the 60fps ROM catches every
-edge and you watch the text arrive letter by letter. Faster paces need the ROM to
-poll tighter than vsync.
-
-## ROMs
-
-### porttest
-Raw port tester. Reads both ports and shows each line's bit live, so you can
-confirm wiring by pulling lines low and watching the bit flip. Use it whenever
-the harness changes.
-
-### datalink
-The data channel receiver. Decodes the protocol above and shows the live bits,
-the current opcode, the last byte, the received text, and rendered graphics. The
-text line wipes dynamically (clears exactly what was shown, no leftovers).
-
-Its Pico sender (`pico_sender.py`) is interactive: type in the Thonny console and
-it transmits. Type plain text to print it, or `/g 0` / `/g 1` to render a graphic.
-
-## Build and run
-
-Build any ROM with `build.sh` (SGDK Docker image, no local toolchain):
+**SGDK projects (games/, tools/)** — via the SGDK Docker image, no local
+toolchain. `build.sh` resolves a project by name across `games/` and `tools/`:
 
 ```
-./build.sh                             # the usual: -> datalink/out/cpc-player.bin
-./build.sh room                        # another ROM: -> room/out/room.bin
+./build.sh            # default: tools/datalink -> out/cpc-player.bin
+./build.sh room       # games/room            -> out/room.bin
 ```
 
 It starts Colima if the Docker daemon is down, runs the build, and stamps the
-descriptive copy (SGDK's makefile always emits `out/rom.bin`; the named copy is
-what goes on the SD, since everything on the card is a ROM). The output name
-defaults to the ROM-dir name. Build under this repo path: Docker file sharing
-does not reach the system temp directory.
+descriptive copy (SGDK always emits `out/rom.bin`). Build under this repo path;
+Docker file sharing does not reach the system temp directory.
 
-Then run the Pico sender and type:
+**ROM hacks (mods/)** are not SGDK — each mod has its own `build.sh` that copies
+its game's pristine disassembly, overlays the mod's edited files, and assembles.
+See [mods/sonic1](mods/sonic1) for the pattern (and `brew install lua`, which
+those builds need).
 
-```
-# in Thonny, on the Pico wired to port 2
-datalink/pico_sender.py
-cpc> hello mega drive      -> prints on screen
-cpc> /g 0                  -> renders the smiley
-cpc> /g 1                  -> renders the heart
-```
+## More
+
+Each subproject documents itself: [games/room](games/room),
+[mods/sonic1](mods/sonic1), [tools/datalink](tools/datalink).

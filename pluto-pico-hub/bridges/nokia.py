@@ -97,7 +97,7 @@ class NokiaBridge:
     # -- read + forward -------------------------------------------------------
     def _read_loop(self):
         try:
-            ser = serial.Serial(RFCOMM_DEV, 115200, timeout=1)
+            ser = serial.Serial(RFCOMM_DEV, 115200, timeout=0.1)
             ser.dtr = True                      # wake the rfcomm link (as the AT modem needed)
             time.sleep(0.2)
             ser.reset_input_buffer()
@@ -111,7 +111,12 @@ class NokiaBridge:
         buf = b""
         while not self._stop.is_set():
             try:
-                chunk = ser.read(64)
+                # Read whatever's buffered RIGHT NOW, not a fixed 64 bytes: read(64)
+                # blocks until 64 bytes arrive or the timeout expires, so a lone
+                # keypress (a few bytes) sat hostage for a full second -- the ~3s
+                # input lag. in_waiting drains the buffer immediately; the short
+                # timeout only paces the idle spin.
+                chunk = ser.read(ser.in_waiting or 1)
             except Exception:
                 break
             if not chunk:
