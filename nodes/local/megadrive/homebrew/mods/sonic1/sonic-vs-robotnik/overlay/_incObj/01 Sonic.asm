@@ -1107,9 +1107,9 @@ Sonic_LevelBound:
 		blo.s	JumpTo_KillSonic			; if not, kill Sonic
 	else
 		cmpi.w	#id_SBZ_act2,(v_zone_act).w		; is level SBZ2?
-		bne.w	KillSonic				; if not, kill Sonic
-		cmpi.w	#$2000,(v_player+obX).w			; is Sonic far enough into the level?
-		blo.w	KillSonic				; if not, kill Sonic
+		bne.s	JumpTo_KillSonic			; sonic-vs-robotnik: route via the near redirect (was
+		cmpi.w	#$2000,(v_player+obX).w			; bne.w KillSonic, now out of range after our added
+		blo.s	JumpTo_KillSonic			; boss code); JumpTo_KillSonic does jmp (KillSonic).l
 	endif
 
 		; Transition from SBZ2 to SBZ3
@@ -1128,12 +1128,11 @@ Sonic_LevelBound:
 		bra.s	.chkbottom				; check for bottom boundary collision as well
 ; ===========================================================================
 
-	if FixBugs
-; Jump-redirect to the KillSonic subroutine, as it otherwise results in an out-of-range error
-; just from enabling FixBugs. This is also a very common beginner's trap
+; Jump-redirect to the KillSonic subroutine, as a direct branch otherwise goes out of range.
+; sonic-vs-robotnik: defined unconditionally (was `if FixBugs`) -- the FixBugs=0 bottom-boundary
+; branches now route through it too, since our added boss code pushed KillSonic out of .w range.
 JumpTo_KillSonic:
 		jmp	(KillSonic).l				; kill Sonic
-	endif
 ; End of function Sonic_LevelBound
 
 
@@ -2010,11 +2009,12 @@ Sonic_HandleDeath:
 
 		; Bottom reached, remove a life and check if game over was triggered
 		; sonic-vs-robotnik: in a boss duel, dying = you LOSE -> back to the level picker
-		cmpi.w	#id_GHZ_act3,(v_zone_act).w
-		beq.s	.vs_lose
-		cmpi.w	#id_MZ_act3,(v_zone_act).w
+		; sonic-vs-robotnik: dying in ANY boss duel = you lose -> level picker. All four
+		; duels are act 3 (v_zone_act low byte = act3/$02) and they're the ONLY levels this
+		; mod ever loads, so one act-byte check covers all four -- and frees ROM room for the
+		; Star Light ball-check fix below. (Demos are act 1, so they're unaffected.)
+		cmpi.b	#act3,(v_zone_act+1).w			; a boss duel (act 3)?
 		bne.s	.vs_normaldeath
-	.vs_lose:
 		move.b	#id_Title,(v_gamemode).w
 		rts
 	.vs_normaldeath:

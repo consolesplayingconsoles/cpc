@@ -3299,7 +3299,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         manager (the classic open-dir icon)."""
         body = self._read_json_body()
         ns = ((body or {}).get("ns") or "").strip()
-        d  = os.path.join(_dist_dir(), "translations", ns)
+        d  = os.path.join(_translations_root(), ns)
         if not ns or not os.path.isdir(d):
             self._send(404, {"error": "no such project"})
             return
@@ -3316,7 +3316,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         Path-guarded: ns must resolve to a direct child of dist/translations/."""
         body = self._read_json_body()
         ns   = ((body or {}).get("ns") or "").strip()
-        base = os.path.realpath(os.path.join(_dist_dir(), "translations"))
+        base = os.path.realpath(_translations_root())
         real = os.path.realpath(os.path.join(base, ns))
         if not ns or os.path.dirname(real) != base or not os.path.isdir(real):
             self._send(404, {"error": "no such project"})
@@ -3434,16 +3434,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, {"sources": data.get("sources", [])})
 
     def _handle_translate_run(self):
-        """POST /translate/run {path} -> run translate.sh on batocera. Blocking
+        """POST /translate/run {path, lang} -> run translate.sh on batocera. Blocking
         (~11s); the UI shows a loading state. Returns the written-back folder
-        path (the DONE: line) plus the full script log."""
+        path (the DONE: line) plus the full script log. `lang` is the target
+        language code (Pluto's LANGUAGES list) -- the FE's language picker
+        already knows it, so it's passed straight through rather than left for
+        the script to guess/default."""
         body = self._read_json_body()
         path = ((body or {}).get("path") or "").strip()
+        lang = ((body or {}).get("lang") or "").strip()
         if not path:
             self._send(400, {"error": "path required"})
             return
+        if not lang:
+            self._send(400, {"error": "lang required"})
+            return
         rc, out = self._node_ssh("batocera",
-                                 ["sh", "/userdata/cpc-scripts/translate.sh", path],
+                                 ["sh", "/userdata/cpc-scripts/translate.sh", path, lang],
                                  timeout=600)
         dest = ""
         for line in out.splitlines():

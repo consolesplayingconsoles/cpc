@@ -24,6 +24,15 @@ python3 -c "open('$DIST/startpos/ghz3.bin','wb').write(bytes([0x2A,0x00,0x03,0xB
 # $17F0 boss trigger, so Eggman descends and the flame-gun duel starts on load.
 python3 -c "open('$DIST/startpos/mz3.bin','wb').write(bytes([0x19,0x20,0x02,0x80]))"
 
+# Spring Yard 3: boss arena at boss_syz_x=$2C00; block floor sits ~Y=$556 over a pit.
+# Spawn Sonic on the blocks at X=$2CC0 (past the $2C00 camera trigger), Y=$0520 above
+# the floor so he drops onto it. (First guess -- tune Y if he clips or floats.)
+python3 -c "open('$DIST/startpos/syz3.bin','wb').write(bytes([0x2C,0xC0,0x05,0x20]))"
+
+# Star Light 3: boss arena at boss_slz_x=$2000; floor ~Y=$2C0 with the seesaws.
+# Spawn Sonic at X=$20C0 (past the $2000 trigger), Y=$0280 so he drops to the floor.
+python3 -c "open('$DIST/startpos/slz3.bin','wb').write(bytes([0x20,0xC0,0x02,0x80]))"
+
 ( cd "$DIST" && lua build.lua ) >/dev/null
 
 # ROM goes to rom/ (gitignored) — easy to grab; full Sonic 1 so never committed.

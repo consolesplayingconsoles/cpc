@@ -234,136 +234,6 @@ BMZ_ShipMove:
 		move.b	#mz_reload_frames,mz_fire_reload(a0)	; start the reload (this is obSubtype on the SHIP, a0)
 		bra.w	BMZ_ShipUpdate
 ; ===========================================================================
-BMZ_ShipMove_Index: dc.w BMZ_ChgDir-BMZ_ShipMove_Index
-		dc.w BMZ_DropFire-BMZ_ShipMove_Index
-		dc.w BMZ_ChgDir-BMZ_ShipMove_Index
-		dc.w BMZ_DropFire-BMZ_ShipMove_Index
-; ===========================================================================
-
-; loc_183CA:
-BMZ_ChgDir:
-		tst.w	obVelX(a0)				; are we currently moving horizontally?
-		bne.s	.skip					; if yes, branch
-		moveq	#$40,d0					; set up downward velocity
-		cmpi.w	#boss_mz_y+$1C,obBossY(a0)		; where are we in relation to this Y position?
-		beq.s	.swoop					; right at the target, start swooping
-		bcs.s	.above					; above the target, keep d0 positive to move down
-		neg.w	d0					; below the target, negate to move up
-
-; loc_183DE
-.above:
-		move.w	d0,obVelY(a0)
-		bra.w	BossMove
-; ===========================================================================
-
-; loc_183E6
-.swoop:
-		move.w	#$200,obVelX(a0)			; set horizontal velocity
-		move.w	#$100,obVelY(a0)			; set vertical velocity
-		btst	#0,obStatus(a0)				; are we facing to the right?
-		bne.s	.skip					; if yes, keep positive x
-		neg.w	obVelX(a0)				; no, flip leftward
-
-; loc_183FE
-.skip:
-		cmpi.b	#$18,obBossFlash(a0)			; has Eggman recently been hit? (this adds a short delay of flashing, then starts moving again)
-		bhs.s	BossMarble_MakeLava			; if yes, freeze movement
-		bsr.w	BossMove				; if no, keep moving
-		subq.w	#4,obVelY(a0)				; subtract y velocity to make his swoop do a U shape
-
-BossMarble_MakeLava:
-		subq.b	#1,BossMarble_LavaTimer(a0)		; subtract 1 from the random number storage
-		bcc.s	.checkRight				; has the frame countdown spawn timer expired? if not, branch
-		jsr	(FindFreeObj).l				; timer has expired, find a free object slot
-		bne.s	.generateTimer				; no free objects, leave early
-		_move.b	#id_LavaBall,obID(a1) 			; load lava ball object
-		move.w	#boss_mz_y+$D8,obY(a1)			; set Y position to initially spawn from
-		jsr	(RandomNumber).l
-		andi.l	#$FFFF,d0				; mask to keep lower word only
-		divu.w	#$50,d0					; divide by $50, remainder is in upper word, result is in lower (remainder is 0 to $4F)
-		swap	d0					; swap so our remainder is now in lower word
-		addi.w	#boss_mz_x+$78,d0			; add the X offset to far left boundary to "clamp" to the lava pool range
-		move.w	d0,obX(a1)				; set x position to calculated position
-		lsr.b	#7,d1					; shift whatever is in d1's first byte over by 7, to contain only 0 or 1
-
-; This line may trick you at first sight, but it actually serves two purposes. It is important to note that
-; this instruction is a move.w with an immediate size of a byte. This means that the immediate actually gets zero-extended
-; to $00FF. Object offsets in Sonic 1 are a single byte in size. The 68000 is also big endian, meaning the high byte gets written first.
-; 00 gets written to objoff_28 (obSubtype) and FF gets written to objoff_29 which is used for a single check to adjust render priority in 14 Lava Ball.asm
-; So, this is NOT setting the subtype to FF, rather it is writing two bytes used for the lava flame in one instruction to save some time.
-		move.w	#$FF,obSubtype(a1)
-
-
-; loc_1844A
-.generateTimer:
-		jsr	(RandomNumber).l			; use d1 as a pseudo-random seeder for d0
-		andi.b	#$1F,d0					; mask to $1F
-		addi.b	#$40,d0					; add $40, forcing range to be $40-$5F
-		move.b	d0,BossMarble_LavaTimer(a0)		; store new countdown timer
-
-; loc_1845C
-.checkRight:
-		btst	#0,obStatus(a0)				; are we facing to the right?
-		beq.s	.checkLeft				; no, branch
-		cmpi.w	#boss_mz_x+$110,obBossX(a0)		; are we at the right side of the screen?
-		blt.s	.exit					; if not, branch
-		move.w	#boss_mz_x+$110,obBossX(a0)		; set x position to rightmost side of the screen (clamp)
-		bra.s	.rise
-; ===========================================================================
-
-; loc_18474
-.checkLeft:
-		cmpi.w	#boss_mz_x+$30,obBossX(a0)		; are we at the left side of the screen?
-		bgt.s	.exit					; if not, branch
-		move.w	#boss_mz_x+$30,obBossX(a0)		; set x position to leftmost side of the screen (clamp)
-
-; loc_18482
-.rise:
-		clr.w	obVelX(a0)				; stop horizontal movement
-		move.w	#-$180,obVelY(a0)			; start rising upwards
-		cmpi.w	#boss_mz_y+$1C,obBossY(a0)		; are we high enough?
-		bhs.s	.advance				; if not, branch
-		neg.w	obVelY(a0)				; yes, we are above target, go down
-
-; loc_18498
-.advance:
-		addq.b	#2,obSubtype(a0)			; increment to go to next routine
-
-; locret_1849C
-.exit:
-		rts
-; ===========================================================================
-
-; BossMarble_MakeLava2:
-BMZ_DropFire:
-		bsr.w	BossMove
-		move.w	obBossY(a0),d0				; copy y position to d0
-		subi.w	#boss_mz_y+$1C,d0			; subtract y position with upper bound
-		bgt.s	.exit					; still rising upwards, exit
-		move.w	#boss_mz_y+$1C,d0			; reached the upper bound (clamp)
-		tst.w	obVelY(a0)				; are we moving vertically at all?
-		beq.s	.skip					; if not, branch
-		clr.w	obVelY(a0)				; stop vertical movement
-		move.w	#80,BossMarble_GenericTimer(a0)		; set a timer for 80 frames
-		bchg	#0,obStatus(a0)				; flip direction so that his back is to the screen bound
-		jsr	(FindFreeObj).l				; are there any free objects?
-		bne.s	.skip					; no, leave early
-		move.w	obBossX(a0),obX(a1)			; copy boss positions to object positions
-		move.w	obBossY(a0),obY(a1)
-		addi.w	#$18,obY(a1)				; set offset to lower object
-		move.b	#id_BossFire,obID(a1)			; load lava ball object
-		move.b	#1,obSubtype(a1)			; set subtype to 1
-
-; loc_184EA
-.skip:
-		subq.w	#1,BossMarble_GenericTimer(a0)		; has the timer hit 0?
-		bne.s	.exit					; if not, branch
-		addq.b	#2,obSubtype(a0)			; increment the routine counter
-
-;locret_184F4
-.exit:
-		rts
-; ===========================================================================
 
 ; loc_184F6:
 BMZ_Explode:
@@ -612,7 +482,13 @@ BossFire_Main:		; Routine 0
 		move.b	#16/2,obHeight(a0)			; set object height and width
 		move.b	#16/2,obWidth(a0)
 		move.l	#Map_Fire,obMap(a0)			; load mappings, graphics, and set render style
-		move.w	#ArtTile_MZ_Fireball,obGfx(a0)
+		; sonic-vs-robotnik: Eggman's fire art lives at $530, NOT the vanilla $345. On the Swiss
+		; Army Knife (Spring Yard) arena, $345 is a real Spring Yard background tile, so loading fire
+		; there corrupted the sky. $530-$535 is a free 6-tile gap in every boss arena (between the
+		; exhaust art at $52A-$52C and the shield art at $541, and clear of the title-card font at
+		; $560+). PLC_MZ + PLC_SwissFire both load Nem_MzFire there. (Byte-neutral vs the vanilla
+		; move -- keeps the KillSonic branch in range.) The MZ lava balls still use $345.
+		move.w	#$530,obGfx(a0)
 		move.b	#sprite_cam_field,obRender(a0)
 		move.b	#5,obPriority(a0)			; set render priority (to allow to hide behind lava)
 		move.w	obY(a0),obBossY(a0)			; copy Y
@@ -639,8 +515,15 @@ BossFire_Action:	; Routine 2
 		jsr	(SpeedToPos).l				; calculate speed based on velocity
 		lea	(Ani_Fire).l,a1				; load animations and send them off to be ran
 		jsr	(AnimateSprite).l
-		cmpi.w	#boss_mz_y+$D8,obY(a0)			; has the fire fallen into the lava (this routine is shared due to sub routine index above)
-		bhi.s	BossFire_Delete				; if so, delete
+		; sonic-vs-robotnik: arena-aware "fell past the floor" delete. On the Swiss Army
+		; Knife (Spring Yard arena) the floor sits much lower than Marble's lava.
+		move.w	#boss_mz_y+$D8,d1			; Marble lava level
+		cmpi.w	#id_SYZ_act3,(v_zone_act).w		; Spring Yard (bonus) arena?
+		bne.s	.floorset
+		move.w	#boss_syz_y+$D8,d1			; Spring Yard floor level
+	.floorset:
+		cmp.w	obY(a0),d1				; has the fire fallen past it?
+		bcs.s	BossFire_Delete				; if obY > threshold, delete
 	if FixBugs
 		; DisplaySprite has been moved to avoid a display-after-free bug.
 		jmp	(DisplaySprite).l
@@ -727,7 +610,12 @@ BossFire_Duplicate:	; sub Routine 4
 		tst.w	d1					; is the object on the floor?
 		bpl.s	.advance2ndRout				; if not, leave and go to FallEdge
 		move.w	obX(a0),d0				; copy X
-		cmpi.w	#boss_mz_x+$140,d0			; has the flame traveled past the right boundary (left screen boundary isn't checked since the level has a gap here)?
+		move.w	#boss_mz_x+$140,d1			; sonic-vs-robotnik: Marble right spread bound
+		cmpi.w	#id_SYZ_act3,(v_zone_act).w		; ...or the Spring Yard (bonus) arena?
+		bne.s	.rbset
+		move.w	#boss_syz_x+$140,d1			; Spring Yard right bound
+	.rbset:
+		cmp.w	d1,d0					; has the flame traveled past the right boundary?
 		bgt.s	.advanceRout				; if so, branch to get ready for deletion
 		move.w	obBossX(a0),d1				; copy position
 		cmp.w	d0,d1					; is the current X the same as the last X?
