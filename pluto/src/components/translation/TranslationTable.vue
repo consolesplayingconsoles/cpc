@@ -829,7 +829,7 @@ async function runBuild() {
   building.value = true; buildMsg.value = ''; buildFailed.value = false
   const startedAt = Date.now()
   try {
-    const data = await translationApi.run(curPath.value)
+    const data = await translationApi.run(curPath.value, selLang.value)
     if (data.error) {
       buildFailed.value = true
       buildMsg.value = `Build failed: ${data.error}`.slice(0, 80)

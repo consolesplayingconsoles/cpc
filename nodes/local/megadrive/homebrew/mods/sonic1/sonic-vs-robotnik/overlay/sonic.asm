@@ -2298,41 +2298,16 @@ PlayLevel:
 ; ---------------------------------------------------------------------------
 
 LevSel_Ptrs:
-		dc.w id_GHZ_act3	; sonic-vs-robotnik: GHZ1/GHZ2 removed from the picker; GHZ3 (the boss) is row 0
-	if Revision=0
-		; old level order
-		dc.w id_LZ_act1
-		dc.w id_LZ_act2
-		dc.w id_LZ_act3
-		dc.w id_MZ_act1
-		dc.w id_MZ_act2
-		dc.w id_MZ_act3
-		dc.w id_SLZ_act1
-		dc.w id_SLZ_act2
-		dc.w id_SLZ_act3
-		dc.w id_SYZ_act1
-		dc.w id_SYZ_act2
-		dc.w id_SYZ_act3
-	else
-		; correct level order
-		; sonic-vs-robotnik: MZ1/MZ2 removed -- only the boss act (MZ3) is a duel
-		dc.w id_MZ_act3
-		dc.w id_SYZ_act1
-		dc.w id_SYZ_act2
-		dc.w id_SYZ_act3
-		dc.w id_LZ_act1
-		dc.w id_LZ_act2
-		dc.w id_LZ_act3
-		dc.w id_SLZ_act1
-		dc.w id_SLZ_act2
-		dc.w id_SLZ_act3
-	endif
-		dc.w id_SBZ_act1
-		dc.w id_SBZ_act2
-		dc.w id_LZ_act4			; Scrap Brain Zone 3
-		dc.w id_FZ			; Final Zone
-		dc.w id_SS<<8			; Special Stage (dummy value)
-		dc.w $8000			; Sound Test
+		; sonic-vs-robotnik: the boss duels where Robotnik is an active threat.
+		; Dropped: the timing/trap bosses (Labyrinth escape, Scrap Brain floor,
+		; Final tubes) -- no P2 agency. Star Light is an experiment (its ball is
+		; welded to the seesaws, so it's positional, not a free weapon).
+		dc.w id_GHZ_act3		; Green Hill  -- wrecking ball
+		dc.w id_MZ_act3			; Marble Zone -- flame gun
+		dc.w id_SYZ_act3		; Spring Yard -- block smash
+		dc.w id_SLZ_act3		; Star Light  -- seesaw ball
+		dc.w id_SYZ_act3		; SWISS ARMY KNIFE -- same arena as Spring Yard, but the
+						; boss reads v_levselitem (row 4) at spawn and goes "super"
 LevSel_PtrsEnd:	even
 
 ; ===========================================================================
@@ -2510,9 +2485,9 @@ LevSel_NoMove:
 ; Subroutine to load level select text
 ; ---------------------------------------------------------------------------
 
-levsel_line_count:	equ 17	; total number of lines (GHZ1/GHZ2 + MZ1/MZ2 removed for the boss picker)
+levsel_line_count:	equ 5	; sonic-vs-robotnik: GHZ3, MZ3, SYZ3, SLZ3 + Swiss Army Knife (row 4)
 levsel_line_length:	equ 24	; characters per line
-levsel_sndtest_row:	equ levsel_line_count-1  ; row index of the sound test
+levsel_sndtest_row:	equ 255  ; sonic-vs-robotnik: no sound test -- out of range so no row ever triggers it
 levsel_sndtest_col:	equ levsel_line_length-8 ; column offset for the sound test number
 
 levsel_start_row:	equ 4	; top tile offset for start position
@@ -2574,6 +2549,23 @@ LevSel_DrawSnd:
 		bsr.w	LevSel_ChgSnd				; draw 1st digit
 		move.b	d2,d0					; restore backup
 		bsr.w	LevSel_ChgSnd				; draw 2nd digit
+
+		; sonic-vs-robotnik: two-line brand header near the top of the picker.
+		; Reuses LevSel_ChgLine (24 chars, font maps spaces to blank tiles).
+		move.w	#levsel_white,d3			; draw in white
+		locVRAM	vram_bg+(1<<7)+(levsel_start_col<<1)	; row 1: "SONIC VS ROBOTNIK"
+		lea	(LevSel_BrandTitle).l,a1
+		bsr.w	LevSel_ChgLine
+		locVRAM	vram_bg+(2<<7)+(levsel_start_col<<1)	; row 2: "BY CPC"
+		lea	(LevSel_BrandBy).l,a1
+		bsr.w	LevSel_ChgLine
+		; sonic-vs-robotnik: player role labels in the picker's empty lower area.
+		locVRAM	vram_bg+(18<<7)+(levsel_start_col<<1)	; row 18: "PLAYER 1 - SONIC"
+		lea	(LevSel_P1).l,a1
+		bsr.w	LevSel_ChgLine
+		locVRAM	vram_bg+(20<<7)+(levsel_start_col<<1)	; row 20: "PLAYER 2 - ROBOTNIK"
+		lea	(LevSel_P2).l,a1
+		bsr.w	LevSel_ChgLine
 		rts
 ; ===========================================================================
 
@@ -2621,41 +2613,12 @@ LevelMenuText:
 	charset 'Y','Z',$0F ; Y and Z come before A-X
 	charset 'A','X',$11
 
+		; sonic-vs-robotnik: four duels + the Swiss Army Knife bonus (order matches LevSel_Ptrs)
 		dc.b "GREEN HILL ZONE         "
-	if Revision=0
-		; old level order
-		dc.b "LABYRINTH ZONE   STAGE 1"
-		dc.b "                 STAGE 2"
-		dc.b "                 STAGE 3"
-		dc.b "MARBLE ZONE      STAGE 1"
-		dc.b "                 STAGE 2"
-		dc.b "                 STAGE 3"
-		dc.b "STAR LIGHT ZONE  STAGE 1"
-		dc.b "                 STAGE 2"
-		dc.b "                 STAGE 3"
-		dc.b "SPRING YARD ZONE STAGE 1"
-		dc.b "                 STAGE 2"
-		dc.b "                 STAGE 3"
-	else
-		; correct level order
-		; sonic-vs-robotnik: MZ1/MZ2 removed -- only the boss act (MZ3) is a duel
 		dc.b "MARBLE ZONE             "
-		dc.b "SPRING YARD ZONE STAGE 1"
-		dc.b "                 STAGE 2"
-		dc.b "                 STAGE 3"
-		dc.b "LABYRINTH ZONE   STAGE 1"
-		dc.b "                 STAGE 2"
-		dc.b "                 STAGE 3"
-		dc.b "STAR LIGHT ZONE  STAGE 1"
-		dc.b "                 STAGE 2"
-		dc.b "                 STAGE 3"
-	endif
-		dc.b "SCRAP BRAIN ZONE STAGE 1"
-		dc.b "                 STAGE 2"
-		dc.b "                 STAGE 3"
-		dc.b "FINAL ZONE              "
-		dc.b "SPECIAL STAGE           "
-		dc.b "SOUND SELECT            "
+		dc.b "SPRING YARD ZONE        "
+		dc.b "STAR LIGHT ZONE         "
+		dc.b "SWISS ARMY KNIFE        "
 		even
 
 	if MOMPASS=1
@@ -2666,6 +2629,15 @@ LevelMenuText:
 			warning "LevSel_Ptrs does not match expected line count."
 		endif
 	endif
+
+	; sonic-vs-robotnik: two-line brand header (outside the size-checked menu block, charset still
+	; active). Each 24 wide so LevSel_ChgLine draws it whole; centred, spaces map to blank tiles.
+LevSel_BrandTitle:	dc.b "   SONIC VS ROBOTNIK    "
+LevSel_BrandBy:		dc.b "         BY CPC         "
+	; sonic-vs-robotnik: player role labels (24 wide, charset still active; '-' and digits valid)
+LevSel_P1:		dc.b "   PLAYER 1 - SONIC     "
+LevSel_P2:		dc.b "   PLAYER 2 - ROBOTNIK  "
+	even
 
 	charset	; reset charset to default
 	even
@@ -2802,6 +2774,14 @@ Level_BgmNotLZ4:
 Level_PlayBgm:
 		lea	(MusicList).l,a1			; load music playlist
 		move.b	(a1,d0.w),d0				; get music ID for current level
+		; sonic-vs-robotnik: the Swiss Army Knife bonus (SYZ arena, picker row 4) plays the
+		; Special Stage music instead of Spring Yard's -- extra "mindfuck" vibe for the super-boss.
+		cmpi.w	#id_SYZ_act3,(v_zone_act).w
+		bne.s	.vs_normalbgm
+		cmpi.w	#4,(v_levselitem).w
+		bne.s	.vs_normalbgm
+		move.b	#bgm_SS,d0				; Special Stage BGM (already in the ROM)
+	.vs_normalbgm:
 		bsr.w	QueueSound1				; play music
 		move.b	#id_TitleCard,(v_titlecard).w		; load title card object
 ; ---------------------------------------------------------------------------
@@ -2858,23 +2838,21 @@ Level_SkipTtlCard:
 		bsr.w	DeformLayers				; initialize background deformation
 		bset	#2,(v_fg_scroll_flags).w		; draw an extra column at the left side of the screen during level start
 		bsr.w	LevelDataLoad				; load block mappings and palettes
-		bsr.w	LoadTilesFromStart			; fully draw the foreground and background once before fade-in
-
-		; sonic-vs-robotnik: flat-sky the GHZ3 arena. Blank the whole background plane
-		; and point the backdrop colour at sky blue, so there are no GHZ background tiles
-		; to render (and no deep-spawn banding glitch) -- just calm sky behind the fight.
+		; sonic-vs-robotnik: pin the GHZ boss background to (0,0) before the draw so its nametable
+		; rows map straight to screen rows (the sky gap-fill in Level_SkipScroll relies on that).
 		cmpi.w	#id_GHZ_act3,(v_zone_act).w
-		bne.s	.vs_noflatsky
-		move.l	#$60000003,(vdp_control_port).l		; VRAM write -> BG nametable ($E000)
-		lea	(vdp_data_port).l,a6
-		moveq	#0,d0
-		move.w	#plane_size_64x32/4-1,d1
-	.vs_blank:
-		move.l	d0,(a6)					; blank every BG cell (tile 0 = transparent)
-		dbf	d1,.vs_blank
-		move.l	#$C0400000,(vdp_control_port).l		; CRAM write -> backdrop entry (line 2, col 0)
-		move.w	#$0ECA,(a6)				; light sky blue
-	.vs_noflatsky:
+		bne.s	.vs_noghzpin
+		clr.w	(v_bgscreenposx).w
+		clr.l	(v_bgscreenposy).w
+	.vs_noghzpin:
+		bsr.w	LoadTilesFromStart			; fully draw the foreground and background once before fade-in
+		; sonic-vs-robotnik: fill the GHZ gap band with sky NOW, before the fade-in, so the empty
+		; blue strip never flashes as the level fades in (the main loop keeps it filled afterward).
+		cmpi.w	#id_GHZ_act3,(v_zone_act).w
+		bne.s	.vs_noghzfill
+		clr.w	(v_bgscrposy_vdp).w
+		jsr	(GHZ_FillSky).l
+	.vs_noghzfill:
 
 		jsr	(ConvertCollisionArray).l		; call a routine that immediately returns (this is a disabled development function)
 		bsr.w	ColIndexLoad				; set collision index for current zone
@@ -2930,12 +2908,10 @@ Level_SkipClr:
 		move.b	#1,(f_ringcount).w			; update rings counter
 		move.b	#1,(f_timecount).w			; update time counter
 
-		; sonic-vs-robotnik: every boss duel is last-ring, last-life
-		cmpi.w	#id_GHZ_act3,(v_zone_act).w		; GHZ3 fight?
-		beq.s	.vs_fight
-		cmpi.w	#id_MZ_act3,(v_zone_act).w		; MZ3 fight?
+		; sonic-vs-robotnik: every boss duel/bonus is last-ring, last-life. All are act 3 (the only
+		; levels this mod loads), so one act-byte check replaces four cmpi.w.
+		cmpi.b	#act3,(v_zone_act+1).w			; a duel/bonus fight?
 		bne.s	.vs_notfight
-	.vs_fight:
 		move.w	#1,(v_rings).w				; one ring
 		move.b	#1,(v_lives).w				; one life
 		move.b	#1,(f_lifecount).w			; repaint the lives HUD (it drew "3" a moment earlier)
@@ -3010,6 +2986,33 @@ Level_ClrCardArt:
 		addi.w	#plcid_GHZAnimals,d0			; add offset to animal patterns (+$15)
 		jsr	(AddPLC).l				; load animal patterns
 
+; ---------------------------------------------------------------------------
+; sonic-vs-robotnik: paint the GHZ boss background's mountain-less gap band with a clean sky tile
+; (the act-3 boss-area layout has no distant-mountain band there). Copies a real sky tile from a
+; known sky row so the colour matches the clouds' sky exactly. Called once before fade-in (so no
+; blue strip flashes at start) and every frame in the main loop (to keep it applied).
+; ---------------------------------------------------------------------------
+GHZ_skyrow:	equ 4					; a clean-sky BG row to copy the tile from
+GHZ_gaptop:	equ 6					; first gap row to fill
+GHZ_gaprows:	equ 15					; rows to fill (down to the sea; closes the small leftover strip)
+
+GHZ_FillSky:
+		lea	(vdp_data_port).l,a6
+		move.l	#((vram_bg+GHZ_skyrow*$80)&$3FFF)<<16|((vram_bg+GHZ_skyrow*$80)&$C000)>>14,(vdp_control_port).l
+		move.w	(a6),d2					; d2 = clean sky tile (VRAM read)
+		move.l	#$40000000+(((vram_bg+GHZ_gaptop*$80)&$3FFF)<<16)+(((vram_bg+GHZ_gaptop*$80)&$C000)>>14),d5
+		moveq	#GHZ_gaprows-1,d3
+	.row:
+		move.l	d5,(vdp_control_port).l
+		move.w	#64-1,d4
+	.col:
+		move.w	d2,(a6)
+		dbf	d4,.col
+		addi.l	#$00800000,d5				; next nametable row
+		dbf	d3,.row
+		rts
+; ===========================================================================
+
 Level_StartGame:
 		bclr	#7,(v_gamemode).w			; subtract $80 from mode to end pre-level stuff
 		; enter main loop...
@@ -3049,6 +3052,25 @@ Level_DoScroll:
 		bsr.w	DeformLayers				; scroll planes and do background deformation
 
 Level_SkipScroll:
+		; sonic-vs-robotnik: freeze the GHZ boss background as a static picture. DeformLayers (above)
+		; keeps recomputing the bg scroll from the deep-spawn camera, which re-introduces the banding
+		; every frame. Pin it back to (0,0) and flatten the per-scanline parallax so the real GHZ
+		; sky/clouds/water stays put and clean (like the title screen).
+		; sonic-vs-robotnik: freeze the GHZ boss background static and keep the sky gap-fill applied.
+		; Flatten the per-scanline H-scroll (kills the shear) and pin V-scroll to 0 each frame, then
+		; (re)paint the mountain-less gap band with sky via GHZ_FillSky.
+		cmpi.w	#id_GHZ_act3,(v_zone_act).w
+		bne.s	.ghz_nofreeze
+		lea	(v_hscrolltablebuffer).w,a0
+		move.w	2(a0),d1				; flatten: every line uses line 0's BG H-scroll
+		move.w	#224-1,d0
+	.ghz_hs:
+		move.w	d1,2(a0)
+		addq.w	#4,a0
+		dbf	d0,.ghz_hs
+		clr.w	(v_bgscrposy_vdp).w			; pin BG V-scroll = 0
+		jsr	(GHZ_FillSky).l				; paint the sky over the gap band
+	.ghz_nofreeze:
 		jsr	(BuildSprites).l			; build sprite table
 		jsr	(ObjPosLoad).l				; run the object manager to load level objects
 		bsr.w	PaletteCycle				; run palette cycles
@@ -5231,6 +5253,7 @@ ObjPos_End:	binclude	"objpos/ending.bin"
 		even
 
 ObjPos_Null:	dc.b $FF, $FF, 0, 0, 0,	0
+
 
 ; ---------------------------------------------------------------------------
 

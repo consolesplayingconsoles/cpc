@@ -44,7 +44,7 @@ export const translationApi = {
   createState: (ns: string, body: unknown) => sendJson<Record<string, unknown>>('POST', `${BASE}/${enc(ns)}`, body),
 
   // actions
-  run:     (path: string) => sendJson<{ error?: string }>('POST', `${BASE}/run`, { path }),
+  run:     (path: string, lang: string) => sendJson<{ error?: string }>('POST', `${BASE}/run`, { path, lang }),
   openDir: (ns: string) => fetch(`${BASE}/open`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ ns }) }),
   remove:  (ns: string) => fetch(`${BASE}/delete`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ ns }) }),
 }

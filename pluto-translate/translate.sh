@@ -1,5 +1,5 @@
 #!/bin/sh
-# translate.sh <gdi-path>  — in-place Dreamcast translation build, runs on Batocera.
+# translate.sh <gdi-path> <lang>  — in-place Dreamcast translation build, runs on Batocera.
 #
 # NEVER rebuilds the GDI. buildgdi/GDIBuilder -rebuild move files to new LBAs and this game reads
 # assets by hardcoded disc position -> any rebuild hangs mid-game (proven, even byte-identical). So
@@ -14,21 +14,25 @@
 #   5. name the .gdi + gamelist   (so Batocera lists "<Game> <Lang>", not "disc")
 #
 # Source originals live in $ROMS_SRC (~/roms, out of Batocera's scan); output lands in $ROMS_OUT.
-# TAG/VER/LAB_API/ROMS_OUT overridable via env.
+# <lang> is the target language code (Pluto's LANGUAGES list, e.g. ca/en) -- the caller (Pluto
+# API, which got it from the FE's language picker) always knows it, so it's a required arg here
+# rather than a hardcoded default. VER/LAB_API/ROMS_OUT still overridable via env.
 set -eu
 
-GDI="${1:?usage: translate.sh <gdi-path>}"
+GDI="${1:?usage: translate.sh <gdi-path> <lang>}"
 [ -f "$GDI" ] || { echo "no such GDI: $GDI" >&2; exit 1; }
 
-TAG="${TAG:-T-Cat}"
+LANG2="${2:?usage: translate.sh <gdi-path> <lang>}"
 VER="${VER:-v1.0}"
 ROMS_OUT="${ROMS_OUT:-/userdata/roms}"
 LAB_API="${LAB_API:-http://192.168.68.51:7700}"     # the Mac's Pluto API (live translation state)
 
-case "$TAG" in
-  T-Cat) LANGNAME=Català; LANG2=ca ;;
-  T-Eng) LANGNAME=English; LANG2=en ;;
-  *)     LANGNAME="$TAG";  LANG2="$TAG" ;;
+# TAG names the output dir/gamelist entry; LANGNAME is the display name. Only languages with a
+# fon_codec.py glyph profile can be built -- unsupported codes fail loudly here, not mid-splice.
+case "$LANG2" in
+  ca) LANGNAME=Català; TAG=T-Cat ;;
+  en) LANGNAME=English; TAG=T-Eng ;;
+  *)  echo "unsupported lang: $LANG2 (fon_codec.py has: ca en)" >&2; exit 1 ;;
 esac
 
 DOTNET=/userdata/dotnet/dotnet
