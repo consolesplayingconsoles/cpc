@@ -1,0 +1,1003 @@
+0x08008A72	44	p"Unable to find area"
+0x0803E024	36	Assertion Failure!
+0x0805553C	88	"Expected dialog to start with a code block"
+0x080555C8	78	"Internal equipment consistency error!"
+0x0805794A	26	Single Player
+0x0805797E	28	Wireless Slave
+0x0805799C	30	Wireless Master
+0x08057A26	32	Switch Character
+0x08057A80	30	Sound FX Volume
+0x08057AA0	24	Music Volume
+0x08057B38	26	Are you sure?
+0x08057B8C	30	Completed Goals
+0x08057CF2	38	{05}TIME: {76}%d:%02d{02}
+0x08057F58	30	Unequip from %s
+0x08057F82	44	No Equipment Available
+0x08057FB0	32	Can't drop here!
+0x08057FEA	28	No Story Items
+0x0805801A	24	Trading Post
+0x08058054	38	{05}Friend's Trade:{02}
+0x08058088	36	How many to trade?
+0x080580AE	26	Propose Trade
+0x080580E8	46	You have accepted trade
+0x08058138	46	Waiting for a friend...
+0x08058168	28	No Saved Games
+0x08058186	52	Please select a saved game
+0x080581BC	24	Disconnected
+0x080581D6	34	Select Saved Game
+0x0805821C	26	Balanced Mode
+0x08058238	24	In-Game Mode
+0x08058252	30	Character Mode:
+0x0805828E	74	Battle with your friends in the Dojo!
+0x080582DA	44	Choose your character!
+0x08058390	32	Grab your prize!
+0x080583B2	40	Go back to training!
+0x0805841E	26	SS Teen Gohan
+0x0805843A	24	Mystic Gohan
+0x08058454	28	Great Saiyaman
+0x0805867A	46	Press A Button To Punch
+0x0805891C	28	Database Empty
+0x0805893A	26	-None- (Body)
+0x0805896C	38	A simple cotton gi.
+0x08058994	28	-None- (Hands)
+0x080589B4	26	-None- (Feet)
+0x080589D2	40	-None- (Accessories)
+0x080589FE	24	Wool Sweater
+0x08058A18	58	A thick knitted wool sweater.
+0x08058A54	28	Leather Jacket
+0x08058A72	60	A cool looking leather jacket.
+0x08058AB0	24	Wooden Armor
+0x08058ACA	50	Armor carved out of wood.
+0x08058AFE	26	Stone O-Yoroi
+0x08058B1A	96	A traditional samurai armor carved out of stone.
+0x08058B7C	24	Bronze Keiko
+0x08058B96	98	A traditional samurai scale armor made of bronze.
+0x08058C10	52	A chestplate made of iron.
+0x08058C46	24	Silver Armor
+0x08058C60	56	A chestplate made of silver.
+0x08058CB0	52	A chestplate made of gold.
+0x08058CE6	28	Platinum Armor
+0x08058D04	60	A chestplate made of platinum.
+0x08058D42	26	Diamond Armor
+0x08058D5E	86	A chestplate carved out of a giant diamond.
+0x08058DB6	40	Geromantium Kataginu
+0x08058DE0	102	A traditional samurai clothing made of Geromantium.
+0x08058E48	32	Reflective Tunic
+0x08058E6A	132	A tunic made of a reflective material resistant to energy attacks.
+0x08058F06	90	The kind of coat a real tough guy might wear.
+0x08058F78	174	A traditional samurai scale armor made of jade that reduces damage done while blocking.
+0x08059028	24	Mystic Aegis
+0x08059042	128	A mystical chestplate that reduces the cost of the energy block.
+0x080590DC	118	Maybe you should get this shirt cleaned before you wear it.
+0x08059166	112	Maybe you should get this gi cleaned before you wear it.
+0x080591F0	118	Maybe you should get this armor cleaned before you wear it.
+0x08059280	54	A shirt so clean it shines!
+0x080592CA	48	A gi so clean it shines!
+0x08059314	56	An armor so clean it shines!
+0x0805934E	42	Prototype Space Armor
+0x0805937A	82	It's a prototype so it isn't working yet.
+0x080593CE	40	Enhanced Space Armor
+0x080593F8	92	This high tech armor emits an electronic aura.
+0x08059456	36	Spiked Breastplate
+0x0805947C	92	This breastplate is covered with sharp spikes.
+0x080594DA	34	Halloween Costume
+0x080594FE	62	It's a scary Halloween costume.
+0x0805953E	46	Rhinestone Leisure Suit
+0x0805956E	66	This a really tacky looking suit.
+0x080595B2	28	Fancy Wardrobe
+0x080595D0	62	This suit is expensive looking.
+0x08059610	26	Stylish Haori
+0x0805962C	112	Wearing this stylish jacket gives you a lot of charisma.
+0x0805969E	36	Do-Maru of Shadows
+0x080596C4	106	A traditional samurai armor that is good for stealth.
+0x08059748	90	A simple monks robe that is good for stealth.
+0x080597BC	114	This armor has magic that makes Super Saiyan last longer.
+0x08059842	76	This suit helps you catch better fish.
+0x08059890	24	Pyrite Armor
+0x080598AA	92	It looks like Gold Amor, but it's fool's gold!
+0x08059908	28	Armor of Light
+0x08059926	144	This magic armor makes your energy regenerate faster when you use melee.
+0x080599B8	34	Armor of Darkness
+0x080599DC	132	This magic armor makes your HP increase faster when you use melee.
+0x08059A78	92	This suit is imbued with the power of science.
+0x08059AD6	30	Crystal O-Yoroi
+0x08059AF6	122	The crystals in this armor make your energy attacks stronger.
+0x08059B72	40	Titanium Breastplate
+0x08059B9C	62	A breastplate made of titanium.
+0x08059BDC	30	"BAD MAN" Shirt
+0x08059BFC	106	A pink shirt? Who would wear such a ridiculous thing?
+0x08059C7C	76	This magic armor constantly heals you.
+0x08059CCA	24	Dragon Armor
+0x08059CE4	150	Armor made from the scales of a dragon. Reduces the cost of energy attacks.
+0x08059D7C	24	Saiyan Armor
+0x08059D96	66	Armor like the Saiyans once wore.
+0x08059DDA	26	Cotton Gloves
+0x08059DF6	62	A pair of simple cotton gloves.
+0x08059E36	24	Wool Mittens
+0x08059E50	74	A pair of thick knitted wool mittens.
+0x08059E9C	28	Leather Gloves
+0x08059EBA	58	Gloves made of tough leather.
+0x08059EF6	28	Brass Knuckles
+0x08059F14	50	A pair of brass knuckles.
+0x08059F60	52	An arm guard made of iron.
+0x08059F96	32	Silver Gauntlets
+0x08059FB8	70	A pair of gauntlets made of silver.
+0x0805A000	36	Platinum Gauntlets
+0x0805A026	74	A pair of gauntlets made of platinum.
+0x0805A072	34	Diamond Gauntlets
+0x0805A096	84	A pair of gauntlets carved from a diamond.
+0x0805A0EC	36	Geromantium Gloves
+0x0805A112	74	A pair of gloves made of Geromantium.
+0x0805A15E	34	Reflective Gloves
+0x0805A182	150	A pair of gloves made of a reflective material resistant to energy attacks.
+0x0805A21A	24	Brute Gloves
+0x0805A234	94	The kind of gloves a real tough guy might wear.
+0x0805A294	28	1 Ton Armbands
+0x0805A2B2	148	Weighted armbands slow you down, but give you more experience as a reward.
+0x0805A348	28	2 Ton Armbands
+0x0805A366	148	Weighted armbands slow you down, but give you more experience as a reward.
+0x0805A3FC	30	10 Ton Armbands
+0x0805A41C	148	Weighted armbands slow you down, but give you more experience as a reward.
+0x0805A4B2	30	20 Ton Armbands
+0x0805A4D2	148	Weighted armbands slow you down, but give you more experience as a reward.
+0x0805A568	32	100 Ton Armbands
+0x0805A58A	148	Weighted armbands slow you down, but give you more experience as a reward.
+0x0805A620	32	Kiloton Armbands
+0x0805A642	148	Weighted armbands slow you down, but give you more experience as a reward.
+0x0805A6D8	34	Magician's Gloves
+0x0805A6FC	108	These magic gloves reduce the cost of an energy block.
+0x0805A76A	24	Dirty Gloves
+0x0805A784	122	Maybe you should get these gloves cleaned before you wear it.
+0x0805A800	30	Dirty Gauntlets
+0x0805A820	128	Maybe you should get these gauntlets cleaned before you wear it.
+0x0805A8A2	24	Clean Gloves
+0x0805A8BC	54	Gloves so clean they shine!
+0x0805A8F4	30	Clean Gauntlets
+0x0805A914	60	Gauntlets so clean they shine!
+0x0805A952	46	Prototype Energy Gloves
+0x0805A982	82	It's a prototype so it isn't working yet.
+0x0805A9D6	44	Enhanced Energy Gloves
+0x0805AA04	72	These are powerful high tech gloves.
+0x0805AA4E	30	Power Gauntlets
+0x0805AA6E	80	These gauntlets are glowing with energy.
+0x0805AAC0	24	Super Gloves
+0x0805AADA	118	These gloves have magic that make Super Saiyan last longer.
+0x0805AB52	24	Scuba Gloves
+0x0805AB6C	82	These gloves helps you catch better fish.
+0x0805ABC0	34	Geromantis Gloves
+0x0805ABE4	132	Looks like Geromantium Gloves, but are actually a cheap knock-off.
+0x0805AC6A	26	Charge Gloves
+0x0805AC86	120	You can detect power flowing through these high tech gloves.
+0x0805AD00	34	Crystal Gauntlets
+0x0805AD24	132	The crystals in these gauntlets make your energy attacks stronger.
+0x0805ADAA	26	Saiyan Gloves
+0x0805ADC6	68	Gloves like the Saiyans once wore.
+0x0805AE0C	28	Pilaf's Gloves
+0x0805AE2A	108	Legend has it wearing these gloves will make you rich!
+0x0805AEB0	50	Simple cotton tabi boots.
+0x0805AEE4	24	Woolen Shoes
+0x0805AEFE	54	Shoes made of knitted wool.
+0x0805AF36	34	Leather Moccasins
+0x0805AF5A	78	Moccasins made of thick tanned leather.
+0x0805AFC2	42	Sandals made of wood.
+0x0805B004	44	Sandals made of stone.
+0x0805B032	38	Bronze Plated Boots
+0x0805B05A	78	Leather boots covered in bronze plates.
+0x0805B0AA	24	Iron Greaves
+0x0805B0C4	50	Shin-guards made of iron.
+0x0805B0F8	24	Silver Boots
+0x0805B112	42	Boots made of silver.
+0x0805B154	38	Boots made of gold.
+0x0805B17C	32	Geromantium Tabi
+0x0805B19E	62	Tabi boots made of Geromantium.
+0x0805B1DE	28	Winged Sandals
+0x0805B1FC	110	These winged sandals will make you walk and run faster.
+0x0805B284	142	Weighted boots slow you down, but give you more experience as a reward.
+0x0805B32C	142	Weighted boots slow you down, but give you more experience as a reward.
+0x0805B3BC	24	10 Ton Boots
+0x0805B3D6	142	Weighted boots slow you down, but give you more experience as a reward.
+0x0805B466	24	20 Ton Boots
+0x0805B480	142	Weighted boots slow you down, but give you more experience as a reward.
+0x0805B510	26	100 Ton Boots
+0x0805B52C	142	Weighted boots slow you down, but give you more experience as a reward.
+0x0805B5BC	26	Kiloton Boots
+0x0805B5D8	142	Weighted boots slow you down, but give you more experience as a reward.
+0x0805B67E	134	Maybe you should get these tabi boots cleaned before you wear them.
+0x0805B71E	124	Maybe you should get these shoes cleaned before you wear them.
+0x0805B7B4	124	Maybe you should get these boots cleaned before you wear them.
+0x0805B848	62	Tabi boots so clean they shine!
+0x0805B8A0	52	Shoes so clean they shine!
+0x0805B8EE	52	Boots so clean they shine!
+0x0805B924	42	Prototype Hyper Boots
+0x0805B950	82	It's a prototype so it isn't working yet.
+0x0805B9A4	40	Enhanced Hyper Boots
+0x0805B9CE	70	These are powerful high tech boots.
+0x0805BA16	34	Alligator Loafers
+0x0805BA3A	62	These are some expensive shoes!
+0x0805BA92	122	There is a mysterious supernatural aura around these sandals.
+0x0805BB20	70	These are sneakers... For sneaking!
+0x0805BB68	26	Soccer Cleats
+0x0805BB84	76	These soccer cleats pack quite a kick!
+0x0805BBEA	118	These boots have magic that makes Super Saiyan last longer.
+0x0805BC74	86	These flippers helps you catch better fish.
+0x0805BCCC	26	Silvery Boots
+0x0805BCE8	138	These look like Silver Boots, but the silver paint is scratching off.
+0x0805BD8C	118	You can detect power flowing through these high tech boots.
+0x0805BE04	24	Saiyan Boots
+0x0805BE1E	66	Boots like the Saiyans once wore.
+0x0805BE74	50	A thick knitted wool cap.
+0x0805BEA8	24	Stone Men-po
+0x0805BEC2	86	An armored samurai face mask made of stone.
+0x0805BF32	84	A traditional samurai helmet made of iron.
+0x0805BF88	38	Geromantium Bandana
+0x0805BFB0	60	A bandana made of Geromantium.
+0x0805BFEE	26	Mercury's Cap
+0x0805C00A	58	The legendary cap of Mercury.
+0x0805C05C	116	Maybe you should get this cape cleaned before you wear it.
+0x0805C0E8	116	Maybe you should get this belt cleaned before you wear it.
+0x0805C174	52	A cape so clean it shines!
+0x0805C1C0	52	A belt so clean it shines!
+0x0805C20C	62	This a terrifying looking mask.
+0x0805C24C	42	Rhinestone Sunglasses
+0x0805C278	94	These are some really tacky looking sunglasses.
+0x0805C2F0	62	This charm gives you good luck!
+0x0805C330	26	Rabbit's Foot
+0x0805C34C	78	This rabbit's foot gives you good luck!
+0x0805C39C	32	Four-Leaf Clover
+0x0805C3BE	84	This four-leaf clover gives you good luck!
+0x0805C42A	80	There's an evil aura around this ring...
+0x0805C494	84	There's an evil aura around this amulet...
+0x0805C4EA	40	Expensive Wristwatch
+0x0805C514	84	This is an extremely expensive wristwatch.
+0x0805C57A	110	Wearing this classy monocle gives you lots of charisma.
+0x0805C5EA	28	Eldritch Cameo
+0x0805C608	160	This carving of unfathomable age is etched in a long forgotten ancient language.
+0x0805C6AA	30	Pure Black Cape
+0x0805C6CA	118	How much more black could this cape be? The answer is none.
+0x0805C758	112	This cape has magic that makes Super Saiyan last longer.
+0x0805C7DA	82	This snorkel helps you catch better fish.
+0x0805C846	116	This item looks like a rabbit's foot... but it's not real.
+0x0805C8BC	34	Talisman of Light
+0x0805C8E0	164	This talisman increases the amount of energy recharged when you use melee attacks.
+0x0805C986	24	Vampire Cape
+0x0805C9A0	162	This cape causes HP to be recharged instead of energy when you use melee attacks.
+0x0805CA44	30	Polka-Dot Kazoo
+0x0805CA64	54	This is a very silly kazoo.
+0x0805CA9C	30	Crystal Pendant
+0x0805CABC	132	The crystals in this pendant increase the power of energy attacks.
+0x0805CB5A	110	When you're about to die, this ring makes you stronger.
+0x0805CBCA	30	Garlic Necklace
+0x0805CBEA	66	This protects against the undead.
+0x0805CC2E	26	Evil Talisman
+0x0805CC4A	100	There is a terrible cost to this talisman's power.
+0x0805CCB0	26	Ox-King's Hat
+0x0805CCCC	132	This is the kind of viking hat that Ox-King is often seen wearing.
+0x0805CD6A	120	If you wear this hat while you level up, you'll get a bonus!
+0x0805CDE4	38	Majestic Chopsticks
+0x0805CE0C	98	Food tastes better when you use these chopsticks.
+0x0805CE70	46	Primordial Twisty-Straw
+0x0805CEA0	104	Drinks taste better when you use this ancient straw.
+0x0805CF20	56	This is a white karate belt.
+0x0805CF72	58	This is a yellow karate belt.
+0x0805CFC0	52	This is a red karate belt.
+0x0805D00C	56	This is a green karate belt.
+0x0805D05A	54	This is a blue karate belt.
+0x0805D0A8	56	This is a brown karate belt.
+0x0805D0F8	56	This is a black karate belt.
+0x0805D132	26	Quartz Amulet
+0x0805D14E	66	This is an amulet made of quartz.
+0x0805D192	24	Topaz Amulet
+0x0805D1AC	64	This is an amulet made of topaz.
+0x0805D1EE	30	Amethyst Amulet
+0x0805D20E	70	This is an amulet made of amethyst.
+0x0805D256	30	Sapphire Amulet
+0x0805D276	70	This is an amulet made of sapphire.
+0x0805D2BE	28	Emerald Amulet
+0x0805D2DC	68	This is an amulet made of emerald.
+0x0805D33A	62	This is an amulet made of ruby.
+0x0805D37A	28	Diamond Amulet
+0x0805D398	68	This is an amulet made of diamond.
+0x0805D3EE	124	Only a really vicious criminal would wear something like this.
+0x0805D47C	32	Airship Interior
+0x0805D4AC	24	Baba's Arena
+0x0805D4C6	26	Babidi's Ship
+0x0805D4E2	40	Inside Babidi's Ship
+0x0805D50C	32	Barren Wasteland
+0x0805D52E	30	Bulma's Airship
+0x0805D54E	26	Bulma's House
+0x0805D576	30	Dr. Brief's Lab
+0x0805D5AE	38	Capsule Corporation
+0x0805D5D6	24	Capsule Room
+0x0805D5F0	40	Cave of the Ancients
+0x0805D61A	28	Chi Chi's Room
+0x0805D638	26	Computer Room
+0x0805D654	24	Control Room
+0x0805D69C	26	Diablo Desert
+0x0805D6C4	34	East District 439
+0x0805D6E8	24	Exhibit Hall
+0x0805D702	28	Final Showdown
+0x0805D720	28	Fukurou Forest
+0x0805D73E	26	Giant Airship
+0x0805D75A	24	Giant Crater
+0x0805D774	44	Gohan and Goten's Room
+0x0805D7A2	24	Goku's House
+0x0805D7BC	38	Grandpa Gohan's Hut
+0x0805D7E4	38	Grand Kai's Mansion
+0x0805D80C	36	Grand Kai's Planet
+0x0805D832	30	Gravity Chamber
+0x0805D87A	24	Hercule City
+0x0805D894	34	Hercule's Mansion
+0x0805D8C2	32	High Above Earth
+0x0805D8E4	46	Hyperbolic Time Chamber
+0x0805D940	28	Kami's Lookout
+0x0805D95E	26	Kami's Palace
+0x0805D97A	26	Korin's Tower
+0x0805D996	28	Kyodai Pyramid
+0x0805D9B4	44	Outside Kyodai Pyramid
+0x0805DA04	26	Musuka Circus
+0x0805DA20	30	Nataday Village
+0x0805DA40	32	Ninja Stronghold
+0x0805DA62	38	Northern Wilderness
+0x0805DA8A	46	Orange Star High School
+0x0805DABA	38	Other World Stadium
+0x0805DAE2	26	Papaya Island
+0x0805DAFE	28	Pilaf's Castle
+0x0805DB1C	36	Planet of the Kais
+0x0805DB42	24	Rocky Canyon
+0x0805DB5C	30	Rogue Submarine
+0x0805DB7C	28	Roshi's Island
+0x0805DB9A	26	Diablo Desert
+0x0805DBB6	24	Sinking Ship
+0x0805DBE2	32	Southwest Forest
+0x0805DC04	28	Stolen Airship
+0x0805DC32	30	The Other World
+0x0805DC82	40	Totenhotep's Chamber
+0x0805DCAC	42	Diablo Desert Express
+0x0805DCE8	28	Volcano Summit
+0x0805DD1A	36	Western Wilderness
+0x0805DD40	94	A Button: {07}Descend/Land{02} B Button: {07}Ascend{02}
+0x0805DDA0	48	World Tournament Stadium
+0x0805DDD2	28	Yakon's Planet
+0x0805DDF0	28	Yemma's Office
+0x0805DE1C	32	Other World Saga
+0x0805DE3E	38	Great Saiyaman Saga
+0x0805DE66	42	World Tournament Saga
+0x0805DEAA	34	Majin Vegeta Saga
+0x0805DECE	32	Dragon Ball Saga
+0x0805DEF0	28	Majin Buu Saga
+0x0805DF0E	24	Janemba Saga
+0x0805DF28	28	Super Buu Saga
+0x0805DF5E	24	Kid Buu Saga
+0x0805DF78	30	A New Beginning
+0x0805DF98	50	Go to King Yemma's Castle
+0x0805DFCC	62	Train with Other World Fighters
+0x0805E00C	64	Go to the Other World Tournament
+0x0805E04E	86	Go to your class at Orange Star High School
+0x0805E0A6	68	Fly to West City and talk to Bulma
+0x0805E0EC	54	Fight Crime in Hercule City
+0x0805E124	88	Defeat the Red Shark Gang and Save the Mayor
+0x0805E17E	52	Save Chobi from the Circus
+0x0805E1B4	80	Tell Your Mother That Goku's Coming Back
+0x0805E206	92	Tell Piccolo and Dende That Goku's Coming Back
+0x0805E264	90	Tell Bulma and Vegeta That Goku's Coming Back
+0x0805E2C0	106	Tell Master Roshi and Krillin That Goku's Coming Back
+0x0805E32C	84	Meet Goten in the eastern forest to train.
+0x0805E382	80	Meet Bulma to go to the World Tournament
+0x0805E3D4	66	Register for the World Tournament
+0x0805E418	106	Go to Kami's Lookout and get a Senzu Bean from Korrin
+0x0805E484	46	Find Babidi's Spaceship
+0x0805E4B4	74	Enter Babidi's Ship and Defeat Dabura
+0x0805E500	52	Destroy Babidi's Spaceship
+0x0805E536	40	Go To Kami's Lookout
+0x0805E560	62	Get the Dragon Radar from Bulma
+0x0805E5A0	42	Find The Dragon Balls
+0x0805E5CC	38	Find Vegeta in HFIL
+0x0805E5F4	28	Defeat Janemba
+0x0805E612	60	Pull the Z-Sword from the rock
+0x0805E650	56	Take a nap at Kami's Lookout
+0x0805E68A	108	Get the Scouter Upgrade from Dr. Brief at Capsule Corp
+0x0805E6F8	74	Save Goten and Trunks from Super Buu.
+0x0805E75A	56	Go back and defeat Super Buu
+0x0805E794	76	Find Gohan, Goten, Trunks, and Piccolo
+0x0805E7E2	30	Escape from Buu
+0x0805E802	92	Go to the Barren Wastelands and Defeat Kid Buu
+0x0805E860	82	Get a root beer for the Lighthouse Keeper
+0x0805E8B4	76	Get a turkey for the Lighthouse Keeper
+0x0805E902	82	Get Hercule-ade for the Lighthouse Keeper
+0x0805E956	78	Get an elixir for the Lighthouse Keeper
+0x0805E9A6	90	Get a dinosaur tail for the Lighthouse Keeper
+0x0805EA02	88	Get a super elixir for the Lighthouse Keeper
+0x0805EA5C	134	Defeat Airship Bandits and take the bandanas they drop to the Ninja
+0x0805EB22	106	A tasty, yet nutritious soup. Restores 20 hit points.
+0x0805EBCC	104	A small ball of sticky rice. Restores 40 hit points.
+0x0805EC66	24	Chicken Legs
+0x0805EC80	94	It tastes like chicken! Restores 80 hit points.
+0x0805ED1E	130	A flame broiled and delicious hamburger. Restores 120 hit points.
+0x0805EDD2	146	A traditional triangle of rice, wrapped in kelp. Restores 200 hit points.
+0x0805EE96	24	Curry Plates
+0x0805EEB0	166	A dish of chicken and rice covered in a spicy curry sauce. Restores 400 hit points.
+0x0805EF84	118	A full sized turkey with stuffing. Restores 800 hit points.
+0x0805F022	136	A medium-rare steak seasoned to perfection. Restores 600 hit points.
+0x0805F0AC	24	3Course Meal
+0x0805F0C6	34	Three Course Meal
+0x0805F0EA	36	Three Course Meals
+0x0805F110	144	Are you sure you can eat that all by yourself? Restores 1100 hit points.
+0x0805F1A2	24	DinosaurTail
+0x0805F1BC	26	Dinosaur Tail
+0x0805F1D8	28	Dinosaur Tails
+0x0805F1F6	176	They say the most succulent dinosaur meat comes from the tail. Restores 1500 hit points.
+0x0805F2C6	88	A carton of milk. Restores 20 energy points.
+0x0805F338	100	Care for a spot of tea? Restores 40 energy points.
+0x0805F3BE	110	Now that's a tasty beverage! Restores 80 energy points.
+0x0805F43E	24	Vanilla Soda
+0x0805F458	26	Vanilla Sodas
+0x0805F474	132	Vanilla makes a good soda even better! Restores 125 energy points.
+0x0805F522	24	Cherry Sodas
+0x0805F53C	136	There's nothing like a good Cherry Soda! Restores 175 energy points.
+0x0805F604	112	A cool refreshing root beer. Restores 250 energy points.
+0x0805F6A6	24	Hercule-ades
+0x0805F6C0	134	Replenishes your precious electrolytes. Restores 350 energy points.
+0x0805F774	156	A rare magical liquid that restores your vitality! Restores 500 energy points.
+0x0805F826	24	Super Elixir
+0x0805F840	26	Super Elixirs
+0x0805F85C	132	The best magical elixir on the market. Restores 750 energy points.
+0x0805F8E2	24	DinosaurMilk
+0x0805F8FC	26	Dinosaur Milk
+0x0805F918	26	Dinosaur Milk
+0x0805F934	128	Where does dinosaur milk come from? Restores 2500 energy points.
+0x0805F9FA	158	The legendary holy water of Korin. Greatly increases your stats for 30 seconds.
+0x0805FADE	146	One of Korin's special Senzu Beans. Fully restores hit points and energy.
+0x0805FBA4	110	A Dyna-Cap.  What is contained inside? It is a mystery.
+0x0805FC2A	30	Lazarus Crystal
+0x0805FC4A	32	Lazarus Crystals
+0x0805FC6C	120	A strange blue crystal. Some say carrying them is good luck!
+0x0805FCE6	24	2402 Capsule
+0x0805FD00	24	2402 Capsule
+0x0805FD1A	24	2402 Capsule
+0x0805FD34	116	A Number 2402 Capsule that contains a digital wrist watch.
+0x0805FDAA	26	Dragon Ball 1
+0x0805FDC6	26	Dragon Ball 1
+0x0805FDE2	26	Dragon Ball 1
+0x0805FDFE	50	The one-star Dragon Ball.
+0x0805FE32	26	Dragon Ball 2
+0x0805FE4E	26	Dragon Ball 2
+0x0805FE6A	26	Dragon Ball 2
+0x0805FE86	50	The two-star Dragon Ball.
+0x0805FEBA	26	Dragon Ball 3
+0x0805FED6	26	Dragon Ball 3
+0x0805FEF2	26	Dragon Ball 3
+0x0805FF0E	54	The three-star Dragon Ball.
+0x0805FF46	26	Dragon Ball 4
+0x0805FF62	26	Dragon Ball 4
+0x0805FF7E	26	Dragon Ball 4
+0x0805FF9A	52	The four-star Dragon Ball.
+0x0805FFD0	26	Dragon Ball 5
+0x0805FFEC	26	Dragon Ball 5
+0x08060008	26	Dragon Ball 5
+0x08060024	52	The five-star Dragon Ball.
+0x0806005A	26	Dragon Ball 6
+0x08060076	26	Dragon Ball 6
+0x08060092	26	Dragon Ball 6
+0x080600AE	50	The six-star Dragon Ball.
+0x080600E2	26	Dragon Ball 7
+0x080600FE	26	Dragon Ball 7
+0x0806011A	26	Dragon Ball 7
+0x08060136	54	The seven-star Dragon Ball.
+0x08060184	28	Potara Earring
+0x080601A2	30	Potara Earrings
+0x080601C2	152	Wear these Earrings to perform a more powerful fusion than the fusion dance.
+0x0806029E	44	A lovely, little fish.
+0x08060314	64	Oooo! A Red Snapper! Very tasty!
+0x08060398	126	Once thought extinct, these giant fish are now quite plentiful.
+0x08060442	130	It's a switch with two prongs, but it's not attached to anything.
+0x080604C6	26	Grandpa's Key
+0x080604E2	26	Grandpa's Key
+0x080604FE	26	Grandpa's Key
+0x0806051A	66	The key to Grandpa Gohan's house.
+0x08060572	46	Headdress of Totenhotep
+0x080605A2	46	Headdress of Totenhotep
+0x080605D2	116	The headdress of an ancient pharaoh. Some say it's cursed!
+0x080606B4	82	The key to the Boss Ninja's inner sanctum
+0x08060740	96	An old shoe? What are you going to do with this?
+0x080607A2	26	H. Exhibit #1
+0x080607BE	36	Hercule Exhibit #1
+0x080607E4	36	Hercule Exhibit #1
+0x0806080A	68	A crate with Hercule's logo on it.
+0x08060850	26	H. Exhibit #2
+0x0806086C	36	Hercule Exhibit #2
+0x08060892	36	Hercule Exhibit #2
+0x080608B8	68	A crate with Hercule's logo on it.
+0x080608FE	26	H. Exhibit #3
+0x0806091A	36	Hercule Exhibit #3
+0x08060940	36	Hercule Exhibit #3
+0x08060966	68	A crate with Hercule's logo on it.
+0x080609AC	26	H. Exhibit #4
+0x080609C8	36	Hercule Exhibit #4
+0x080609EE	36	Hercule Exhibit #4
+0x08060A14	68	A crate with Hercule's logo on it.
+0x08060A5A	26	H. Exhibit #5
+0x08060A76	36	Hercule Exhibit #5
+0x08060A9C	36	Hercule Exhibit #5
+0x08060AC2	68	A crate with Hercule's logo on it.
+0x08060B08	26	H. Exhibit #6
+0x08060B24	36	Hercule Exhibit #6
+0x08060B4A	36	Hercule Exhibit #6
+0x08060B70	68	A crate with Hercule's logo on it.
+0x08060BB6	26	H. Exhibit #7
+0x08060BD2	36	Hercule Exhibit #7
+0x08060BF8	36	Hercule Exhibit #7
+0x08060C1E	68	A crate with Hercule's logo on it.
+0x08060C64	26	H. Exhibit #8
+0x08060C80	36	Hercule Exhibit #8
+0x08060CA6	36	Hercule Exhibit #8
+0x08060CCC	68	A crate with Hercule's logo on it.
+0x08060D12	26	H. Exhibit #9
+0x08060D2E	36	Hercule Exhibit #9
+0x08060D54	36	Hercule Exhibit #9
+0x08060D7A	68	A crate with Hercule's logo on it.
+0x08060DC0	28	H. Exhibit #10
+0x08060DDE	38	Hercule Exhibit #10
+0x08060E06	38	Hercule Exhibit #10
+0x08060E2E	68	A crate with Hercule's logo on it.
+0x08060E74	28	H. Exhibit #11
+0x08060E92	38	Hercule Exhibit #11
+0x08060EBA	38	Hercule Exhibit #11
+0x08060EE2	68	A crate with Hercule's logo on it.
+0x08060F28	28	H. Exhibit #12
+0x08060F46	38	Hercule Exhibit #12
+0x08060F6E	38	Hercule Exhibit #12
+0x08060F96	68	A crate with Hercule's logo on it.
+0x08060FDC	28	H. Exhibit #13
+0x08060FFA	38	Hercule Exhibit #13
+0x08061022	38	Hercule Exhibit #13
+0x0806104A	68	A crate with Hercule's logo on it.
+0x08061090	28	H. Exhibit #14
+0x080610AE	38	Hercule Exhibit #14
+0x080610D6	38	Hercule Exhibit #14
+0x080610FE	68	A crate with Hercule's logo on it.
+0x08061144	28	H. Exhibit #15
+0x08061162	38	Hercule Exhibit #15
+0x0806118A	38	Hercule Exhibit #15
+0x080611B2	68	A crate with Hercule's logo on it.
+0x080611F8	28	H. Exhibit #16
+0x08061216	38	Hercule Exhibit #16
+0x0806123E	38	Hercule Exhibit #16
+0x08061266	68	A crate with Hercule's logo on it.
+0x080612AC	28	H. Exhibit #17
+0x080612CA	38	Hercule Exhibit #17
+0x080612F2	38	Hercule Exhibit #17
+0x0806131A	68	A crate with Hercule's logo on it.
+0x08061360	28	H. Exhibit #18
+0x0806137E	38	Hercule Exhibit #18
+0x080613A6	38	Hercule Exhibit #18
+0x080613CE	68	A crate with Hercule's logo on it.
+0x08061414	28	H. Exhibit #19
+0x08061432	38	Hercule Exhibit #19
+0x0806145A	38	Hercule Exhibit #19
+0x08061482	68	A crate with Hercule's logo on it.
+0x080614C8	28	H. Exhibit #20
+0x080614E6	38	Hercule Exhibit #20
+0x0806150E	38	Hercule Exhibit #20
+0x08061536	68	A crate with Hercule's logo on it.
+0x0806157C	28	H. Exhibit #21
+0x0806159A	38	Hercule Exhibit #21
+0x080615C2	38	Hercule Exhibit #21
+0x080615EA	68	A crate with Hercule's logo on it.
+0x08061630	28	H. Exhibit #22
+0x0806164E	38	Hercule Exhibit #22
+0x08061676	38	Hercule Exhibit #22
+0x0806169E	68	A crate with Hercule's logo on it.
+0x080616E4	28	H. Exhibit #23
+0x08061702	38	Hercule Exhibit #23
+0x0806172A	38	Hercule Exhibit #23
+0x08061752	68	A crate with Hercule's logo on it.
+0x08061798	28	H. Exhibit #24
+0x080617B6	38	Hercule Exhibit #24
+0x080617DE	38	Hercule Exhibit #24
+0x08061806	68	A crate with Hercule's logo on it.
+0x0806184C	28	H. Exhibit #25
+0x0806186A	38	Hercule Exhibit #25
+0x08061892	38	Hercule Exhibit #25
+0x080618BA	68	A crate with Hercule's logo on it.
+0x08061900	26	Z. Exhibit #1
+0x0806191C	40	Z-Fighter Exhibit #1
+0x08061946	40	Z-Fighter Exhibit #1
+0x08061970	56	A crate with a Z logo on it.
+0x080619AA	26	Z. Exhibit #2
+0x080619C6	40	Z-Fighter Exhibit #2
+0x080619F0	40	Z-Fighter Exhibit #2
+0x08061A1A	56	A crate with a Z logo on it.
+0x08061A54	26	Z. Exhibit #3
+0x08061A70	40	Z-Fighter Exhibit #3
+0x08061A9A	40	Z-Fighter Exhibit #3
+0x08061AC4	56	A crate with a Z logo on it.
+0x08061AFE	26	Z. Exhibit #4
+0x08061B1A	40	Z-Fighter Exhibit #4
+0x08061B44	40	Z-Fighter Exhibit #4
+0x08061B6E	56	A crate with a Z logo on it.
+0x08061BA8	26	Z. Exhibit #5
+0x08061BC4	40	Z-Fighter Exhibit #5
+0x08061BEE	40	Z-Fighter Exhibit #5
+0x08061C18	56	A crate with a Z logo on it.
+0x08061C52	26	Z. Exhibit #6
+0x08061C6E	40	Z-Fighter Exhibit #6
+0x08061C98	40	Z-Fighter Exhibit #6
+0x08061CC2	56	A crate with a Z logo on it.
+0x08061CFC	26	Z. Exhibit #7
+0x08061D18	40	Z-Fighter Exhibit #7
+0x08061D42	40	Z-Fighter Exhibit #7
+0x08061D6C	56	A crate with a Z logo on it.
+0x08061DA6	26	Z. Exhibit #8
+0x08061DC2	40	Z-Fighter Exhibit #8
+0x08061DEC	40	Z-Fighter Exhibit #8
+0x08061E16	56	A crate with a Z logo on it.
+0x08061E50	26	Z. Exhibit #9
+0x08061E6C	40	Z-Fighter Exhibit #9
+0x08061E96	40	Z-Fighter Exhibit #9
+0x08061EC0	56	A crate with a Z logo on it.
+0x08061EFA	28	Z. Exhibit #10
+0x08061F18	42	Z-Fighter Exhibit #10
+0x08061F44	42	Z-Fighter Exhibit #10
+0x08061F70	56	A crate with a Z logo on it.
+0x08061FAA	28	Z. Exhibit #11
+0x08061FC8	42	Z-Fighter Exhibit #11
+0x08061FF4	42	Z-Fighter Exhibit #11
+0x08062020	56	A crate with a Z logo on it.
+0x0806205A	28	Z. Exhibit #12
+0x08062078	42	Z-Fighter Exhibit #12
+0x080620A4	42	Z-Fighter Exhibit #12
+0x080620D0	56	A crate with a Z logo on it.
+0x0806210A	28	Z. Exhibit #13
+0x08062128	42	Z-Fighter Exhibit #13
+0x08062154	42	Z-Fighter Exhibit #13
+0x08062180	56	A crate with a Z logo on it.
+0x080621BA	28	Z. Exhibit #14
+0x080621D8	42	Z-Fighter Exhibit #14
+0x08062204	42	Z-Fighter Exhibit #14
+0x08062230	56	A crate with a Z logo on it.
+0x0806226A	28	Z. Exhibit #15
+0x08062288	42	Z-Fighter Exhibit #15
+0x080622B4	42	Z-Fighter Exhibit #15
+0x080622E0	56	A crate with a Z logo on it.
+0x08062346	144	Mrs. Brief's freshly baked chocolate chip cookie! Restores 5 hit points.
+0x080623E4	134	The Capsule Corporation database has no information on this person.
+0x0806247C	92	This is a martial artist from the Other World.
+0x080624E6	202	Olibu is an Other World fighter, originally from Earth. Many of Earth's legends are based off of him.
+0x080625C4	182	A known criminal, wanted on several counts of chicanery and multiple counts of shenanigans.
+0x08062690	136	A ruthless soldier of fortune. Armed with rocket propelled grenades.
+0x08062728	180	A known criminal, wanted on several counts of mischief and multiple counts of high jinks. 
+0x080627EC	144	A bomber armed with dangerous explosives. Approach with extreme caution.
+0x0806287E	26	Majin Soldier
+0x0806289A	122	One of Babidi's Majin Henchmen from an unknown alien species.
+0x08062916	26	Majin Fighter
+0x08062932	124	A martial artist who has been converted over to Babidi's side.
+0x080629BC	246	A ninja. These warriors value stealth and subterfuge. Some ninja use their ninjutsu skills for assassination and thieving. 
+0x08062AC8	186	A robot with thick geromantium armor that makes it invulnerable to most conventional attacks.
+0x08062B84	24	Laser Turret
+0x08062B9E	140	These advanced megawatt class chemical laser guns are quite dangerous.
+0x08062C3C	342	Although many of these ancient warriors live by the code of the Bushido, they should be considered highly dangerous. Samurai are known for their devastating sword attacks.
+0x08062D9E	212	Battle tanks are fully armored in 2 inch plates of geromantium. These tanks are armed with a 120mm cannon.
+0x08062E82	116	A powerful and respected alien warrior in the Other World.
+0x08062F04	208	An elementary school student who has made a name for himself in various junior martial arts tournaments.
+0x08062FEA	246	This martial artist fought against Hercule in the 24th World Tournament. There appears to be something strange about him...
+0x080630EC	128	There appears to be something strange about this martial artist.
+0x0806317C	140	PuiPui is an alien from the planet Zoon and also a henchman of Babidi.
+0x08063218	132	Dabura is the ruler of the Underworld. He is a henchman of Babidi.
+0x080632AC	206	An evil wizard. Babidi is the son of Bibidi. He controls people by exploiting the evil in their hearts.
+0x08063390	400	An evil creature created by Bibidi many ages ago. Although he is child-like, his extreme power, underdeveloped sense of right and wrong, and rubbery indestructible body make him a dangerous adversary.
+0x08063534	268	This guardian of the North Galaxy is known as one of the greatest martial arts trainers in the universe, and his corny sense of humor.
+0x0806364E	488	Bulma Brief is the daughter of the founder and president of the Capsule Corporation, Dr. Brief. Bulma has many invention patents in her name, most notably the Dragon Radar. Bulma is often involved in Goku's adventures, and is married to Vegeta.
+0x08063844	266	Broly is the Legendary Super Saiyan, prophesied in ancient Saiyan folklore. Once defeated by Goku, he has returned, insane with rage.
+0x08063960	192	Although  he looks like a child, Kid Buu is actually the most dangerous of all Buu's many forms.
+0x08063A36	214	When Majin Buu was absorbed the mysterious Evil Buu, the Evil Buu transformed into this new dangerous form.
+0x08063B22	162	When Gotenks was absorbed by Super Buu, Super Buu transformed into this new form.
+0x08063BDA	158	When Gohan was absorbed by Super Buu, Super Buu transformed into this new form.
+0x08063C8A	194	The evil soul of an organized crime boss named Janemba has escaped and become this evil creature.
+0x08063D4E	26	Super Janemba
+0x08063D6A	124	Janemba has transformed into a faster and more dangerous form.
+0x08063DF4	170	A notorious monster from an alien planet of darkness. Has the power to absorb energy.
+0x08063EB8	94	An evil Android created by Dr. Gero's computer.
+0x08063F30	94	An evil Android created by Dr. Gero's computer.
+0x08063FA8	94	An evil Android created by Dr. Gero's computer.
+0x08064008	34	Super Android #13
+0x0806402C	196	After absorbing the broken parts of Androids #14 and #15, #13 transformed into this Super Android.
+0x0806410A	222	Once Dr. Gero's evil Android, she has now changed her ways and fights for the good guys. Is married to Krillin.
+0x080641FA	432	The World Champion of Martial Arts. The world believes he was the one who defeated Cell, even though it was really Gohan. Although a powerful martial artist in his own right, he is no match for the Z-fighters powers.
+0x080643BC	224	Krillin is an old friend of Goku's. They trained together under Master Roshi. Krillin is married to Android #18.
+0x080644A8	232	Tien was once a rival of Goku is now a loyal Z-Fighter. His most distinguishing feature is his mysterious third eye.
+0x0806459E	172	The crimefighting daughter of Hercule. She attends Orange Star High School with Gohan.
+0x0806465A	190	Yamcha was once known as the dreaded Desert Bandit of Diablo Desert. He's now one of good guys.
+0x0806472E	182	This Announcer has been announcing Martial Arts Tournaments since back when Goku was a kid!
+0x080647F0	282	Baba is a fortune teller who sometimes acts as an emmisary between the physical world and the Other World. She is also Master Roshi's sister.
+0x08064920	148	Dr. Brief is the president of the Capsule Corporation, and Bulma's father.
+0x080649CC	102	Mrs. Brief is Dr. Brief's wife, and Bulma's mother.
+0x08064A44	92	Bubbles is an ape who hangs out with King Kai.
+0x08064AB4	144	Chiaotzu is a mysterious telepathic being who is often seen around Tien.
+0x08064B56	176	Chi-Chi is Goku's wife and Gohan and Goten's mother. She is the daughter of the Ox-King.
+0x08064C14	110	Chobi is a dinosaur who is friends with Gohan's family.
+0x08064C90	132	Dende is the Guardian Of Earth and an alien from the planet Namek.
+0x08064D22	128	Erasa attends high school with Gohan at Orange Star High School.
+0x08064DB4	114	Gregory is a talking cricket who hangs out with King Kai.
+0x08064E32	66	Jewl is a popular martial artist.
+0x08064E8A	232	The Grand Kai is one of the Guardians of the universe and of the Other World. He is also a legendary martial artist.
+0x08064F8C	128	The Supreme Kai is the highest ranking Guardian of the universe.
+0x0806501C	88	Kibito is the body guard of the Supreme Kai.
+0x0806508C	108	The Supreme Kai and Kibito fused to become Kibitoshin.
+0x08065106	52	Killa is a martial artist.
+0x08065152	140	King Yemma is a giant ogre who guards the entrance to the Other World.
+0x080651E0	34	Yemma's Assistant
+0x08065204	130	This assistant helps King Yemma usher souls into the Other World.
+0x08065294	146	Korin is a wise martial artist cat who lives at the top of Korin's tower.
+0x08065336	100	Marron is the daughter of Krillin and Android #18.
+0x0806539C	24	Master Roshi
+0x080653B6	218	Master Roshi is a master of martial arts who trained Goku and Krillin. He is also known as the Turtle Hermit.
+0x0806549E	52	The Mayor of Hercule City.
+0x080654DE	118	One of the monks in charge of running the World Tournament.
+0x08065568	172	Mr. Popo is Dende's right hand man. He has lived on Kami's Lookout for countless ages.
+0x08065624	138	Oolong is a friend of the Z-Fighters. He has the power to shapeshift.
+0x080656C0	66	Ox King is the father of Chi-Chi.
+0x08065704	26	Emperor Pilaf
+0x08065720	188	The bumbling Pilaf has tried to take over the world many times, but is usually foiled by Goku.
+0x080657EC	54	Pintar is a martial artist.
+0x08065824	28	Village Priest
+0x08065842	70	The head shaman of Nataday Village.
+0x08065894	124	Puar is a shapeshiting cat and a constant companion of Yamcha.
+0x08065920	92	Musaka is the ringmaster of the Musaka Circus.
+0x08065992	34	A man of science!
+0x080659C8	104	Sharpner attends Orange Star High School with Gohan.
+0x08065A3C	94	This is a spirit that lives in the Other World.
+0x08065AA4	112	Uub is 10 year old boy who is the reincarnation of Buu. 
+0x08065B28	174	Yajirobe is a friend of the Z-Fighters. Although he carries a sword, he rarely uses it.
+0x08065BEA	80	Watch out for this Cyborg's killer claw!
+0x08065C4C	58	This blister creates enzymes.
+0x08065C96	64	Enzymes assist Buu in digestion.
+0x08065CEE	120	The Blood Cells in Buu's immune system don't like intruders.
+0x08065D76	78	Half man... Half machine... All deadly.
+0x08065DD2	120	These spirits come from the Other World to haunt the living.
+0x08065E4C	24	Mini-Janemba
+0x08065E66	104	Janemba creates these miniature versions of himself.
+0x08065ED0	32	Knight Destroyer
+0x08065EF2	120	The Destroyer's nastier, stronger, and meaner older brother.
+0x08065F6C	40	Majin Shield Soldier
+0x08065F96	118	This Majin Soldier will block your attacks with his shield.
+0x08066022	82	This cyborg transforms into a metal ball.
+0x08066086	104	This Mud Man will split in half when you attack him.
+0x080660FC	144	From the ancient sands of time these mummies awaken to curse the living.
+0x080661A0	108	The bones of the dead are animated by an unseen force.
+0x08066224	126	These bandits have taken to the sky! Watch out for their bombs.
+0x080662AE	94	These tough guys have more muscles than brains.
+0x0806631E	120	These undead monsters thrive off of the blood of the living.
+0x080663AC	94	These worms live inside Buu's digestive system.
+0x08066420	94	These worms live inside Buu's digestive system.
+0x08066494	94	These worms live inside Buu's digestive system.
+0x0806650A	100	These aliens are like miniature versions of Yakon.
+0x0806657E	136	When there is no more room in H.F.I.L. the dead will walk the Earth.
+0x08066614	220	Gohan is the son of Goku and Chi-Chi. He is half human and half Saiyan. Gohan defeated Cell in the Cell Games.
+0x080666FC	248	Goku is a Saiyan from the planet Vegeta that was stranded on Earth. He is an all-around good guy, who often saves the Earth.
+0x08066802	234	Goten is the son of  Goku and Chi-Chi. Despite his young age, he's one of the most powerful fighters in the universe.
+0x080668FC	232	Trunks is the son of Vegeta and Bulma. Despite his young age he's one of the most powerful fighters in the universe.
+0x080669F4	302	Vegeta was the prince of the Planet Vegeta before it was destroyed by Frieza. Although he was once a villian, he usually fights for the Z-Fighters now.
+0x08066B34	292	Once an evil villian, Piccolo has seen the error of his ways and is now one of Earth's greatest heroes. Piccolo is an alien from the planet Namek.
+0x08066C72	186	A robot with thick geromantium armor that makes it invulnerable to most conventional attacks.
+0x08066D40	180	A known criminal, wanted on several counts of mischief and multiple counts of high jinks. 
+0x08066E08	140	These advanced megawatt class chemical laser guns are quite dangerous.
+0x08066EA2	108	The bones of the dead are animated by an unseen force.
+0x08066F20	94	These tough guys have more muscles than brains.
+0x08066F96	144	From the ancient sands of time these mummies awaken to curse the living.
+0x08067028	26	Death Machine
+0x08067044	186	A robot with thick geromantium armor that makes it invulnerable to most conventional attacks.
+0x08067100	38	Elite Majin Fighter
+0x08067128	124	A martial artist who has been converted over to Babidi's side.
+0x080671A6	38	Elite Majin Soldier
+0x080671CE	122	One of Babidi's Majin Henchmen from an unknown alien species.
+0x0806724A	40	Elite Shield Soldier
+0x08067274	118	This Majin Soldier will block your attacks with his shield.
+0x080672F8	136	When there is no more room in H.F.I.L. the dead will walk the Earth.
+0x0806738E	104	This Mud Man will split in half when you attack him.
+0x08067402	94	These tough guys have more muscles than brains.
+0x08067462	30	Grand Mechanoid
+0x08067482	82	This cyborg transforms into a metal ball.
+0x080674EA	144	A bomber armed with dangerous explosives. Approach with extreme caution.
+0x0806758C	136	A ruthless soldier of fortune. Armed with rocket propelled grenades.
+0x08067628	182	A known criminal, wanted on several counts of chicanery and multiple counts of shenanigans.
+0x080676E0	24	Hyper Cyborg
+0x080676FA	78	Half man... Half machine... All deadly.
+0x08067760	140	These advanced megawatt class chemical laser guns are quite dangerous.
+0x080677EE	24	Janemba Hand
+0x08067808	152	Be careful of the hand of Janemba that travels through a dimensional portal.
+0x080678B8	212	Battle tanks are fully armored in 2 inch plates of geromantium. These tanks are armed with a 120mm cannon.
+0x08067998	108	The bones of the dead are animated by an unseen force.
+0x08067A1E	136	When there is no more room in H.F.I.L. the dead will walk the Earth.
+0x08067ABE	144	A bomber armed with dangerous explosives. Approach with extreme caution.
+0x08067B62	136	A ruthless soldier of fortune. Armed with rocket propelled grenades.
+0x08067C04	78	Half man... Half machine... All deadly.
+0x08067C6A	120	The Destroyer's nastier, stronger, and meaner older brother.
+0x08067CFA	246	A ninja. These warriors value stealth and subterfuge. Some ninja use their ninjutsu skills for assassination and thieving. 
+0x08067E06	120	These undead monsters thrive off of the blood of the living.
+0x08067E90	120	These spirits come from the Other World to haunt the living.
+0x08067F1A	144	From the ancient sands of time these mummies awaken to curse the living.
+0x08067FC4	120	These spirits come from the Other World to haunt the living.
+0x0806803E	32	Power Mechandoid
+0x08068060	82	This cyborg transforms into a metal ball.
+0x080680CC	182	A known criminal, wanted on several counts of chicanery and multiple counts of shenanigans.
+0x08068190	342	Although many of these ancient warriors live by the code of the Bushido, they should be considered highly dangerous. Samurai are known for their devastating sword attacks.
+0x080682E8	30	Shadow Colossus
+0x08068308	120	The Destroyer's nastier, stronger, and meaner older brother.
+0x08068382	28	Shadow Warrior
+0x080683A0	246	A ninja. These warriors value stealth and subterfuge. Some ninja use their ninjutsu skills for assassination and thieving. 
+0x080684A8	246	A ninja. These warriors value stealth and subterfuge. Some ninja use their ninjutsu skills for assassination and thieving. 
+0x080685AE	342	Although many of these ancient warriors live by the code of the Bushido, they should be considered highly dangerous. Samurai are known for their devastating sword attacks.
+0x08068714	180	A known criminal, wanted on several counts of mischief and multiple counts of high jinks. 
+0x080687CA	28	Super Bio Mech
+0x080687E8	80	Watch out for this Cyborg's killer claw!
+0x0806883A	38	Super Majin Fighter
+0x08068862	124	A martial artist who has been converted over to Babidi's side.
+0x080688E0	38	Super Majin Soldier
+0x08068908	122	One of Babidi's Majin Henchmen from an unknown alien species.
+0x08068984	40	Super Shield Soldier
+0x080689AE	118	This Majin Soldier will block your attacks with his shield.
+0x08068A3C	104	This Mud Man will split in half when you attack him.
+0x08068AA6	28	Ultra Bio Mech
+0x08068AC4	80	Watch out for this Cyborg's killer claw!
+0x08068B20	120	These undead monsters thrive off of the blood of the living.
+0x08068BB2	212	Battle tanks are fully armored in 2 inch plates of geromantium. These tanks are armed with a 120mm cannon.
+0x08068C88	24	Majin Vegeta
+0x08068CA2	104	Vegeta has been taken over by Babidi's Majin powers.
+0x08068D0C	30	Airship Warlord
+0x08068D2C	80	Watch out for this Cyborg's killer claw!
+0x08068D7E	32	Pilaf's Guardian
+0x08068DA0	120	The Destroyer's nastier, stronger, and meaner older brother.
+0x08068E1A	36	Pharoah Totenhotep
+0x08068E40	144	From the ancient sands of time these mummies awaken to curse the living.
+0x08068EE2	154	Gotenks is the fusion of Goten and Trunks using the Metamorese Art of Fusion.
+0x08068F8C	150	Gogeta is the fusion of Goku and Vegeta using the Metamorese Art of Fusion.
+0x08069032	144	Vegito is the fusion of Goku and Vegeta using the magic Potara earrings.
+0x080690C4	30	Alien Announcer
+0x080690E4	158	This fungus alien is well known as the announcer of the Other World Tournament.
+0x08069196	136	This guardian of the West Galaxy has a fierce rivalry with King Kai.
+0x08069220	26	Banshee Blast
+0x0806923C	162	Hold the B Button to emit 5 thin, powerful beams of energy, one from each finger.
+0x080692F2	284	Press the B Button and release to emit a large ball of energy that explodes on contact.  Hold the B Button longer to make the attack stronger.
+0x08069410	38	Big Bang Kamehameha
+0x08069438	156	Hold the B Button to create a large ball of energy, followed by a long beam.  
+0x080694D6	28	Burning Attack
+0x080694F4	278	Press the B Button to shoot a spiked ball of chrono-energy which stuns enemies on contact.  Hold the B Button longer to increase stun time.
+0x0806960C	42	Dragon Fist Explosion
+0x08069638	314	Hold the B Button to create a giant dragon of pure energy.  Use the +Control Pad to control the dragon's head.  Release the B Button to make the dragon bite.
+0x08069774	38	Electric Kamehameha
+0x0806979C	214	Hold the B Button to emit a long beam of energy.  Enemies hit by this beam can become electrically charged.
+0x08069874	24	Energy Blast
+0x0806988E	270	Press the B Button to shoot out a concentrated missile of internal energy.  Press the B Button multiple times to shoot out many blasts.
+0x0806999E	24	Energy Punch
+0x080699B8	134	Press the B Button to throw a mighty punch, enhanced with energy.  
+0x08069A40	24	Energy Sword
+0x08069A5A	314	Hold the B Button to create a glowing sword of energy.  When fully charged, continue holding the B Button to spin around, and press the +Control Pad to move.
+0x08069BAE	168	Hold the B Button to emit a long beam of energy which travels across land instantly.
+0x08069C58	32	Flame Kamehameha
+0x08069C7A	270	Hold the B Button to emit a chain of energy flames.  While holding the B Button, press the +Control Pad to move the flames like a whip.
+0x08069D8A	24	Fusion Dance
+0x08069DA4	260	Press the B Button to begin the Fusion Dance sequence.  Watch carefully, then press the button indicated when it is highlighted.  
+0x08069EAA	54	Super Kamikaze Ghost Attack
+0x08069EE2	302	Hold the B Button to create small ghost replicas.  Let go of the B Button to release the ghosts, which attack the closest enemy and explode on contact.
+0x0806A012	40	Instant Transmission
+0x0806A03C	300	Hold the B Button to bring up the cursor.  Use the +Control Pad to select an item, enemy, or switch.  Release the B Button to teleport there and back.
+0x0806A180	96	Hold the B Button to emit a long beam of energy.
+0x0806A1F8	146	Mispronounced by Goten.  Hold the B Button to emit a long beam of energy.
+0x0806A2A0	318	Hold the B Button to make a cursor appear in front of the player.  Upon releasing the B Button, a large ball of energy will be thrown at the cursor's location.
+0x0806A3F2	204	Press the B Button to turn into the Great Saiyaman.  Press the B Button again to turn back into Gohan.
+0x0806A4C0	24	Super Saiyan
+0x0806A4DA	104	Press the B Button to transform into a Super Saiyan.
+0x0806A544	28	Super Saiyan 3
+0x0806A562	226	Press the B Button to transform into a Super Saiyan 3.  You must already be a Super Sayian to use this technique.
+0x0806A646	46	Ultra Volleyball Attack
+0x0806A676	154	Press the B Button to emit a beam that turns enemies into giant volleyballs. 
+0x0806A71A	52	Webfoot Technologies, Inc.
+0x0806A78C	34	Tools Programming
+0x0806A7B0	24	Cliff Davies
+0x0806A7E8	38	Network Programming
+0x0806A824	64	Lead Game Scripting, Design, Art
+0x0806A866	24	Andrew Myers
+0x0806A880	76	Lead Character Production, Design, Art
+0x0806A8CE	26	Gerry Swanson
+0x0806A8EA	76	Lead Level Design, Dialog, Design, Art
+0x0806A950	26	Character Art
+0x0806A984	24	Portrait Art
+0x0806A99E	36	Brian Babendererde
+0x0806A9D8	40	Character Animation:
+0x0806AA68	24	Yannis Brown
+0x0806AA82	40	Music, Sound Effects
+0x0806AAFC	26	Dana Dominiak
+0x0806AB18	26	Dana Dominiak
+0x0806AB34	38	Producer, President
+0x0806AB5C	26	Pascal Pochol
+0x0806AB78	64	Director of Software Engineering
+0x0806AC16	26	Andrew Osborn
+0x0806AC9C	30	Dana Pellegrini
+0x0806ACBC	24	Debra Osborn
+0x0806ACD6	32	Project Director
+0x0806AD12	24	Mark Flitman
+0x0806AD2C	30	Senior Producer
+0x0806AD60	36	Executive Producer
+0x0806AD86	24	Matt Collins
+0x0806ADA0	40	Senior Brand Manager
+0x0806ADE2	42	Director of Marketing
+0x0806AE0E	30	Nancy MacIntyre
+0x0806AE2E	34	V.P. of Marketing
+0x0806AE68	76	Executive. V.P. of Sales and Marketing
+0x0806AEB6	24	Steve Martin
+0x0806AED0	58	Director of Creative Services
+0x0806AF0C	34	Elizabeth Mackney
+0x0806AF30	92	Director of Editorial & Documentation Services
+0x0806AF8E	24	Kelly Wolnik
+0x0806AFA8	32	Graphic Designer
+0x0806AFCA	24	Kurt Carlson
+0x0806AFE4	48	Documentation-Specialist
+0x0806B044	34	Michael Gilmartin
+0x0806B068	60	Director of Publishing Support
+0x0806B0A6	44	Ezequiel "Chuck" Nunez
+0x0806B0D4	28	QA Supervisors
+0x0806B0F2	42	Christopher D. Reimer
+0x0806B12E	28	Howell Selburn
+0x0806B14C	28	Assistant Lead
+0x0806B234	26	Angel Marquez
+0x0806B250	30	Special Thanks:
+0x0806B2CA	26	Chris Lundeen
+0x0806B2E6	56	FUNimation Productions, Ltd.
+0x0806B322	24	Gen Fukunaga
+0x0806B350	36	Daniel Cocanougher
+0x0806B376	48	Executive Vice-President
+0x0806B3A8	44	Cindy Brennan Fukunaga
+0x0806B3D6	50	Vice-President, Marketing
+0x0806B422	42	Director of Licensing
+0x0806B44E	24	Jeremy Snead
+0x0806B468	50	Licensing Account Manager
+0x0806B49C	28	Jeremy Carlile
+0x0806B4BA	26	Script Writer
+0x0806B4D6	30	Special Thanks:
+0x0806B4F8	26	SHUEISHA Inc.
+0x0806B516	28	Toei Animation
+0x0806B536	28	Akira Toriyama
+0x0806B554	30	Original Author
+0x0806B590	30	The Other World
+0x0806B5C4	28	Great Saiyaman
+0x0806B5F6	32	World Tournament
+0x0806B64E	24	Majin Vegeta
+0x0806B768	30	A New Beginning
+0x0806B8B4	28	Grand Champion
+0x0806B8D2	28	World Champion
+0x0806B924	38	Supreme Grandmaster
+0x0806BA74	24	Super Saiyan
+0x0806BA8E	44	Ascendant Super Saiyan
+0x0806BABC	28	Super Saiyan 2
+0x0806BADA	28	Super Saiyan 3
+0x0806BAF8	26	Mystic Saiyan
+0x0806BB14	44	Legendary Super Saiyan
+0x0806BB50	26	Golden Oozaru
+0x0806BB7A	30	Mystical Dragon
+0x0806BB9A	28	Eternal Dragon
+0x0806BBB8	28	Match 1 Fight!
+0x0806BBD6	28	Match 2 Fight!
+0x0806BBF4	28	Match 3 Fight!
+0x0806BC12	28	Match 4 Fight!
+0x0806BC30	28	Match 5 Fight!
+0x0806BC4E	28	Match 6 Fight!
+0x0806BC6C	28	Match 7 Fight!
+0x0806BC8A	28	Match 8 Fight!
+0x0806BCA8	28	Match 9 Fight!
+0x0806BCC6	30	Match 10 Fight!
+0x086B7400	136	"Energy attack level set for attack which doesn't exist for player!"
+0x086B748C	148	"Energy attack level requested for attack which doesn't exist for player!"
+0x086B7524	106	"Unable to find sprite index in character state data"
+0x08734D24	38	&'()*+,-./012345678
+0x087358A6	30	&'()*+,-./01234
+0x08735908	38	>?@ABCDEF56789:;<=[
+0x08735F58	36	YZ[\]^_=>`abcCdefg
+0x0873741C	44	PQRSTUV9WXY999Z[\]]]]^
+0x0873A880	30	pqrstuvwxyz{{{|
+0x0873B5CE	38	FGHIJKLMNO/PQNRSTUV
+0x0873B648	24	fghNiQ/Njklm
+0x0873B66A	30	WXYZ[\=]@!=^_`a
+0x08742D50	24	4566789:;<=>
+0x08743666	44	GJKLMNOPQ{52}STU@VWXYZ{47}
+0x08748B1A	52	234555567895:;<55=>?5@AB5C
+0x087801BC	24	-Accessories
