@@ -584,6 +584,96 @@ with open(path, "w") as f:
 print("patched: C hot-swaps Sonic <-> Knuckles, Start left vanilla")
 PYPATCH
 
+# Patch 3: sign the cartridge header. The title screen's text is pre-rendered
+# art (ArtNem_TitleScreenText), not a font, so a subtitle there needs a drawn
+# asset. The header is plain text and is what emulators and flashcarts display,
+# so it signs the build without inventing artwork. Both name fields are exactly
+# 48 characters - the header is fixed-width and the ROM will not boot if the
+# length changes.
+python3 - "$DIST/sonic3k.asm" <<'PYHEADER'
+import sys
+
+path = sys.argv[1]
+with open(path) as f:
+    content = f.read()
+
+OLD = '"SONIC & KNUCKLES                                "'
+NEW = '"SONIC 3 HEROES - SWAP MOD BY CPC                "'
+
+assert len(OLD) == len(NEW), "header fields are fixed width"
+
+n = content.count(OLD)
+if n != 2:
+    sys.exit("PATCH FAILED: expected 2 header names, found %d" % n)
+
+content = content.replace(OLD, NEW)
+
+with open(path, "w") as f:
+    f.write(content)
+print("patched: cartridge header signed (%d fields)" % n)
+PYHEADER
+
+# Patch 4: "CPC" on the title screen, spelled from tiles already on it.
+#
+# The title text is pre-rendered art, not a font - but Map_TitleScreenText draws
+# "COMPETITION" from tiles $0C-$17, twelve tiles for eleven letters, i.e. one
+# tile per character. So $0C is C and $0F is P, and CPC costs no new artwork.
+# Mirrors Obj_TitleCopyright for art base, palette and priority.
+python3 - "$DIST/sonic3k.asm" <<'PYCPC'
+import sys
+
+path = sys.argv[1]
+with open(path) as f:
+    content = f.read()
+
+anchor = "\nObj_TitleCopyright:\n"
+if anchor not in content:
+    sys.exit("PATCH FAILED: Obj_TitleCopyright not found")
+
+obj = (
+    "\n; Sonic 3 Heroes - CPC credit, built from the title screen's own letters.\n"
+    "S3H_Obj_CPC:\n"
+    "\t\tmove.l\t#S3H_Map_CPC,mappings(a0)\n"
+    "\t\tmove.w\t#make_art_tile($680,3,1),art_tile(a0)\n"
+    "\t\tmove.w\t#$158,x_pos(a0)\t; right edge, as the copyright uses\n"
+    "\t\tmove.w\t#$C0,y_pos(a0)\t; top right, down in the dark of the ring\n"
+    "\t\tmove.w\t#$80,priority(a0)\t; priority is in units of $80 - $40 is invalid\n"
+    "\t\tmove.b\t#$18,width_pixels(a0)\n"
+    "\t\tmove.b\t#4,height_pixels(a0)\n"
+    "\t\tmove.b\t#0,mapping_frame(a0)\n"
+    "\t\tmove.l\t#S3H_Obj_CPC_Display,(a0)\n"
+    "S3H_Obj_CPC_Display:\n"
+    "\t\tjmp\t(Draw_Sprite).l\n"
+    "; The row reads _COMPETITION_, so the underscore is $0C and the letters start\n"
+    "; at $0D: C=$0D, O=$0E, M=$0F, P=$10. Rendering $0C/$0F gave \"_M_\".\n"
+    "S3H_Map_CPC:\n"
+    "\t\tdc.w\tS3H_CPC_Frame0-S3H_Map_CPC\n"
+    "S3H_CPC_Frame0:\tdc.w 3\n"
+    "; The O beside C is a fat glyph and spills into C's tile. Pieces draw in\n"
+    "; order, so overlap them by a pixel: each letter paints over the previous\n"
+    "; one's spillover. A blank tile ($02, the space in \"1 PLAYER\") caps the\n"
+    "; trailing C is left alone: $02 was not actually blank and drew a stray\n"
+    "; glyph, which looked worse than the edge it was meant to hide.\n"
+    "\t\tdc.b\t0, 0, 0, $0D, 0, 0\t; C\n"
+    "\t\tdc.b\t0, 0, 0, $10, 0, 6\t; P, 2px over C - 3px was too tight\n"
+    "\t\tdc.b\t0, 0, 0, $0D, 0, $E\t; C, butted against P\n"
+    "\t\teven\n"
+)
+
+content = content.replace(anchor, obj + anchor, 1)
+
+spawn = "\t\tmove.l\t#Obj_TitleANDKnuckles,(Dynamic_object_RAM+(object_size*4)).w"
+if spawn not in content:
+    sys.exit("PATCH FAILED: title object spawn list not found")
+content = content.replace(
+    spawn,
+    spawn + "\n\t\tmove.l\t#S3H_Obj_CPC,(Dynamic_object_RAM+(object_size*5)).w", 1)
+
+with open(path, "w") as f:
+    f.write(content)
+print("patched: CPC on the title screen")
+PYCPC
+
 ( cd "$DIST" && lua buildS3Complete.lua ) >/dev/null
 
 mkdir -p "$HERE/rom"
