@@ -674,6 +674,37 @@ with open(path, "w") as f:
 print("patched: CPC on the title screen")
 PYCPC
 
+# Patch 5: level select and debug mode always on. Both are the retail game's own
+# cheat (the title-screen button sequence at ~6295 sets exactly these two flags),
+# and Sonic 3's developers had the same shortcut left in and commented out at
+# ~10028 - "These two below lines from S3 were NOPed out". This mod is a god-mode
+# cruise, so there is nothing to protect.
+#
+# Set them as the TITLE SCREEN loads its objects: at level init they would only
+# apply after you had already played a level, which is too late to be useful.
+python3 - "$DIST/sonic3k.asm" <<'PYCHEATS'
+import sys
+
+path = sys.argv[1]
+with open(path) as f:
+    content = f.read()
+
+anchor = "\t\tmove.l\t#Obj_TitleCopyright,(Dynamic_object_RAM).w\n"
+if anchor not in content:
+    sys.exit("PATCH FAILED: title object spawn not found")
+
+content = content.replace(
+    anchor,
+    "\t\tmove.w\t#(1<<8)|1,(Level_select_flag).w\t; always available\n"
+    "\t\tmove.w\t#(1<<8)|1,(Debug_cheat_flag).w\n"
+    + anchor,
+    1)
+
+with open(path, "w") as f:
+    f.write(content)
+print("patched: level select and debug mode enabled")
+PYCHEATS
+
 ( cd "$DIST" && lua buildS3Complete.lua ) >/dev/null
 
 mkdir -p "$HERE/rom"
