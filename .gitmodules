@@ -1,0 +1,3 @@
+[submodule "nodes/local/megadrive/homebrew"]
+	path = nodes/local/megadrive/homebrew
+	url = https://github.com/consolesplayingconsoles/megadrive-homebrew.git
