@@ -1,9 +1,0 @@
-[submodule "nodes/local/megadrive/homebrew/mods/sonic1/s1disasm"]
-	path = nodes/local/megadrive/homebrew/mods/sonic1/s1disasm
-	url = https://github.com/consolesplayingconsoles/s1disasm.git
-[submodule "nodes/local/megadrive/homebrew/mods/sonic2/s2disasm"]
-	path = nodes/local/megadrive/homebrew/mods/sonic2/s2disasm
-	url = https://github.com/consolesplayingconsoles/s2disasm
-[submodule "nodes/local/megadrive/homebrew/mods/sonic3/skdisasm"]
-	path = nodes/local/megadrive/homebrew/mods/sonic3/skdisasm
-	url = https://github.com/consolesplayingconsoles/skdisasm.git
