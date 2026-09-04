@@ -112,7 +112,10 @@ function cmdAttach() { postLog('attack', 'operator') }
 let poll = 0, frameTick = 0
 function startLoops() {
   if (!poll)      poll      = window.setInterval(() => { refreshCapture(); refreshLog() }, 2000)
-  if (!frameTick) frameTick = window.setInterval(() => { if (capture.value.running) frameBust.value = Date.now() }, 1000)
+  // 250ms: ffmpeg writes the rolling still at 10fps (see _capture_try), so 1s was
+  // throwing away 9 of every 10 frames and made the panel look frozen. 4fps is as
+  // smooth as a still-poller gets without going to a real MJPEG stream.
+  if (!frameTick) frameTick = window.setInterval(() => { if (capture.value.running) frameBust.value = Date.now() }, 250)
 }
 function stopLoops() {
   if (poll)      { clearInterval(poll);      poll = 0 }

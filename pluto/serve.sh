@@ -32,7 +32,29 @@ fi
 # Mappings (event->controller-op config) ship inside config/; point the core there.
 [[ -d "$HERE/config/mappings" ]] && export CPC_MAPPINGS="$HERE/config/mappings"
 
-python3 "$HERE/api/api.py"                              & API_PID=$!
+# Pick an interpreter that HAS Pillow. The API only needs it for the capture renders
+# (the Kindle e-ink frames, latest-processed.jpg) and degrades to raw frames without
+# it -- which on this Lab Mac meant `python3` = Homebrew 3.14 = no Pillow = the Kindle
+# silently served unrotated full-size frames for a whole session. Probe rather than
+# hardcode a version, since this same script is deployed to the Pi and the EEE PC.
+# Override with PLUTO_PYTHON=... if you want a specific one.
+PY="${PLUTO_PYTHON:-}"
+if [[ -z "$PY" ]]; then
+  for c in python3 python3.13 python3.12 python3.11 python3.10; do
+    command -v "$c" >/dev/null 2>&1 || continue
+    if "$c" -c 'import PIL' >/dev/null 2>&1; then PY="$c"; break; fi
+  done
+fi
+if [[ -z "$PY" ]]; then
+  PY=python3
+  echo "[WARN] no python with Pillow found — capture renders will be degraded (see the API's boot banner)"
+fi
+echo "[info] api interpreter: $PY ($("$PY" --version 2>&1))"
+
+# -u: unbuffered. Under systemd/nohup stdout is a pipe, so Python block-buffers it and
+# the boot output (including the PILLOW MISSING banner) would sit unflushed in memory --
+# a warning you can't see is no warning at all.
+"$PY" -u "$HERE/api/api.py"                             & API_PID=$!
 # SPA static server with history-fallback: serves real files from dist/, and
 # falls back to dist/index.html for any path that doesn't resolve (so deep
 # links / refreshes on /chat and /dreame work). Pure stdlib, Python 3.6-safe.

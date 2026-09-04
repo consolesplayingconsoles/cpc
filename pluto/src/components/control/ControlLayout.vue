@@ -3,6 +3,7 @@ import { useSlots, computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import ControlKeyboard from './ControlKeyboard.vue'
 import RoombaTelemetry from './RoombaTelemetry.vue'
 import RoombaCamera from './RoombaCamera.vue'
+import KindleOutput from './KindleOutput.vue'
 
 type Cell = 'nw' | 'ne' | 'sw' | 'se'
 
@@ -10,6 +11,11 @@ interface Props {
   active: boolean
   mapSource: string
   target: string
+  // The selected target's ID, when it differs from the drive sink above. The roomba
+  // target's sink happens to be named 'roomba', so its panels can key off `target`;
+  // a display-only target (kindle) drives nothing -- sink 'none' -- so it needs the
+  // id to be recognised here.
+  targetId?: string
   mapping: string
   targetDev: string
   roombaIp?: string
@@ -22,6 +28,10 @@ interface Props {
 const props = defineProps<Props>()
 
 const shouldShowTelemetry = computed(() => props.target === 'roomba' && props.roombaIp)
+// SW is the target-owned slot: roomba telemetry for the roomba target, the Kindle
+// output (what the e-ink page is showing) for the kindle target. Source slots never
+// claim SW, so a target panel can't collide with one.
+const shouldShowKindle = computed(() => props.targetId === 'kindle')
 defineEmits<{ 'drive-error': [msg: string] }>()
 
 const slots = useSlots()
@@ -61,6 +71,7 @@ const maxCell = ref<Cell | null>(null)
 const maxCells = computed<Set<Cell>>(() => {
   const s = new Set<Cell>(props.maxCells ?? [])
   if (shouldShowCamera.value) s.add('ne')   // roomba camera opts itself in
+  if (shouldShowKindle.value) s.add('sw')   // so does the kindle output
   return s
 })
 // No fullscreen on the phone/narrow layout -- it's already a scrollable stack.
@@ -76,7 +87,7 @@ watch(() => props.active, (on) => { if (!on) maxCell.value = null })
 
 const has = (n: string) => {
   if (n === 'se') return true  // SE is always hardcoded
-  if (n === 'sw') return shouldShowTelemetry.value  // SW (telemetry) rendered if target is roomba
+  if (n === 'sw') return shouldShowTelemetry.value || shouldShowKindle.value  // SW = the target-owned panel
   if (n === 'ne') return !!slots['ne'] || shouldShowCamera.value  // NE: source slot or the camera
   return !!slots[n]
 }
@@ -134,8 +145,16 @@ function cellStyle(cell: 'nw' | 'ne' | 'sw' | 'se') {
         </button>
         <slot name="ne"><RoombaCamera v-if="shouldShowCamera" :node="targetDev" :active="active" :listening="listening" /></slot>
       </div>
-      <div v-if="shouldShowTelemetry" class="quad" :style="isNarrow ? undefined : cellStyle('sw')">
-        <RoombaTelemetry :ip="roombaIp!" :active="active" />
+      <div v-if="shouldShowTelemetry || shouldShowKindle" class="quad" :style="isNarrow ? undefined : cellStyle('sw')">
+        <button v-if="canMax('sw')" class="quad-max" :class="{ on: maxCell === 'sw' }"
+          @click="toggleMax('sw')"
+          :title="maxCell === 'sw' ? 'Exit fullscreen (Esc)' : 'Fullscreen'"
+          :aria-label="maxCell === 'sw' ? 'Exit fullscreen' : 'Fullscreen'">
+          <svg v-if="maxCell === 'sw'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
+          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
+        </button>
+        <RoombaTelemetry v-if="shouldShowTelemetry" :ip="roombaIp!" :active="active" />
+        <KindleOutput v-else :active="active" />
       </div>
       <div class="quad quad--main" :style="isNarrow ? undefined : cellStyle('se')">
         <ControlKeyboard :active="active" :map-source="mapSource" :target="target" :mapping="mapping" :target-dev="targetDev" :narrow="isNarrow" @drive-error="$emit('drive-error', $event)" @listen="listening = $event" />
