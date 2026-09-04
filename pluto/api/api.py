@@ -7,9 +7,11 @@ Listens on all interfaces so LAN clients (consoles) can reach it.
 Usage: python3 api/api.py
 """
 import os
+import io
 import sys
 import json
 import zlib
+import html
 import base64
 import tempfile
 import platform
@@ -56,6 +58,14 @@ PORT = 7700
 
 # Cache retro.html path at module load (resolves once, survives dev reloads)
 _RETRO_HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "retro.html")
+_KINDLE_HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kindle.html")
+# Default seconds between /kindle reloads. Low enough to feel live, high enough that
+# an e-ink panel finishes its refresh before the next one lands. Override per-device
+# with /kindle?r=N (clamped below) -- the Kindle's own bookmark carries the value, so
+# you can dial it in on the device without touching the host.
+_KINDLE_REFRESH_SECS = 5
+_KINDLE_REFRESH_MIN  = 1
+_KINDLE_REFRESH_MAX  = 300
 
 
 # ── @claude bot (Anthropic API) ──────────────────────────────────────────────
@@ -1553,6 +1563,7 @@ def _write_state_atomic(path, obj, backup=False):
 
 
 def _capture_frame_path(): return os.path.join(_capture_dir(), "latest.jpg")
+def _capture_processed_path(): return os.path.join(_capture_dir(), "latest-processed.jpg")
 def _capture_flag_path():  return os.path.join(_capture_dir(), "state.flag")
 
 
@@ -1725,6 +1736,38 @@ def _frame_processor(src, dst, stop):
             img.save(dst, "JPEG", quality=80)
         except Exception:
             pass
+
+
+def _kindle_frame_bytes(width=None, quality=75, rotate=0):
+    """E-ink render of the current capture frame: greyscale, scaled, histogram
+    stretched. Deliberately NOT latest-processed.jpg -- that one is brightness x2.2
+    for Reverse Animus's dark corridors (REVERSE-ANIMUS.md) and washes a normal game
+    out to white on a Kindle. autocontrast stretches per frame instead, so a dark
+    scene still lifts but a bright one keeps its highlights. Rendered on demand
+    rather than written to disk, so it needs no second processor thread. Smaller
+    width = less to decode and less panel to push, which is the whole game when the
+    display is e-ink. None -> caller falls back to the raw frame."""
+    if not _PIL_OK:
+        return None
+    try:
+        img = Image.open(_capture_frame_path()).convert("RGB")
+        # Rotate BEFORE scaling so `width` always means the width of the picture the
+        # Kindle actually receives -- turning a 16:9 game sideways is what lets it
+        # fill a portrait e-ink panel instead of letterboxing into a third of it.
+        # PIL rotates counter-clockwise, so 90 = turned left.
+        if rotate:
+            img = img.rotate(rotate, expand=True)
+        w = int(width or img.width // 2)
+        w = max(160, min(img.width, w))
+        h = max(1, int(img.height * w / float(img.width)))
+        img = img.resize((w, h), Image.LANCZOS)
+        img = ImageOps.grayscale(img)
+        img = ImageOps.autocontrast(img, cutoff=2)
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=quality)
+        return buf.getvalue()
+    except Exception:
+        return None
 
 
 def _capture_try(name, frame, rec_path):
@@ -1985,6 +2028,77 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _serve_kindle(self, query=""):
+        """Serve the zero-JS retro frame-viewer page for e-ink browsers (Kindle):
+        meta-refresh reloads the whole page every `?r=` seconds (default
+        _KINDLE_REFRESH_SECS), so every value below is rendered server-side per
+        request -- no fetch, no timers, nothing that depends on the on-device
+        browser running JS at all."""
+        try:
+            with open(_KINDLE_HTML_PATH, "r") as f:
+                page = f.read()
+        except Exception:
+            self._send(500, {"error": "kindle.html missing"})
+            return
+        # Refresh rate lives in the URL so the Kindle's own bookmark carries it.
+        refresh = _KINDLE_REFRESH_SECS
+        try:
+            r = urllib.parse.parse_qs(query).get("r", [None])[0]
+            if r is not None:
+                refresh = max(_KINDLE_REFRESH_MIN, min(_KINDLE_REFRESH_MAX, int(r)))
+        except (TypeError, ValueError):
+            pass
+        cfg = self.__class__.config
+        brand = cfg.get("NODE_NAME", "CPC") + (" Lab" if self.__class__.is_lab else " C2")
+        primary = cfg.get("UI_PRIMARY_COLOR", "") or "#1a1a1a"
+
+        with _capture_lock:
+            proc = _capture_state.get("proc")
+            running = bool(proc and proc.poll() is None)
+            device = _capture_state.get("device")
+        # The picture is an MJPEG stream, not a reloaded still: one connection, and a
+        # frame is pushed only when the capture actually changes. fps/w pass straight
+        # through so they can be tuned from the Kindle's own bookmark.
+        qs = urllib.parse.parse_qs(query or "")
+        src = "/control/frame/kindle/stream"
+        extra = []
+        for k in ("fps", "w", "rot", "q"):
+            v = (qs.get(k, [""])[0] or "").strip()
+            if v:
+                extra.append("%s=%s" % (k, urllib.parse.quote(v, safe="")))
+        if extra:
+            src += "?" + "&".join(extra)
+
+        # Chrome costs panel space, and the panel is the point -- so it is OFF unless
+        # explicitly asked for (?chrome=1), for when you want to read the state.
+        head_html, foot_html = "", ""
+        if (qs.get("chrome", [""])[0] or "").strip() in ("1", "true", "yes"):
+            head_html = '<div id="hd"><span style="color:%s">%s</span>%s</div>' % (
+                html.escape(primary), html.escape(brand),
+                (" &nbsp; " + html.escape(device)) if device else "")
+            try:
+                age_s = int(time.time() - os.path.getmtime(_capture_frame_path()))
+                age   = ("%ss" % age_s) if age_s < 60 else ("%sm" % (age_s // 60))
+                state = "LIVE" if running else "PAUSED"
+            except OSError:
+                age, state = "never", "NO SIGNAL"
+            foot_html = '<div id="status">%s &middot; frame %s old</div>' % (state, age)
+
+        page = page.replace("<!--CPC_REFRESH-->", str(refresh))
+        page = page.replace("<!--CPC_TITLE-->", html.escape(brand))
+        page = page.replace("<!--CPC_SRC-->", src)
+        page = page.replace("<!--CPC_HEAD-->", head_html)
+        page = page.replace("<!--CPC_FOOT-->", foot_html)
+        body = page.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _dreame_repo(self):
         """Absolute path to the dreamehome-client repo (DREAME_CLIENT_PATH or default)."""
         cfg = self.__class__.config
@@ -2118,13 +2232,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # BESIDE the dispatch, not table-driven: add/rename/remove a route in do_GET/
     # do_POST/do_PUT below -> update this set AND openapi.yaml or the commit fails.
     API_ROUTES = {
-        ("GET", "/retro"), ("GET", "/dreame"), ("GET", "/nodes"),
+        ("GET", "/retro"), ("GET", "/kindle"), ("GET", "/dreame"), ("GET", "/nodes"),
         ("GET", "/connections"), ("GET", "/whoami"), ("GET", "/messages"),
         ("GET", "/deploy/{node}/stream"),
         ("GET", "/mappings"), ("GET", "/mappings/{source}"), ("GET", "/mappings/{source}/{target}"),
         ("GET", "/control/config"),
         ("GET", "/control/signal"), ("GET", "/control/capture"), ("GET", "/control/log"),
-        ("GET", "/control/frame"), ("GET", "/control/google/lens"), ("GET", "/control/google/config"),
+        ("GET", "/control/frame"), ("GET", "/control/frame/processed"),
+        ("GET", "/control/frame/kindle"), ("GET", "/control/frame/kindle/stream"),
+        ("GET", "/control/google/lens"), ("GET", "/control/google/config"),
         ("GET", "/control/google/latest"),
         ("GET", "/translate/projects"), ("GET", "/translate/systems"), ("GET", "/translate/games"),
         ("GET", "/translate/extract"), ("GET", "/translate/sources"), ("GET", "/translate/meta"),
@@ -2147,6 +2263,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if parsed.path == "/retro":
             self._serve_retro()
+
+        elif parsed.path == "/kindle":
+
+            self._serve_kindle(parsed.query)
 
         elif parsed.path == "/dreame":
             self._serve_dreame()
@@ -2189,6 +2309,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif parsed.path == "/control/frame":
             self._handle_control_frame()
+
+        elif parsed.path == "/control/frame/processed":
+            self._handle_control_frame_processed()
+
+        elif parsed.path == "/control/frame/kindle":
+            self._handle_control_frame_kindle()
+
+        elif parsed.path == "/control/frame/kindle/stream":
+            self._handle_control_frame_kindle_stream(parsed.query)
 
         elif parts[:1] == ["camera"] and len(parts) >= 3 and parts[2] == "stream":
             self._handle_camera_stream(parts[1])
@@ -2639,6 +2768,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "session": _capture_state.get("session_ts"),
                     "recording": bool(_capture_state.get("rec_path"))}
         info["flag"] = _flag_read()
+        # Surfaced so a degraded render is visible from the API too, not just the
+        # boot log -- false means the frame routes are serving raw, unprocessed frames.
+        info["pil"] = _PIL_OK
         try:
             info["frame_mtime"] = round(os.path.getmtime(_capture_frame_path()), 3)
         except OSError:
@@ -2681,6 +2813,118 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._cors_headers()
         self.end_headers()
         self.wfile.write(data)
+
+    def _handle_control_frame_processed(self):
+        """GET /control/frame/processed -> the downscaled, contrast-boosted JPEG
+        _frame_processor keeps writing alongside the raw frame (latest-processed.jpg) --
+        cheaper to look at, closer to what Claude's own 'watch' actually reads."""
+        try:
+            with open(_capture_processed_path(), "rb") as f:
+                data = f.read()
+        except OSError:
+            self._send(404, {"error": "no processed frame"})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self._cors_headers()
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _handle_control_frame_kindle(self):
+        """GET /control/frame/kindle -> the e-ink render of the current frame (what the
+        /kindle page and its Control-tab panel both show). Falls back to the raw frame
+        when Pillow is missing, so the page never breaks -- just looks less e-ink."""
+        data = _kindle_frame_bytes()
+        if data is None:
+            try:
+                with open(_capture_frame_path(), "rb") as f:
+                    data = f.read()
+            except OSError:
+                self._send(404, {"error": "no frame"})
+                return
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self._cors_headers()
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _handle_control_frame_kindle_stream(self, query=""):
+        """GET /control/frame/kindle/stream -> the e-ink render as MJPEG
+        (multipart/x-mixed-replace). The Kindle holds ONE connection and the server
+        pushes frames into a single <img>: no page reload, no polling, no JS, no
+        re-layout -- the panel repaints a picture and nothing else. Same mechanism as
+        the roomba camera (_handle_camera_stream), except the frames are rendered here
+        from the rolling capture still rather than proxied out of ffmpeg.
+
+        A frame is pushed only when the underlying capture frame actually CHANGED: on
+        e-ink every repaint costs a flash and some ghosting, so a static screen (a
+        menu, a paused game) should cost nothing at all.
+        ?fps= push cap (default 4), ?w= render width (default 600)."""
+        qs = urllib.parse.parse_qs(query or "")
+
+        def _num(key, default, lo, hi):
+            try:
+                return max(lo, min(hi, float(qs.get(key, [default])[0])))
+            except (TypeError, ValueError):
+                return default
+
+        # Defaults ARE the tuned setup -- a bare /kindle is the one you want, because
+        # typing query strings on an e-ink keyboard is its own punishment. Measured on
+        # a 1280x720 capture of a 320x224 console: 400px wide at q60 is 35KB/frame vs
+        # 78KB at the old 600/q75, and 400 still oversamples the 224 real scanlines.
+        # rot=270 is CONFIRMED ON THE DEVICE: upright with the Kindle laid on its side,
+        # resting on its case cover. Don't re-derive this from which way PIL rotates --
+        # every attempt to reason it out got the sign wrong, and every earlier "test"
+        # was worthless because Pillow was missing and the frames came through raw and
+        # unrotated (see the boot banner). The device is the only oracle.
+        # fps=10 matches ffmpeg's write rate.
+        fps   = _num("fps", 10.0, 0.1, 15.0)
+        width = int(_num("w", 400, 160, 1920))
+        rot   = int(_num("rot", 270, 0, 270)) // 90 * 90   # snap to 0/90/180/270
+        # NB: don't be tempted to posterise to the panel's ~16 greys "to save bytes" --
+        # measured, it makes the JPEG 14% BIGGER. Hard quantisation steps are sharp
+        # edges, and a DCT codec pays for edges. Width and quality are the real levers.
+        qual  = int(_num("q", 60, 20, 95))
+        boundary = "frame"
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=%s" % boundary)
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self._cors_headers()
+        self.end_headers()
+        interval = 1.0 / fps
+        last_mtime, last_push = 0.0, 0.0
+        try:
+            while True:
+                try:
+                    mt = os.path.getmtime(_capture_frame_path())
+                except OSError:
+                    mt = 0.0
+                now = time.time()
+                # Changed frame, or a 10s keepalive so a paused game doesn't read as a
+                # dropped connection to the browser.
+                if mt != last_mtime or (now - last_push) >= 10.0:
+                    data = _kindle_frame_bytes(width, quality=qual, rotate=rot)
+                    if data is None:      # no Pillow: push the raw still instead
+                        try:
+                            with open(_capture_frame_path(), "rb") as f:
+                                data = f.read()
+                        except OSError:
+                            data = None
+                    if data:
+                        self.wfile.write(b"--%s\r\n" % boundary.encode())
+                        self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                        self.wfile.write(b"Content-Length: %d\r\n\r\n" % len(data))
+                        self.wfile.write(data)
+                        self.wfile.write(b"\r\n")
+                        self.wfile.flush()
+                        last_mtime, last_push = mt, now
+                time.sleep(interval)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass   # viewer closed the <img> / navigated away / Kindle slept
 
     def _handle_camera_stream(self, node_id):
         """GET /camera/<node>/stream -> ffmpeg proxies the node's RTSP camera as MJPEG
@@ -3805,9 +4049,30 @@ def run():
 
     signal.signal(signal.SIGTERM, _on_term)
 
+    # Pillow is optional for MOST of Pluto (nodes, chat, deploys need none of it), so
+    # this doesn't exit -- but it must never degrade QUIETLY again. Without it every
+    # capture render falls back to the raw 1280x720 frame, so the Kindle silently gets
+    # an unrotated, full-size, full-colour picture and the code looks blameless. That
+    # cost a whole debugging session. Say so, loudly, and name the interpreter, because
+    # the usual cause is `python3` resolving to a build that lacks it.
+    if not _PIL_OK:
+        print("")
+        print("  " + "!" * 66)
+        print("  !! PILLOW MISSING -- capture renders are DEGRADED")
+        print("  !!")
+        print("  !! interpreter: %s" % sys.executable)
+        print("  !! effect:      /control/frame/kindle[/stream] and latest-processed.jpg")
+        print("  !!              fall back to the RAW frame: no rotation, no downscale,")
+        print("  !!              no greyscale. The Kindle view will look wrong.")
+        print("  !! fix:         run under a python that has Pillow, e.g. python3.11,")
+        print("  !!              or set PLUTO_PYTHON to one in serve.sh")
+        print("  " + "!" * 66)
+        print("")
+
     print("  api listening on 0.0.0.0:%d" % PORT)
     if host_ip:
         print("  LAN: http://%s:%d" % (host_ip, PORT))
+    print("  pillow: %s" % ("yes" if _PIL_OK else "NO -- renders degraded"))
     print("  logs: %s" % _log_path)
     print("  ctrl-c to stop")
 

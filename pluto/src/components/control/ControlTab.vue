@@ -39,7 +39,7 @@ function pickHost(h: string) {
 
 // ── SOURCE — the event producer, scoped to the host (config-driven, shown in full). ──
 const SOURCE_LABELS: Record<string, string> = {
-  claude: 'Claude', google: 'Google', keyboard: 'Keyboard only',
+  claude: 'Claude', google: 'Google', capture: 'Capture', keyboard: 'Keyboard only',
   dreampicoport: 'DreamPicoPort', kinect: 'Kinect', nokia: 'Nokia Phone', dreame: 'Dreame Cloud',
 }
 const sourceList = computed(() =>
@@ -57,7 +57,7 @@ interface FlatTarget {
   label: string
   drive: 'none' | 'keyboard' | 'pi' | 'roomba' | 'megadrive'   // the sink the drive service opens
   dev: string                                     // pico dev (pi) | roomba node id (roomba)
-  kind: 'none' | 'emulator' | 'console' | 'roomba'
+  kind: 'none' | 'emulator' | 'console' | 'roomba' | 'display'
   ip?: string                                     // roomba: host:port, for the telemetry panel
 }
 const roombaNodes = computed(() =>
@@ -85,6 +85,12 @@ const targetOptions = computed<FlatTarget[]>(() => {
     } else if (cat === 'roomba') {
       for (const n of roombaNodes.value)
         out.push({ id: n.id, label: n.name, drive: 'roomba', dev: n.id, kind: 'roomba', ip: n.ip })
+    } else if (cat === 'kindle') {
+      // A DISPLAY target: the capture goes out to it over the web (Pluto's /kindle
+      // page, which the Kindle's e-ink browser reloads on a timer). Nothing is driven
+      // INTO it -- sink 'none', so the on-screen pad renders but stays inert -- and
+      // the stage mounts the target-owned Kindle panel (see ControlLayout).
+      out.push({ id: 'kindle', label: 'Kindle', drive: 'none', dev: '', kind: 'display' })
     } else if (cat === 'megadrive') {
       // MD as a CONTROLLER target: the selected source's quadrant layout drives it via the
       // SE ControlKeyboard, same as any pad. The 'megadrive' drive sink (drive service ->
@@ -181,9 +187,10 @@ watch([source, target, mapping, mappings, targetOptions, sourceList, host, () =>
     if (sourceList.value.length) router.replace(path(sourceList.value[0].id, '', ''))
     return
   }
-  // Claude is Lab-only (capture is local to the dev host). A deep link to /control/claude
-  // on the C2 must not render it -> fall back to the first available source.
-  if ((source.value === 'claude' || source.value === 'google') && !isLab) {
+  // Claude/Google/Capture are Lab-only (the HDMI capture card is local to the dev host).
+  // A deep link to /control/claude on the C2 must not render it -> fall back to the
+  // first available source.
+  if ((source.value === 'claude' || source.value === 'google' || source.value === 'capture') && !isLab) {
     router.replace(path(sourceList.value[0]?.id || 'keyboard', '', ''))
     return
   }
@@ -256,7 +263,7 @@ function openMappingDir() {
     <div class="control-body">
       <div class="control-stage">
         <ControlBody
-          :active="active" :source="source" :target="driveTarget" :mapping="effMapping"
+          :active="active" :source="source" :target="driveTarget" :target-id="effTarget" :mapping="effMapping"
           :target-dev="driveDev" :roomba-ip="roombaIp" :nodes="nodes" :name="name"
           :show-offline="showOffline"
           @drive-error="setError" />

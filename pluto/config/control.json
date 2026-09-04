@@ -3,8 +3,8 @@
     {
       "id": "lab",
       "label": "Pluto Lab",
-      "sources": ["claude", "google", "keyboard", "dreampicoport", "dreame"],
-      "targets": ["emulator", "roomba"]
+      "sources": ["claude", "google", "capture", "keyboard", "dreampicoport", "dreame"],
+      "targets": ["emulator", "kindle", "roomba"]
     },
     {
       "id": "pi",

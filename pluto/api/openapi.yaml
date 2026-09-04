@@ -26,6 +26,8 @@ tags:
 paths:
   /retro:
     get: { tags: [chat], summary: Barebones retro-console chat page (HTML), responses: { '200': { description: HTML } } }
+  /kindle:
+    get: { tags: [control], summary: Zero-JS retro capture-frame viewer for e-ink browsers (HTML), responses: { '200': { description: HTML } } }
   /dreame:
     get: { tags: [nodes], summary: Dreame vacuum drill-in page (HTML), responses: { '200': { description: HTML } } }
   /nodes:
@@ -80,6 +82,12 @@ paths:
     get: { tags: [control], summary: Guide-Dog control log tail, responses: { '200': { description: Log } } }
   /control/frame:
     get: { tags: [control], summary: Latest capture frame (image), responses: { '200': { description: Frame } } }
+  /control/frame/processed:
+    get: { tags: [control], summary: Latest processed (downscaled, contrast-boosted) capture frame (image), responses: { '200': { description: Frame } } }
+  /control/frame/kindle:
+    get: { tags: [control], summary: E-ink render of the latest capture frame (image), responses: { '200': { description: Frame } } }
+  /control/frame/kindle/stream:
+    get: { tags: [control], summary: E-ink render as MJPEG (multipart/x-mixed-replace), responses: { '200': { description: Stream } } }
   /control/google/lens:
     get: { tags: [google], summary: Vision (Lens) OCR state, responses: { '200': { description: State } } }
     post: { tags: [google], summary: Trigger a Lens scan, responses: { '200': { description: OK } } }
