@@ -11,31 +11,44 @@ Your backups, your translations. No API keys required — you bring your own Cla
 ## Directory Structure
 
 ```
-translation/
+docs/
   README.md                      # This file
+  translation-method.md          # Cross-console method notes
   dc/
-    extract.py                   # Dreamcast extraction code
     extract.md                   # Console guide (text encoding, tools, patterns)
+    build.md                     # In-place GDI build (never rebuild the ISO)
+    fonts.md                     # Glyph atlases / font patching
+    textures.md                  # Baked-in text: the PVR repaint method
     games/
-      boku-doraemon.md           # Per-game notes (status, findings, glossary)
+      Boku Doraemon/             # A game gets a dir once it needs >1 note
+        boku-doraemon.md         #   status, findings, glossary
+        BUGS.md  flags.md  mn-hud.md  names.md
+      Tokyo Bus Guide/
+        tokyo-bus-guide.md
   gba/
     extract.md
     games/
-      dragon-ball-advanced.md
-  megadrive/
-    extract.py                   # (in progress)
+      dragon-ball-advanced.md    # A single note file stays flat
+  smd/
     extract.md
+    extract.py                   # (in progress)
+    manual.py
     games/
       buyuu-retsuden.md
   ws/
     extract.md
 ```
 
+Dreamcast implementation code is not under `docs/`. It lives beside it in
+`pluto-translate/dc/` (`extract.py`, `build_patch.py`, `pvr_codec.py`,
+`fon_codec.py`, per-game repaint scripts under `dc/games/`).
+
+
 ## Workflow
 
 1. **Choose console** — Find the console dir matching your ROM
 2. **Read `extract.md`** — Console-level guide: text encoding, compression, extraction patterns
-3. **Read `games/<game>.md`** — Game-specific notes: current extraction status, findings, blockers
+3. **Read the game notes** (`games/<game>.md`, or `games/<Game Name>/<game>.md` once a title has more than one) — current extraction status, findings, blockers
 4. **Contribute** — Add findings to the `.md` file. If you discover offsets, compression format, or text samples, update the game notes
 5. **Extract** — Run the extractor (or follow the guide for manual extraction)
 6. **Translate** — Use the glossary and notes provided

@@ -75,6 +75,11 @@
     "label": "Serial / Pico"
   },
   {
+    "from": "master-system",
+    "to": "gateway",
+    "label": "Pending link"
+  },
+  {
     "from": "megadrive",
     "to": "pluto",
     "label": "Serial / Pico"
