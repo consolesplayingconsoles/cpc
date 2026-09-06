@@ -1,3 +1,9 @@
 [submodule "nodes/local/megadrive/homebrew"]
 	path = nodes/local/megadrive/homebrew
 	url = https://github.com/consolesplayingconsoles/megadrive-homebrew.git
+[submodule "nodes/local/dc/homebrew"]
+	path = nodes/local/dc/homebrew
+	url = https://github.com/consolesplayingconsoles/dreamcast-homebrew.git
+[submodule "nodes/local/master-system/homebrew"]
+	path = nodes/local/master-system/homebrew
+	url = https://github.com/consolesplayingconsoles/master-system-homebrew.git
