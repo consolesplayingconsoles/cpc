@@ -67,7 +67,13 @@ PY
 
 echo "[2/5] build patched files from live state ($GAME_KEY @ $LAB_API)"
 python3 "$HERE/dc/build_patch.py" "$GAME_KEY" "$EXTRACT" "$PATCH" "$LAB_API"
-python3 "$HERE/dc/fon_codec.py" "$EXTRACT/S18RM04.FON" "$PATCH/S18RM04.FON" "$LANG2"
+# S18RM04.FON is Boku Doraemon's glyph atlas. Games that don't ship it (a different disc
+# entirely) need no font patch -- skip instead of dying, or the whole build aborts here.
+if [ -f "$EXTRACT/S18RM04.FON" ]; then
+  python3 "$HERE/dc/fon_codec.py" "$EXTRACT/S18RM04.FON" "$PATCH/S18RM04.FON" "$LANG2"
+else
+  echo "  (no S18RM04.FON on this disc -- font patch skipped)"
+fi
 
 echo "[3/5] copy GDI -> $DEST (track05 real, rest linked)"
 mkdir -p "$OUT_SYSDIR"
