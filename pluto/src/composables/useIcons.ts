@@ -15,6 +15,7 @@ import imgCloud    from '../assets/avatars/cloud.svg'
 import imgCloudStorage from '../assets/avatars/cloud-storage.svg'
 import imgSaturn    from '../assets/avatars/saturn.png'
 import imgMegadrive from '../assets/avatars/megadrive.png'
+import imgMasterSystem from '../assets/avatars/master-system.png'
 import imgSubstack    from '../assets/avatars/substack.svg'
 import imgGoogle      from '../assets/avatars/google.svg'
 import imgGateway     from '../assets/avatars/gateway.svg'
@@ -33,6 +34,7 @@ export const ICONS: Record<string, string> = {
   lab:       imgPlutoLab,   // the workspace node wears the beaker-badge planet mark
   saturn:    imgSaturn,
   megadrive: imgMegadrive,
+  'master-system': imgMasterSystem,   // Mark III artwork; see avatars/NOTICES
   claude:        imgClaude,
   birdbuddy:     imgBird,
   pi:            imgPi,
