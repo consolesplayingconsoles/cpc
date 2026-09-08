@@ -75,7 +75,7 @@
     "label": "Serial / Pico"
   },
   {
-    "from": "master-system",
+    "from": "sms",
     "to": "gateway",
     "label": "Pending link"
   },

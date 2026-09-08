@@ -1,6 +1,6 @@
 # Tokyo Bus Guide (東京バス案内) — Dreamcast (1999)
 
-Translation target: **Japanese → Catalan / English**
+Translation target: **Japanese → English**
 
 ## Game
 

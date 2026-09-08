@@ -4,8 +4,8 @@
 [submodule "nodes/local/dc/homebrew"]
 	path = nodes/local/dc/homebrew
 	url = https://github.com/consolesplayingconsoles/dreamcast-homebrew.git
-[submodule "nodes/local/master-system/homebrew"]
-	path = nodes/local/master-system/homebrew
+[submodule "nodes/local/sms/homebrew"]
+	path = nodes/local/sms/homebrew
 	url = https://github.com/consolesplayingconsoles/master-system-homebrew.git
 [submodule "nodes/local/gba/homebrew"]
 	path = nodes/local/gba/homebrew
