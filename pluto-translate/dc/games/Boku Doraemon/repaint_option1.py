@@ -6,7 +6,7 @@ WITHIN the original JP label's x-extent or the quad clips it (that was the earli
 STEREO·MONO / RÀPID·LENT). Boxes below are the detected JP extents; text is fit-to-box (Arial Narrow
 Bold for the tight toggles). Number scales (12345 / 1234) are left untouched.
 
-    repaint_option1.py <orig OPTION1.PVR> <out OPTION1.PVR>
+    repaint_option1.py <orig OPTION1.PVR> <out OPTION1.PVR> [lang=ca|en]
 """
 import sys, os, struct
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))  # dc/ format-generic codecs
@@ -38,13 +38,32 @@ LABELS = [
     ((146, 160, 240, 186),"S L",        P, ARIAL,  0.60),
     ((146, 184, 254, 205),"RÀP LEN",    P, NARROW, 0.85),   # nudged up 3px off the bottom clip
 ]
+# other languages: same boxes/colours/fonts, text in LABELS order (JP: オプション, サウンドせってい,
+# メッセージスピード, ページ送り, 音声/BGM/SEボリューム, ステレオ, モノラル, なしあり, 小大, はやいおそい)
+TEXT = {
+    "en": ["OPTIONS", "SOUND", "SPEED", "PAGE", "VOICE", "MUSIC", "EFFECTS", "STEREO", "MONO",
+           "OFF ON", "S L", "FAST SLOW"],
+}
 
 
-def draw_fit(im, box, text, colour, fontpath, fill=0.95, pad=3):
+def fit_size(box, text, fontpath, fill=0.95, pad=3):
+    """Font size draw_fit would pick for `text` in `box`."""
     x0, y0, x1, y1 = box
     bw, bh = int(((x1 - x0) - 2 * pad) * fill), (y1 - y0)
     sz = bh + 6
     while sz > 6:
+        l, t, r, b = ImageFont.truetype(fontpath, sz).getbbox(text)
+        if (r - l) <= bw and (b - t) <= bh: break
+        sz -= 1
+    return sz
+
+
+def draw_fit(im, box, text, colour, fontpath, fill=0.95, pad=3, size=None, centre=None):
+    """size/centre (optional): force a font size / an x centre instead of fitting to `box`."""
+    x0, y0, x1, y1 = box
+    bw, bh = int(((x1 - x0) - 2 * pad) * fill), (y1 - y0)
+    sz = size or bh + 6
+    while not size and sz > 6:
         f = ImageFont.truetype(fontpath, sz)
         l, t, r, b = f.getbbox(text)
         if (r - l) <= bw and (b - t) <= bh: break
@@ -57,13 +76,16 @@ def draw_fit(im, box, text, colour, fontpath, fill=0.95, pad=3):
         for dy in (-1, 0, 1):
             if dx or dy: td.text((ox + dx, oy + dy), text, font=f, fill=(0, 0, 0, 255))
     td.text((ox, oy), text, font=f, fill=colour + (255,))
-    cx = x0 + (bw + 2 * pad - tw) // 2 - 3
+    cx = x0 + (bw + 2 * pad - tw) // 2 - 3 if centre is None else centre - tw // 2 - 3
     cy = y0 + (bh - th) // 2 - 3
     im.alpha_composite(tmp, (max(0, cx), max(0, cy)))
+    return sz
 
 
 def main():
     src, out = sys.argv[1], sys.argv[2]
+    lang = sys.argv[3] if len(sys.argv) > 3 else "ca"
+    labels = LABELS if lang == "ca" else [(b, t, c, f, fl) for (b, _, c, f, fl), t in zip(LABELS, TEXT[lang])]
     d = bytearray(open(src, "rb").read())
     p = d.find(b"PVRT"); W, H = struct.unpack_from("<HH", d, p + 12); off = p + 16
     rgba = pv.decode_argb4444(bytes(d), off, W, H)
@@ -72,7 +94,15 @@ def main():
     kx0, ky0, kx1, ky1 = 0, 187, 122, 234       # ...then restore ONLY the rainbow number scales (12345/1234)
     arr[ky0:ky1, kx0:kx1, 3] = rgba[ky0:ky1, kx0:kx1, 3]
     im = Image.fromarray(arr, "RGBA")
-    for box, text, col, font, fill in LABELS:
+    for box, text, col, font, fill in labels:
+        if lang != "ca" and text == TEXT[lang][9]:
+            # OFF/ON are two options with their own selection frames (like STEREO/MONO): drawn as one string,
+            # ON sat ~15px left of its frame in-game (en). Draw each centred on its JP word (なし ~x28, あり ~x95).
+            w_off, w_on = text.split(" ")                         # not `off`: that's the PVR data offset
+            sz = fit_size(box, text, font, fill)                  # the size "OFF ON" had as one string
+            draw_fit(im, box, w_off, col, font, fill, size=sz, centre=28)
+            draw_fit(im, box, w_on, col, font, fill, size=sz, centre=95)
+            continue
         draw_fit(im, box, text, col, font, fill)
     enc = pv.encode_argb4444(np.array(im))
     assert len(enc) == H * W * 2, (len(enc), H * W * 2)

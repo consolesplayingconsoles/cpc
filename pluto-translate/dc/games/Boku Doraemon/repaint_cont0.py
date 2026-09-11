@@ -89,8 +89,13 @@ def build(d):
     return bytes(out)
 
 
+# other languages: same rows, new text
+TEXT = {"en": dict(ROWS=[(y0, y1, t) for (y0, y1, _), t in zip(ROWS, ["Move", "Select", "Back"])])}
+
 def main():
     src, out = sys.argv[1], sys.argv[2]
+    if len(sys.argv) > 3 and sys.argv[3] != "ca":
+        globals().update(TEXT[sys.argv[3]])        # other language: swap the text tables (layout unchanged)
     d = open(src, "rb").read()
     patched = build(d)
     assert len(patched) == len(d), (len(patched), len(d))
