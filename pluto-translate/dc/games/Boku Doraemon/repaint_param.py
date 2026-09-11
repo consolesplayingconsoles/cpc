@@ -58,8 +58,13 @@ def build(d):
     return bytes(out)
 
 
+# other languages (repaint_param.py <in> <out> en)
+TEXT = {"en": dict(LABEL="Dorayaki")}
+
 def main():
     src, out = sys.argv[1], sys.argv[2]
+    if len(sys.argv) > 3 and sys.argv[3] != "ca":
+        globals().update(TEXT[sys.argv[3]])        # other language: swap the text tables (layout unchanged)
     d = open(src, "rb").read()
     patched = build(d)
     assert len(patched) == len(d), (len(patched), len(d))

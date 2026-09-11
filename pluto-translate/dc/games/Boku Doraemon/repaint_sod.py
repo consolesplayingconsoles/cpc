@@ -29,6 +29,7 @@ CHUNK_INDEX = 170
 CELL = 64
 # bottom row cells (row 3): [0]=12  [1]=月  [2]=第  [3]=週
 MES_BOX  = (CELL * 1, CELL * 3, CELL * 3, CELL * 4)   # spans 月+第 (x64-192, y192-256)
+WORDS = ("MES", "SETM")                             # month word, week word (stacked)
 SETM_BOX = (CELL * 3, CELL * 3, CELL * 4, CELL * 4)   # 週 cell (x192-256, y192-256)
 
 
@@ -77,12 +78,12 @@ def build_chunk(pac):
     im = Image.fromarray(arr, "RGBA")
     # MES horizontal across 月+第 (margin so a letter doesn't hug the cell seam/edge)
     mx0, my0, mx1, my1 = MES_BOX
-    mes = _grad_text("MES", (mx1 - mx0) - 24, (my1 - my0) - 16)
+    mes = _grad_text(WORDS[0], (mx1 - mx0) - 24, (my1 - my0) - 16)
     im.alpha_composite(mes, (mx0 + (mx1 - mx0 - mes.width) // 2, my0 + (my1 - my0 - mes.height) // 2))
     # SETM stacked in 週 cell
     sx0, sy0, sx1, sy1 = SETM_BOX
-    cellh = (sy1 - sy0) / 4
-    for k, ch in enumerate("SETM"):
+    cellh = (sy1 - sy0) / len(WORDS[1])
+    for k, ch in enumerate(WORDS[1]):
         gt = _grad_text(ch, (sx1 - sx0) - 20, int(cellh + 2))
         im.alpha_composite(gt, (sx0 + (sx1 - sx0 - gt.width) // 2, int(sy0 + cellh * k + (cellh - gt.height) // 2)))
     enc = pv.encode_argb4444(np.array(im))
@@ -90,8 +91,13 @@ def build_chunk(pac):
     return enc
 
 
+# other languages: (month word drawn across 月+第, week word stacked one letter per row in 週)
+TEXT = {"en": dict(WORDS=("MONTH", "WEEK"))}
+
 def main():
     src, out = sys.argv[1], sys.argv[2]
+    if len(sys.argv) > 3 and sys.argv[3] != "ca":
+        globals().update(TEXT[sys.argv[3]])        # other language: swap the text tables (layout unchanged)
     pac = open(src, "rb").read()
     enc = build_chunk(pac)
     open(out, "wb").write(enc)

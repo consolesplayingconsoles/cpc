@@ -149,8 +149,28 @@ def build(d, bubbles, golds):
     return bytes(out)
 
 
+# other languages: same bubbles/positions, new lines (same count per bubble)
+def _lines(groups, texts):
+    return [(c, xr, [(cy, t) for (cy, _), t in zip(ls, tx)]) for (c, xr, ls), tx in zip(groups, texts)]
+_EN_FLASH = [(87, 54, "Ready…"), (169, 54, "Go!!"), (248, 54, "End!!")]
+TEXT = {"en": dict(
+    BUBBLES={
+        "MN1.PVM": _lines(BUBBLES["MN1.PVM"], [["Great, Doraemon!", "You give good massages", "Have lots of dorayaki"],
+                                              ["Thanks, Doraemon", "Here, dorayaki for you"],
+                                              ["Listen, Doraemon…", "Not trying hard?", "Then no dorayaki!"]]),
+        "MN2.PVM": _lines(BUBBLES["MN2.PVM"], [["You slacked off!", "No dorayaki", "for you today"],
+                                              ["Wow, so clean!", "Thanks, Doraemon"],
+                                              ["Good job, Doraemon", "Pretty clean, right?"]]),
+        "MN3.PVM": _lines(BUBBLES["MN3.PVM"], [["This isn't tidy…", "No snack for you"],
+                                              ["It's so clean!", "Thanks, Doraemon", "Here's a snack"],
+                                              ["Thanks, Doraemon", "Help me again, OK?", "Here, dorayaki"]])},
+    GOLD={"MN1.PVM": [(4, FLASH_ERASE, _EN_FLASH)], "MN2.PVM": [(4, FLASH_ERASE, _EN_FLASH)],
+          "MN3.PVM": [(4, FLASH_ERASE, _EN_FLASH), (4, GOLD["MN3.PVM"][1][1], [(317, 42, "Put it"), (380, 42, "here")])]})}
+
 def main():
     src, out = sys.argv[1], sys.argv[2]
+    if len(sys.argv) > 3 and sys.argv[3] != "ca":
+        globals().update(TEXT[sys.argv[3]])        # other language: swap the text tables (layout unchanged)
     os.makedirs(out, exist_ok=True)
     for fn in BUBBLES:
         d = open(os.path.join(src, fn), "rb").read()

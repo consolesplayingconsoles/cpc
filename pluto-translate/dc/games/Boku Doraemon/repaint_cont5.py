@@ -68,8 +68,12 @@ def draw_line(im, text, box, fontpath, colour, sz, pad=3):
     im.alpha_composite(tmp, (x0, y0 + (bh - th) // 2 - 3))
 
 
+TEXT = {"en": dict(LINES=["Start: Confirm", "B: Cancel"])}
+
 def main():
     src, out = sys.argv[1], sys.argv[2]
+    if len(sys.argv) > 3 and sys.argv[3] != "ca":
+        globals().update(TEXT[sys.argv[3]])        # other language: swap the text tables (layout unchanged)
     d = bytearray(open(src, "rb").read())
     p = d.find(b"PVRT"); W, H = struct.unpack_from("<HH", d, p + 12); off = p + 16
     arr = lin_decode(bytes(d), off, W, H)

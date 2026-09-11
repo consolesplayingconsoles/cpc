@@ -14,7 +14,7 @@ fit WITHIN the original JP label's x-extent (measured bands below) or it clips. 
 colour is SAMPLED from the original pixels so the palette stays identical. Same size preserved
 -> splice the sub-texture back into the PVM at its offset.
 
-    repaint_title.py <orig TITLE.PVM> <out TITLE.PVM>
+    repaint_title.py <orig TITLE.PVM> <out TITLE.PVM> [lang=ca|en]
 """
 import sys, os, struct
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))  # dc/ format-generic codecs
@@ -26,13 +26,13 @@ ARIAL  = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
 SUBOFF = 0x180130          # PVRT of sub-texture #3
 W = H = 256
 
-# (box=x0,y0,x1,y1  measured from the JP bands), text, fill-fraction of box width
-LABELS = [
-    ((1, 36, 128, 61),  "COMENÇA",  0.95),
-    ((1, 67, 128, 92),  "CONTINUA", 0.95),
-    ((1, 98, 180, 123), "INTERNET", 0.90),
-    ((4, 192, 124, 218),"OPCIONS",  0.95),
-]
+# (box=x0,y0,x1,y1  measured from the JP bands), fill-fraction of box width -- same for every language
+BOXES = [((1, 36, 128, 61), 0.95), ((1, 67, 128, 92), 0.95), ((1, 98, 180, 123), 0.90), ((4, 192, 124, 218), 0.95)]
+# per language: the 4 menu labels (in BOXES order) + the translation credit on the sky
+TEXT = {
+    "ca": (["COMENÇA", "CONTINUA", "INTERNET", "OPCIONS"], "Traduït per CPC"),
+    "en": (["START", "CONTINUE", "INTERNET", "OPTIONS"], "Translated by CPC"),
+}
 # the 2-line Dream Passport note (its own colour sampled from its band)
 DPNOTE = [((4, 131, 246, 158), "Cal registrar-se amb"),
           ((4, 159, 246, 187), "el Dream Passport")]
@@ -82,6 +82,9 @@ def draw_at(im, box, text, colour, sz, pad=2):
 
 def main():
     src, out = sys.argv[1], sys.argv[2]
+    lang = sys.argv[3] if len(sys.argv) > 3 else "ca"
+    words, credit = TEXT[lang]
+    LABELS = [(box, text, fill) for (box, fill), text in zip(BOXES, words)]
     d = bytearray(open(src, "rb").read())
     orig = pv.decode_argb4444(bytes(d), SUBOFF + 16, W, H)
     arr = orig.copy()
@@ -97,6 +100,12 @@ def main():
             l, t, r, _ = f.getbbox(text); tw = r - l
             x0, y0, x1, y1 = box
             pos = (x0 + ((x1 - x0) - tw) // 2 - 8, y0, x1, y1)   # centred, then ~half a letter left (operator)
+        elif lang != "ca" and text == words[0]:     # START is far shorter than CONTINUE (en, in-game): centre it
+            f = ImageFont.truetype(ARIAL, menu_sz)  # on CONTINUE's axis, which fills its box
+            cw = f.getbbox(words[1])[2] - f.getbbox(words[1])[0]
+            l, t, r, _ = f.getbbox(text)
+            x0, y0, x1, y1 = box
+            pos = (x0 + (cw - (r - l)) // 2, y0, x1, y1)
         draw_at(im, pos, text, sample_colour(orig, box), menu_sz)
     # DP registration note (band y131..187) is left BLANK — the shipped title never showed it.
     enc = pv.encode_argb4444(np.array(im))
@@ -107,8 +116,9 @@ def main():
     SKY = 0xd0
     sky = Image.fromarray(pv.decode_argb4444(bytes(d), SKY + 16, 512, 512), "RGBA")
     sd = ImageDraw.Draw(sky); sf = ImageFont.truetype(ARIAL, 20)
-    credit = "Traduït per CPC"
     l, t, r, b = sf.getbbox(credit); cx = 420 - (r - l) // 2; cy = 212   # up + right, off COMENÇA
+    if lang != "ca":                   # a longer credit clipped at the screen edge (en, in-game): end it where ca ends
+        cl, _, cr, _ = sf.getbbox(TEXT["ca"][1]); cx = 420 - (cr - cl) // 2 + (cr - cl) - (r - l)
     for dx in (-1, 0, 1):
         for dy in (-1, 0, 1):
             if dx or dy: sd.text((cx + dx, cy + dy), credit, font=sf, fill=(0, 0, 0, 255))

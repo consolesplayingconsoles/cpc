@@ -164,8 +164,32 @@ def build(d, cfg):
     return bytes(out)
 
 
+# other languages: same rows/sizes/positions, new segments (same line count per board)
+def _swap(cfg, lines, labels=None, timer="Time"):
+    c = dict(cfg)
+    c["lines"] = [(cy, sz, segs) for (cy, sz, _), segs in zip(cfg["lines"], lines)]
+    if labels:
+        c["labels"] = [(wb, xl, cy, sz, segs) for (wb, xl, cy, sz, _), segs in zip(cfg["labels"], labels)]
+    lx, ly, ls, _ = cfg["timer_label"]; c["timer_label"] = (lx, ly, ls, timer)
+    return c
+TEXT = {"en": dict(CONFIG={
+    "MN2.PVM": _swap(CONFIG["MN2.PVM"], [[("~ How to play ~", W_)],
+        [("Press ", W_), ("A", "A"), (" to grab the weeds", W_)], [("and shake the D-pad fast", W_)],
+        [("to pull them out", W_)], [("Watch out for rats!", W_)], [("Jump with ", W_), ("B", "B"), (" to dodge them", W_)]]),
+    "MN1.PVM": _swap(CONFIG["MN1.PVM"], [[("~ How to play ~", W_)],
+        [("Watch the cursor on the bar", W_)], [("and press at the right moment", W_)], [("to massage Mom!!", W_)],
+        [("A", "A"), (" in the red zone, ", W_), ("B", "B"), (" in the blue", W_)], [("Keep the rhythm!", W_)]],
+        labels=[[("A Button", (225, 55, 55))], [("B Button", (65, 95, 235))]]),
+    "MN3.PVM": _swap(CONFIG["MN3.PVM"], [[("~ How to play ~", W_)],
+        [("Remember where things go", W_)], [("and put them back in time", W_)],
+        [("Grab things with ", W_), ("A", "A")], [("and drop them", W_)], [("Jump with ", W_), ("B", "B"), (" to", W_)],
+        [("dodge the rats", W_)], [("Press ", W_), ("Y", "Y"), (" to finish", W_)], [("early, even if", W_)],
+        [("time is left", W_)]])})}
+
 def main():
     src, out = sys.argv[1], sys.argv[2]
+    if len(sys.argv) > 3 and sys.argv[3] != "ca":
+        globals().update(TEXT[sys.argv[3]])        # other language: swap the text tables (layout unchanged)
     os.makedirs(out, exist_ok=True)
     for fn, cfg in CONFIG.items():
         d = open(os.path.join(src, fn), "rb").read()

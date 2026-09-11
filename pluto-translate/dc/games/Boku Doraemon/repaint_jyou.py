@@ -43,6 +43,7 @@ LABELS = [
 ]
 
 # The big green title. Rendered larger with a thicker outline, centred in its band.
+_CA_LABELS = LABELS                                     # the text sizes other languages are capped at
 TITLE = ((8, 170, 233, 215), (90, 200, 45), "Info")     # じょうほう
 
 # Unit suffixes: (x0, y0, x1, y1), text, orientation ('h' horizontal | 'v' stacked). The slot is inset
@@ -121,8 +122,10 @@ def build(d):
     im = Image.fromarray(arr, "RGBA")
 
     MARGIN = 5   # keep the word off the box edges
-    for (x0, y0, x1, y1), fill, text in LABELS:
+    for i, ((x0, y0, x1, y1), fill, text) in enumerate(LABELS):
         size = fit(text, (x1 - x0) - 2 * MARGIN, (y1 - y0) - 4)
+        if LABELS is not _CA_LABELS:   # other language: never bigger than the Catalan word in that box
+            size = min(size, fit(_CA_LABELS[i][2], (x1 - x0) - 2 * MARGIN, (y1 - y0) - 4))  # (short en words ballooned)
         draw_outlined(im, (x0 + x1) / 2, (y0 + y1) / 2, text, size, fill, ow=1)
 
     # title: bigger, thicker outline
@@ -145,8 +148,17 @@ def build(d):
     return bytes(out)
 
 
+# other languages: same boxes/colours/orientation, text in LABELS / UNITS order
+TEXT = {"en": dict(
+    LABELS=[(b, c, t) for (b, c, _), t in zip(LABELS, ["Scene", "Wins", "Dorayaki", "& a half", "Chores", "Best",
+                                                      "Massage", "Weeding", "Tidying", "Fails", "Back", "Secret"])],
+    TITLE=(TITLE[0], TITLE[1], "Info"),
+    UNITS=[(b, t, o) for (b, _, o), t in zip(UNITS, ["yr", "mo", "wk", "#", "x", "P"])])}
+
 def main():
     src, out = sys.argv[1], sys.argv[2]
+    if len(sys.argv) > 3 and sys.argv[3] != "ca":
+        globals().update(TEXT[sys.argv[3]])        # other language: swap the text tables (layout unchanged)
     d = open(src, "rb").read()
     patched = build(d)
     assert len(patched) == len(d), (len(patched), len(d))

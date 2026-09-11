@@ -126,8 +126,14 @@ def build(d):
     return bytes(out)
 
 
+# other languages: one entry per box (row-major, as LABELS), 1-2 lines each
+TEXT = {"en": dict(LABELS=[["Infrared", "eyes"], ["Super", "nose"], ["Radar", "whiskers"], ["Cat-call", "bell"],
+                          ["Suction", "hands"], ["4D", "pocket"], ["Switch", "tail"], ["Hover", "feet"]])}
+
 def main():
     src, out = sys.argv[1], sys.argv[2]
+    if len(sys.argv) > 3 and sys.argv[3] != "ca":
+        globals().update(TEXT[sys.argv[3]])        # other language: swap the text tables (layout unchanged)
     d = open(src, "rb").read()
     patched = build(d)
     assert len(patched) == len(d), (len(patched), len(d))

@@ -71,8 +71,12 @@ def build_counter(d, off):
     return pv.encode_argb4444(np.array(im))
 
 
+TEXT = {"en": dict(LINES=[(b, t) for (b, _), t in zip(LINES, ["DORAYAKI", "WON"])])}
+
 def main():
     src, out = sys.argv[1], sys.argv[2]; os.makedirs(out, exist_ok=True)
+    if len(sys.argv) > 3 and sys.argv[3] != "ca":
+        globals().update(TEXT[sys.argv[3]])        # other language: swap the text tables (layout unchanged)
     d1 = open(os.path.join(src, "MN1.PVM"), "rb").read()
     enc = build_counter(d1, counter_offset(d1))  # identical chunk -> repaint once
     for fn in ("MN1.PVM", "MN2.PVM", "MN3.PVM"):
