@@ -26,6 +26,12 @@ export type ExtractResp = { blocks?: unknown[]; scenes?: unknown[]; total?: numb
 export type MeasureResp = { used?: Record<string, number>; line?: Record<string, number> }
 export type MeasureBlock = Pick<Block, 'offset' | 'ca' | 'jpBytes'>
 
+// The project-list fields other tabs read (Media links a translation variant to its project).
+export interface ProjectSummary {
+  ns: string; gameName: string; lang: string; system: string
+  meta?: { product?: string } | null; total: number; done: number
+}
+
 export const translationApi = {
   // discovery / listing
   listProjects: () => getJson<{ projects?: unknown[] }>(`${BASE}/projects`),

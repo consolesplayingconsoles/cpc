@@ -84,6 +84,9 @@ const dashLabel  = computed(() => props.id === 'pluto' ? 'Open Pluto C2' : 'Open
 const retroUrl   = computed(() => `http://${instanceHost.value}:7700/retro`)
 // The retro page is served by each instance's own API, so it IS the local/stable build.
 const retroLabel = computed(() => props.id === 'lab' ? 'Open Retro Web (local)' : 'Open Retro Web (stable)')
+// The zero-JS capture viewer for e-ink browsers, also served by each instance's own API.
+const kindleUrl   = computed(() => `http://${instanceHost.value}:7700/kindle`)
+const kindleLabel = computed(() => props.id === 'lab' ? 'Open Kindle Page (local)' : 'Open Kindle Page (stable)')
 function openExternal(url: string) {
   if (url) window.open(url, '_blank', 'noopener')
 }
@@ -190,6 +193,11 @@ function postCommand(text: string) {
         <UiActionRow @click="openExternal(retroUrl)">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9h2M7 13h4"/><circle cx="16" cy="10" r="1.3"/><circle cx="16" cy="14" r="1.3"/></svg>
           <span>{{ retroLabel }}</span>
+          <span class="nd__ext">&#8599;</span>
+        </UiActionRow>
+        <UiActionRow @click="openExternal(kindleUrl)">
+          <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M8.5 7h7M8.5 10.5h7M8.5 14h4"/></svg>
+          <span>{{ kindleLabel }}</span>
           <span class="nd__ext">&#8599;</span>
         </UiActionRow>
       </section>
