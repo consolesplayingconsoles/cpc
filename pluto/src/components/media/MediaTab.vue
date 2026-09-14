@@ -3,12 +3,13 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { NodeMap } from '../../composables/useNodes'
 import { ICONS } from '../../composables/useIcons'
-import { catalogueApi, type SystemSummary, type SystemView, type Game } from '../../api/catalogue'
+import { catalogueApi, type SystemSummary, type SystemView, type Game, type MissingCover } from '../../api/catalogue'
 import consolesConfig from '../../../config/consoles.json'
 import UiButton from '../ui/UiButton.vue'
 import UiSpinner from '../ui/UiSpinner.vue'
 import UiIconButton from '../ui/UiIconButton.vue'
 import UiSelect from '../ui/UiSelect.vue'
+import UiCopyButton from '../ui/UiCopyButton.vue'
 import Terminal, { type TerminalOutput } from '../Terminal.vue'
 import GameDrawer from './GameDrawer.vue'
 import { useRomActions } from '../../composables/useRomActions'
@@ -49,6 +50,13 @@ function coverChanged(g: Game) {
   coverVersion.value[g.key] = Date.now()
 }
 
+// A new label renames the game and re-matches its art: reload and re-ask the cover.
+async function relabeled() {
+  const key = openGame.value?.key
+  if (key) { coverLoaded.value[key] = false; coverVersion.value[key] = Date.now() }
+  await load()
+}
+
 async function load() {
   loading.value = true
   apiError.value = ''
@@ -64,12 +72,58 @@ async function load() {
 watch(system, () => { filter.value = ''; if (props.active) load() })
 watch(() => props.active, (a) => { if (a) load() }, { immediate: true })
 
+// ── Missing covers: games with no image linked in the catalogue (no upload, no downloaded
+// art), across all systems. Local only. Click one -> its drawer (upload, or the art fetch).
+const missingOpen = ref(false)
+const missing = ref<MissingCover[] | null>(null)
+const missingLoading = ref(false)
+async function toggleMissing() {
+  missingOpen.value = !missingOpen.value
+  if (!missingOpen.value || missingLoading.value) return
+  missingLoading.value = true
+  try {
+    const r = await catalogueApi.missingCovers()
+    missing.value = r.games
+  } catch {
+    apiError.value = 'Catalogue API unreachable'
+  } finally {
+    missingLoading.value = false
+  }
+}
+// Per-system sections fold; big ones (MAME) start folded so the list stays scannable.
+const missingFolded = ref<Record<string, boolean>>({})
+const isFolded = (sys: string, n: number) => missingFolded.value[sys] ?? n > 20
+function toggleFold(sys: string, n: number) { missingFolded.value[sys] = !isFolded(sys, n) }
+const missingBySystem = computed(() => {
+  const by = new Map<string, MissingCover[]>()
+  for (const m of missing.value ?? []) by.set(m.system, [...(by.get(m.system) ?? []), m])
+  return [...by.entries()].sort(([a], [b]) => systemName(a).localeCompare(systemName(b)))
+})
+
+// Grid filter: system name, brand or folder key ("sega", "dreamcast", "ngpc").
+const systemFilter = ref('')
+
 // Families: brand, then name. Systems without a brand (arcade) go last.
-const sortedSystems = computed(() => [...systems.value].sort((a, b) => {
+const sortedSystems = computed(() => [...systems.value].filter(s => {
+  const q = systemFilter.value.trim().toLowerCase()
+  return !q || [s.system, systemName(s.system), SYSTEMS[s.system]?.brand ?? ''].some(t => t.toLowerCase().includes(q))
+}).sort((a, b) => {
   const ba = SYSTEMS[a.system]?.brand, bb = SYSTEMS[b.system]?.brand
   if (!!ba !== !!bb) return ba ? -1 : 1
   return (ba ?? '').localeCompare(bb ?? '') || systemName(a.system).localeCompare(systemName(b.system))
 }))
+
+// Grid sections by manufacturer (sortedSystems order kept); brandless systems under "Other".
+const brandGroups = computed(() => {
+  const out: { brand: string; systems: SystemSummary[] }[] = []
+  for (const s of sortedSystems.value) {
+    const brand = SYSTEMS[s.system]?.brand ?? 'Other'
+    const last = out[out.length - 1]
+    if (last && last.brand === brand) last.systems.push(s)
+    else out.push({ brand, systems: [s] })
+  }
+  return out
+})
 
 const favOnly = ref(false)
 watch(system, () => { favOnly.value = false; groupBy.value = '' })
@@ -197,25 +251,50 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
     <template v-if="!system">
       <div class="md__body">
         <div class="md__actions">
+          <input v-if="!missingOpen" v-model="systemFilter" class="md__filter md__filter--grid" type="search" placeholder="Filter systems" />
+          <UiButton :class="{ 'is-on': missingOpen }" @click="toggleMissing">
+            {{ missingOpen ? 'All systems' : 'Missing covers' }}<template v-if="missing && !missingOpen"> ({{ missing.length }})</template>
+          </UiButton>
           <UiButton variant="primary" :loading="syncing" loading-text="Syncing…" @click="sync('*')">Sync all</UiButton>
         </div>
+        <template v-if="missingOpen">
+          <p v-if="missingLoading" class="md__state"><UiSpinner /> Checking covers…</p>
+          <p v-else-if="missing && !missing.length" class="md__state">Every game has a cover.</p>
+          <section v-for="[sys, list] in missingBySystem" :key="sys" class="md__missing">
+            <button class="md__section md__fold" :aria-expanded="!isFolded(sys, list.length)" @click="toggleFold(sys, list.length)">
+              <svg class="md__fold-chev" :class="{ 'is-open': !isFolded(sys, list.length) }" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <img v-if="systemIcon(sys)" :src="systemIcon(sys)" class="md__missing-ic" alt="" />
+              {{ systemName(sys) }} <span>{{ list.length }}</span>
+            </button>
+            <ul v-if="!isFolded(sys, list.length)" class="md__list">
+              <li v-for="m in list" :key="m.key" class="md__row" @click="go(m.system, m.key)">
+                <span class="md__title">{{ m.title }}</span>
+              </li>
+            </ul>
+          </section>
+        </template>
         <p v-if="apiError" class="md__state is-bad">{{ apiError }}</p>
         <p v-else-if="loading && !systems.length" class="md__state"><UiSpinner /> Loading catalogue…</p>
         <p v-else-if="!systems.length" class="md__state">No games yet. Sync all to build the catalogue.</p>
-        <div class="md__grid">
-          <button v-for="s in sortedSystems" :key="s.system" class="md__tile" @click="go(s.system)">
+        <p v-if="!missingOpen && systems.length && !sortedSystems.length" class="md__state">No system matches "{{ systemFilter }}".</p>
+        <template v-if="!missingOpen">
+         <template v-for="grp in brandGroups" :key="grp.brand">
+          <h3 class="md__section md__brand">{{ grp.brand }} <span>{{ grp.systems.length }}</span></h3>
+          <div class="md__grid">
+          <div v-for="s in grp.systems" :key="s.system" class="md__tile" role="button" tabindex="0" @click="go(s.system)" @keydown.enter="go(s.system)">
             <img v-if="systemIcon(s.system)" :src="systemIcon(s.system)" class="md__tile-ic" alt="" />
             <span v-else class="md__tile-ic md__tile-letter">{{ systemName(s.system).slice(0, 1) }}</span>
-            <span v-if="SYSTEMS[s.system]?.brand" class="md__tile-brand">{{ SYSTEMS[s.system].brand }}</span>
-            <span class="md__tile-name">{{ systemName(s.system) }}</span>
+            <span class="md__tile-name">{{ systemName(s.system) }} <UiCopyButton :text="systemName(s.system)" title="Copy system name" /></span>
             <span class="md__tile-count">{{ s.games }} game{{ s.games === 1 ? '' : 's' }}<template v-if="s.physical"> · {{ s.physical }} physical</template></span>
             <span class="md__tile-nodes">
               <img v-for="n in hostsFor(s.system)" :key="n" :src="ICONS[n]" alt=""
                    :class="{ 'is-idle': !s.nodes.includes(n) }"
                    :title="nodeName(n) + (s.nodes.includes(n) ? '' : ' (configured, no games yet)')" />
             </span>
-          </button>
-        </div>
+          </div>
+          </div>
+         </template>
+        </template>
       </div>
     </template>
 
@@ -283,7 +362,7 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
               <span v-if="g.favourite" class="md__card-star">★</span>
             </span>
             <span class="md__card-body">
-              <span class="md__card-title">{{ g.title }}</span>
+              <span class="md__card-title">{{ g.title }} <UiCopyButton :text="g.title" title="Copy title" /></span>
               <span v-if="variantSummary(g)" class="md__variants">{{ variantSummary(g) }}</span>
               <span v-if="g.regions.length" class="md__card-row">
                 <span v-for="r in g.regions" :key="r" class="md__region">{{ r }}</span>
@@ -331,7 +410,7 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
       </div>
       <GameDrawer v-if="openGame && view" :system="view.system" :game="openGame" :nodes="nodes" :system-icon="systemIcon(system)"
                   :cover-version="coverVersion[openGame.key]"
-                  @close="go(system)" @favourite="toggleFavourite(openGame, $event)" @cover-changed="coverChanged(openGame)" />
+                  @close="go(system)" @favourite="toggleFavourite(openGame, $event)" @cover-changed="coverChanged(openGame)" @relabeled="relabeled" />
       </div>
     </template>
 
@@ -342,7 +421,19 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
 <style scoped>
 .md { position: relative; display: flex; flex-direction: column; height: 100%; background: var(--surface-2); font-family: var(--font-sans); color: var(--text); }
 .md__bar { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-5); background: var(--surface); border-bottom: 1px solid var(--line); flex-shrink: 0; flex-wrap: wrap; }
-.md__actions { display: flex; justify-content: flex-end; margin-bottom: var(--sp-4); }
+.md__actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+/* same side as the games filter on a system page: right, next to the actions */
+.md__missing { margin-bottom: var(--sp-4); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+.md__missing .md__section { padding: var(--sp-3) var(--sp-4); align-items: center; }
+.md__fold { width: 100%; border: 0; background: none; font: inherit; cursor: pointer; text-align: left; }
+.md__fold:hover { background: var(--surface-2); }
+.md__fold-chev { color: var(--text-faint); transition: transform 0.12s; flex: none; }
+.md__fold-chev.is-open { transform: rotate(90deg); }
+.md__missing-ic { width: 22px; height: 22px; object-fit: contain; }
+.md__missing .md__row { padding: 8px var(--sp-4); }
+.md__missing .md__row:last-child { border-bottom: 0; }
+/* the chat dock floats bottom-left over the page: leave room so the last system isn't hidden under it */
+.md__missing:last-of-type { margin-bottom: 96px; }
 /* back button: same pattern as the Translation tab's "‹ Projects" */
 .md__title-row { display: flex; align-items: center; gap: var(--sp-2); margin-right: auto; }
 .md__back { margin-right: 12px; }
@@ -395,7 +486,9 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
 .md__tile-ic { width: 88px; height: 88px; object-fit: contain; margin-bottom: 8px; }
 .md__tile-letter { display: flex; align-items: center; justify-content: center; border-radius: var(--r-lg); background: var(--surface-3); color: var(--text-faint); font-size: 34px; font-weight: 600; }
 .md__tile-brand { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-faint); }
-.md__tile-name { font-size: 14px; font-weight: 600; }
+.md__tile-name { font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 2px; }
+.md__brand { padding: var(--sp-5) 0 var(--sp-3); }
+.md__brand:first-of-type { padding-top: 0; }
 .md__tile-count { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 .md__tile-nodes { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; min-height: 32px; }
 .md__tile-nodes img { width: 32px; height: 32px; object-fit: contain; }

@@ -29,6 +29,29 @@ import imgNgpc     from '../assets/avatars/ngpc.png'
 import imgGbc      from '../assets/avatars/gbc.png'
 import imgPsx      from '../assets/avatars/psx.png'
 import imgPs2      from '../assets/avatars/ps2.png'
+import imgSys_3ds from '../assets/avatars/3ds.png'
+import imgSys_c64 from '../assets/avatars/c64.png'
+import imgSys_dos from '../assets/avatars/dos.png'
+import imgSys_fds from '../assets/avatars/fds.png'
+import imgSys_gb from '../assets/avatars/gb.png'
+import imgSys_mame from '../assets/avatars/mame.png'
+import imgArcade from '../assets/avatars/arcade.png'
+import imgSys_megacd from '../assets/avatars/megacd.png'
+import imgSys_msx1 from '../assets/avatars/msx1.png'
+import imgSys_n64 from '../assets/avatars/n64.png'
+import imgSys_n64dd from '../assets/avatars/n64dd.png'
+import imgSys_nds from '../assets/avatars/nds.png'
+import imgSys_neogeo from '../assets/avatars/neogeo.png'
+import imgSys_neogeocd from '../assets/avatars/neogeocd.png'
+import imgSys_pcengine from '../assets/avatars/pcengine.png'
+import imgSys_pcenginecd from '../assets/avatars/pcenginecd.png'
+import imgSys_pico from '../assets/avatars/pico.png'
+import imgSys_pokemini from '../assets/avatars/pokemini.png'
+import imgSys_psp from '../assets/avatars/psp.png'
+import imgSys_sega32x from '../assets/avatars/sega32x.png'
+import imgSys_sufami from '../assets/avatars/sufami.png'
+import imgSys_virtualboy from '../assets/avatars/virtualboy.png'
+import imgSys_x68000 from '../assets/avatars/x68000.png'
 
 export const ICONS: Record<string, string> = {
   wii:       imgWii,
@@ -65,4 +88,27 @@ export const ICONS: Record<string, string> = {
   gbc: imgGbc,
   psx: imgPsx,
   ps2: imgPs2,
+  "3ds": imgSys_3ds,
+  c64: imgSys_c64,
+  dos: imgSys_dos,
+  fds: imgSys_fds,
+  gb: imgSys_gb,
+  mame: imgSys_mame,
+  arcade: imgArcade,   // generic arcade cabinet (FBNeo art) for non-MAME arcade boards
+  megacd: imgSys_megacd,
+  msx1: imgSys_msx1,
+  n64: imgSys_n64,
+  n64dd: imgSys_n64dd,
+  nds: imgSys_nds,
+  neogeo: imgSys_neogeo,
+  neogeocd: imgSys_neogeocd,
+  pcengine: imgSys_pcengine,
+  pcenginecd: imgSys_pcenginecd,
+  pico: imgSys_pico,
+  pokemini: imgSys_pokemini,
+  psp: imgSys_psp,
+  sega32x: imgSys_sega32x,
+  sufami: imgSys_sufami,
+  virtualboy: imgSys_virtualboy,
+  x68000: imgSys_x68000,
 }

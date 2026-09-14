@@ -871,9 +871,20 @@ def _sd_backup(node_id, roster, consoles_cfg):
     """
     sender = "dropbox"
     cfg   = (roster or {}).get(node_id) or {}
-    label = (cfg.get("SD_LABEL") or "").strip()
-    if not label:
+    labels = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()]
+    if not labels:
         _new_message(sender, "%s has no SD_LABEL set." % node_id); return
+    label = labels[0]
+    if len(labels) > 1:
+        # several cards for one console: back up the one that's in the hub right now
+        pi_cfg = (roster or {}).get("pi") or {}
+        try:
+            req = Request("http://%s:%s/sync" % ((pi_cfg.get("HOST_IP") or "").strip(), (pi_cfg.get("PI_SYNC_PORT") or "7721").strip()),
+                          data=json.dumps({"action": "labels", "target": "sd"}).encode(), headers={"Content-Type": "application/json"})
+            attached = set(json.loads(urlopen(req, timeout=20).read().decode()).get("labels") or [])
+            label = next((l for l in labels if l in attached), labels[0])   # exact: SAROO must not match SAROO2
+        except Exception:
+            pass
     ccfg     = consoles_cfg or {}
     consoles = (ccfg.get("nodeConsoles") or {}).get(node_id) or []
     consoles = [c for c in consoles if c != "*"]
@@ -2246,7 +2257,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/translate/projects"), ("GET", "/translate/systems"), ("GET", "/translate/games"),
         ("GET", "/translate/extract"), ("GET", "/translate/sources"), ("GET", "/translate/meta"),
         ("GET", "/translate/{game}/textures"), ("GET", "/translate/{game}"),
-        ("GET", "/catalogue"), ("GET", "/catalogue/sync/stream"), ("GET", "/catalogue/{system}"),
+        ("GET", "/catalogue"), ("GET", "/catalogue/sync/stream"), ("GET", "/catalogue/missing-covers"),
+        ("GET", "/catalogue/{system}"),
         ("GET", "/catalogue/{system}/cover/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
         ("POST", "/messages"), ("POST", "/dreame/login"), ("POST", "/dreame/logout"),
@@ -2254,7 +2266,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("POST", "/control/capture/grab"), ("POST", "/control/google/lens"),
         ("POST", "/control/google/translate"), ("POST", "/control/google/translate-last"),
         ("POST", "/workspace/{node}"), ("POST", "/config/open"), ("POST", "/native/{node}/{action}"),
-        ("POST", "/sd/{node}"), ("POST", "/catalogue/{system}/favourite"), ("POST", "/catalogue/{system}/open"),
+        ("POST", "/sd/{node}"), ("POST", "/catalogue/{system}/favourite"), ("POST", "/catalogue/{system}/label"), ("POST", "/catalogue/{system}/open"),
         ("POST", "/catalogue/{system}/cover/{game}"), ("POST", "/catalogue/{system}/play"),
         ("POST", "/translate/run"), ("POST", "/translate/open"), ("POST", "/translate/delete"),
         ("POST", "/translate/upload"), ("POST", "/translate/{game}"),
@@ -2302,6 +2314,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/catalogue/sync/stream":
             qs = urllib.parse.parse_qs(parsed.query)
             self._handle_catalogue_sync_stream((qs.get("system") or ["*"])[0])
+
+        elif parsed.path == "/catalogue/missing-covers":
+            self._send(200, catalogue.missing_covers(self._catalogue_root()))
 
         elif len(parts) == 2 and parts[0] == "catalogue":
             self._handle_catalogue_system(parts[1])
@@ -2442,6 +2457,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = self._read_json_body()
             if body is not None:
                 self._handle_catalogue_open(parts[1], str(body.get("path", "")))
+        elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "label":
+            body = self._read_json_body()
+            if body is not None:
+                catalogue.set_label(self._catalogue_root(), parts[1], str(body.get("game", "")), str(body.get("label") or ""))
+                self._send(200, {"ok": True})
         elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "favourite":
             body = self._read_json_body()
             if body is not None:
@@ -3485,7 +3505,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """Box art, fetched from libretro-thumbnails on first ask and cached in the catalogue."""
         if not re.match(r"^[A-Za-z0-9_.-]+$", system) or "/" in game or game.startswith("."):
             self._send(400, {"error": "bad path"}); return
-        path = catalogue.cover(self._catalogue_root(), system, game, self.__class__.consoles_config)
+        path = catalogue.cover(self._catalogue_root(), system, game, self.__class__.consoles_config,
+                               read_node_file=self._node_read_file)
         if not path:
             self._send(404, {"error": "no cover"}); return
         with open(path, "rb") as f:
@@ -3499,15 +3520,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _handle_catalogue_cover_upload(self, system, game):
-        """Raw image body (PNG/JPEG/WebP, max 10 MB) -> catalogue/<system>/art/<game>.*,
-        which takes priority over libretro art for that game."""
+        """Raw image body (PNG/JPEG/WebP, max 10 MB) -- or JSON {url}: the API downloads the
+        image at a pasted link -- -> catalogue/<system>/art/<game>.*, which takes priority
+        over libretro art for that game."""
         if not re.match(r"^[A-Za-z0-9_.-]+$", system) or not re.match(r"^[A-Za-z0-9_.~+-]+$", game) or game.startswith("."):
             self._send(400, {"error": "bad path"}); return
-        length = int(self.headers.get("Content-Length", 0) or 0)
-        if not 0 < length <= 10 * 1024 * 1024:
-            self._send(413, {"error": "image must be 1 byte to 10 MB"}); return
+        if (self.headers.get("Content-Type") or "").startswith("application/json"):
+            body = self._read_json_body()
+            if body is None:
+                return
+            try:
+                data = catalogue.covers.download(str(body.get("url") or "").strip())
+            except ValueError as exc:
+                self._send(400, {"error": str(exc)}); return
+            except Exception as exc:
+                self._send(502, {"error": "could not download: %s" % exc}); return
+        else:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            if not 0 < length <= 10 * 1024 * 1024:
+                self._send(413, {"error": "image must be 1 byte to 10 MB"}); return
+            data = self.rfile.read(length)
         try:
-            path = catalogue.covers.save_custom(self._catalogue_root(), system, game, self.rfile.read(length))
+            path = catalogue.covers.save_custom(self._catalogue_root(), system, game, data)
         except ValueError as exc:
             self._send(415, {"error": str(exc)}); return
         print("  [CATALOGUE:cover] %s/%s -> %s" % (system, game, path))
@@ -3560,6 +3594,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         open_path(path)
         self._send(200, {"status": "opened", "path": path})
 
+    def _catalogue_sd_nodes(self):
+        """Nodes whose games live on SD cards read through the Pi hub: SD_LABEL (one or more
+        labels, comma-separated: a console can own several cards) + SD_ROMS_DIR (where the
+        games sit on the card, e.g. SAROO/ISO). A node without SD_ROMS_DIR only backs up saves."""
+        out = {}
+        for node, cfg in (self.__class__.node_roster or {}).items():
+            labels = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()]
+            roms_dir = (cfg.get("SD_ROMS_DIR") or "").strip().strip("/")
+            if labels and roms_dir:
+                out[node] = {"labels": labels, "roms_dir": roms_dir, "hub": "pi"}
+        return out
+
     def _catalogue_saves(self, system):
         """{rom stem (lower): [nodes holding a save]} from the Dropbox ledger, or None."""
         try:
@@ -3599,9 +3645,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             catalogue.sync(
                 self._catalogue_root(), system,
                 self.__class__.consoles_config,
-                lambda node, argv: self._node_ssh(node, argv, timeout=600, connect_timeout=10),
+                lambda node, argv, stdin=None: self._node_ssh(node, argv, timeout=600, connect_timeout=10, stdin=stdin),
                 self._catalogue_saves, lambda line: emit("line", line), now,
-                lab_roms=(self.__class__.config.get("ROMS_PATH") or "").strip() or None)
+                lab_roms=(self.__class__.config.get("ROMS_PATH") or "").strip() or None,
+                sd_nodes=self._catalogue_sd_nodes())
             emit("done", "ok")          # per-node / per-system failures are WARN lines above
         except Exception as exc:
             emit("line", "sync crashed: %s" % exc)
@@ -3611,11 +3658,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ── Translation flow (Batocera fast flow) ──────────────────────────────────
 
-    def _node_ssh(self, node_id, argv, timeout=300, connect_timeout=None):
+    def _node_read_file(self, node_id, path, timeout=60):
+        """Bytes of one file on a node over SSH (same alias/host rule as _node_ssh), or None."""
+        import shlex
+        cfg   = self.__class__.node_roster.get(node_id) or {}
+        alias = (cfg.get("CUSTOM_SSH_ALIAS") or "").strip()
+        host  = (cfg.get("HOST_IP") or "").strip()
+        if alias:
+            prefix = ["ssh", "-o", "ConnectTimeout=10", alias]
+        elif host:
+            user = (cfg.get("SSH_USER") or "").strip()
+            key  = os.path.expanduser((cfg.get("SSH_KEY_PATH") or "~/.ssh/id_rsa").strip())
+            prefix = ["ssh", "-o", "ConnectTimeout=10", "-i", key, "-o", "StrictHostKeyChecking=no", "%s@%s" % (user, host)]
+        else:
+            return None
+        try:
+            r = subprocess.run(prefix + ["cat -- " + shlex.quote(path)], stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, timeout=timeout)
+            return r.stdout if r.returncode == 0 else None
+        except Exception:
+            return None
+
+    def _node_ssh(self, node_id, argv, timeout=300, connect_timeout=None, stdin=None):
         """Run argv on a node over SSH, using its .env -- the same local/remote
         rule as deploy.sh: CUSTOM_SSH_ALIAS wins, else SSH_USER@HOST_IP + key.
         Args are shell-quoted for the remote side (roms paths have spaces).
         connect_timeout (s) fails fast on a powered-off box instead of the OS's ~75s.
+        stdin (str) is piped to the remote command -- use it for program text: Batocera's
+        dropbear drops any command line over ~9000 chars.
         Returns (returncode, combined_output)."""
         import shlex
         cfg   = self.__class__.node_roster.get(node_id) or {}
@@ -3633,7 +3703,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             prefix[1:1] = ["-o", "ConnectTimeout=%d" % connect_timeout]
         remote = " ".join(shlex.quote(a) for a in argv)
         try:
-            r = subprocess.run(prefix + [remote], stdout=subprocess.PIPE,
+            r = subprocess.run(prefix + [remote], input=stdin, stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, text=True, timeout=timeout)
             return (r.returncode, r.stdout or "")
         except Exception as exc:

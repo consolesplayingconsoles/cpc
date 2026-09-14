@@ -27,11 +27,12 @@ VER="${VER:-v1.0}"
 ROMS_OUT="${ROMS_OUT:-/userdata/roms}"
 LAB_API="${LAB_API:-http://192.168.68.51:7700}"     # the Mac's Pluto API (live translation state)
 
-# TAG names the output dir/gamelist entry; LANGNAME is the display name. Only languages with a
-# fon_codec.py glyph profile can be built -- unsupported codes fail loudly here, not mid-splice.
+# LANGNAME is the gamelist display name. Only languages with a fon_codec.py glyph profile can be
+# built -- unsupported codes fail loudly here, not mid-splice. LEGACY is the old folder tag, only
+# to take over an earlier build's folder (see DEST).
 case "$LANG2" in
-  ca) LANGNAME=Català; TAG=T-Cat ;;
-  en) LANGNAME=English; TAG=T-Eng ;;
+  ca) LANGNAME=Català; LEGACY=T-Cat ;;
+  en) LANGNAME=English; LEGACY=T-Eng ;;
   *)  echo "unsupported lang: $LANG2 (fon_codec.py has: ca en)" >&2; exit 1 ;;
 esac
 
@@ -44,7 +45,12 @@ GAME=$(basename "$GAMEDIR")               # e.g. "Boku Doraemon (Japan)"
 SYSTEM=$(basename "$(dirname "$GAMEDIR")")
 GAME_KEY="$GAME [$LANG2]"                  # state key in Pluto, e.g. "Boku Doraemon (Japan) [ca]"
 OUT_SYSDIR="$ROMS_OUT/$SYSTEM"
-DEST="$OUT_SYSDIR/$GAME $LANGNAME [$TAG] ($VER)"
+# Output name follows the catalogue convention: "<Game> (Region) [T-<Code> <ver>]" with the ISO
+# code from config/languages.json, e.g. "Boku Doraemon (Japan) [T-Ca v1.0]". Pluto's Media tab
+# reads that as a translation (language ca, version 1.0) of the base game.
+CODE=$(printf '%s' "$LANG2" | cut -c1 | tr '[:lower:]' '[:upper:]')$(printf '%s' "$LANG2" | cut -c2-)
+DEST="$OUT_SYSDIR/$GAME [T-$CODE $VER]"
+OLD_DEST="$OUT_SYSDIR/$GAME $LANGNAME [$LEGACY] ($VER)"
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -77,6 +83,8 @@ fi
 
 echo "[3/5] copy GDI -> $DEST (track05 real, rest linked)"
 mkdir -p "$OUT_SYSDIR"
+# An earlier build under the legacy name is this same output: take it over so it's replaced, not duplicated.
+if [ -d "$OLD_DEST" ] && [ ! -e "$DEST" ]; then mv "$OLD_DEST" "$DEST"; fi
 rm -rf "$DEST"; mkdir -p "$DEST"
 for f in "$GAMEDIR"/*; do
   b=$(basename "$f")

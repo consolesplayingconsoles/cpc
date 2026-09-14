@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<!-- Fixture shaped like Batocera's scraper output (Batocera was off when this was
+     written). Replace with a real one once the box is reachable. -->
+<gameList>
+	<game>
+		<path>./Sonic the Hedgehog (USA, Europe).md</path>
+		<name>Sonic The Hedgehog</name>
+		<desc>Sonic races through Green Hill Zone.</desc>
+		<image>./images/Sonic the Hedgehog (USA, Europe)-image.png</image>
+		<thumbnail>./images/Sonic the Hedgehog (USA, Europe)-thumb.png</thumbnail>
+		<rating>0.8</rating>
+		<releasedate>19910623T000000</releasedate>
+		<developer>Sonic Team</developer>
+		<publisher>Sega</publisher>
+		<genre>Platform</genre>
+		<players>1</players>
+		<favorite>true</favorite>
+		<playcount>12</playcount>
+		<lastplayed>20260801T213000</lastplayed>
+	</game>
+	<game>
+		<path>./Sonic 1 Boss Mod [Boss Versus v0.3].md</path>
+		<name>Sonic 1 Boss Mod</name>
+	</game>
+	<game>
+		<path>./Streets of Rage 2 (USA).zip</path>
+		<name>Streets of Rage 2</name>
+		<image>./images/Streets of Rage 2 (USA)-image.png</image>
+		<favorite>false</favorite>
+	</game>
+	<game>
+		<path>./Gone From Disk (Japan).md</path>
+		<name>Gone From Disk</name>
+		<favorite>true</favorite>
+	</game>
+</gameList>

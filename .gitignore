@@ -248,4 +248,4 @@ dist
 sandbox
 music-lib
 # Media catalogue: separate private repo, cloned here
-catalogue/
+/catalogue/

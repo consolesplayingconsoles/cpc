@@ -1,0 +1,17 @@
+{
+  "_comment": "Canonical languages for Pluto: translation targets, Lens OCR, and catalogue translation tags. code = ISO 639-1 (what translation projects store). aliases = other spellings seen in ROM names ([T-Eng], [T-Cat], 'Espanol'...), matched case-insensitively; the catalogue folds them all into code.",
+  "languages": [
+    { "code": "ca", "label": "Català",    "aliases": ["cat", "catala", "català", "catalan"] },
+    { "code": "es", "label": "Español",   "aliases": ["spa", "esp", "espanol", "español", "spanish", "castellano"] },
+    { "code": "en", "label": "English",   "aliases": ["eng", "english"] },
+    { "code": "fr", "label": "Français",  "aliases": ["fre", "fra", "francais", "français", "french"] },
+    { "code": "de", "label": "Deutsch",   "aliases": ["ger", "deu", "deutsch", "german"] },
+    { "code": "pt", "label": "Português", "aliases": ["por", "ptbr", "pt-br", "br", "portugues", "português", "portuguese", "brazilian"] },
+    { "code": "it", "label": "Italiano",  "aliases": ["ita", "italiano", "italian"] },
+    { "code": "ja", "label": "日本語",     "aliases": ["jap", "jpn", "japanese"] },
+    { "code": "ko", "label": "한국어",     "aliases": ["kor", "korean"] },
+    { "code": "zh", "label": "中文",       "aliases": ["chi", "zho", "chn", "chinese"] },
+    { "code": "ru", "label": "Русский",   "aliases": ["rus", "russian"] },
+    { "code": "ar", "label": "العربية",   "aliases": ["ara", "arabic"] }
+  ]
+}
