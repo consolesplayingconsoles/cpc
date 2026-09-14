@@ -127,6 +127,8 @@ paths:
       summary: Sync the local catalogue from the nodes (SSE; read-only against nodes)
       parameters: [{ name: system, in: query, required: false, schema: { type: string, default: '*' } }]
       responses: { '200': { description: text/event-stream of line/done events } }
+  /catalogue/missing-covers:
+    get: { tags: [catalogue], summary: "Present games with no image linked in the catalogue (no upload, no downloaded art), all systems", responses: { '200': { description: "{games: [{system, key, title}]}" } } }
   /catalogue/{system}:
     get:
       tags: [catalogue]
@@ -143,7 +145,7 @@ paths:
       responses: { '200': { description: image (uploaded art first, else libretro) }, '404': { description: No cover found } }
     post:
       tags: [catalogue]
-      summary: Upload a game's own cover (raw PNG/JPEG/WebP body, max 10 MB); wins over libretro art
+      summary: Upload a game's own cover (raw PNG/JPEG/WebP body, or JSON {url} to download a pasted link; max 10 MB); wins over libretro art
       parameters:
         - { name: system, in: path, required: true, schema: { type: string } }
         - { name: game, in: path, required: true, schema: { type: string } }
@@ -164,6 +166,12 @@ paths:
     post:
       tags: [catalogue]
       summary: Star or un-star a game (body {game, on})
+      parameters: [{ name: system, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+  /catalogue/{system}/label:
+    post:
+      tags: [catalogue]
+      summary: Set or clear ("") a game's label, its Pluto name and art lookup (body {game, label})
       parameters: [{ name: system, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: OK } }
   /native/{node}/{action}:

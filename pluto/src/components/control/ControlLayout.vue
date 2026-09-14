@@ -35,6 +35,14 @@ const shouldShowKindle = computed(() => props.targetId === 'kindle')
 defineEmits<{ 'drive-error': [msg: string] }>()
 
 const slots = useSlots()
+
+// Panels that draw their own title row (Camera, Telemetry, Kindle): their fullscreen button
+// sits ON that row instead of over the content. Capture has no title row, so it keeps the
+// corner overlay on the video.
+const headed = computed(() => ({
+  ne: !slots['ne'] && shouldShowCamera.value,
+  sw: shouldShowTelemetry.value || shouldShowKindle.value,
+}))
 // NE gets the roomba camera when target is roomba AND the source hasn't claimed the slot
 // (keyboard + DreamPicoPort both leave NE free). Mirrors the SW=telemetry hardcode.
 const shouldShowCamera = computed(() =>
@@ -135,7 +143,7 @@ function cellStyle(cell: 'nw' | 'ne' | 'sw' | 'se') {
         </button>
         <slot name="nw" />
       </div>
-      <div v-if="has('ne')" class="quad" :style="isNarrow ? undefined : cellStyle('ne')">
+      <div v-if="has('ne')" class="quad" :class="{ 'quad--headed': headed.ne }" :style="isNarrow ? undefined : cellStyle('ne')">
         <button v-if="canMax('ne')" class="quad-max" :class="{ on: maxCell === 'ne' }"
           @click="toggleMax('ne')"
           :title="maxCell === 'ne' ? 'Exit fullscreen (Esc)' : 'Fullscreen'"
@@ -145,7 +153,7 @@ function cellStyle(cell: 'nw' | 'ne' | 'sw' | 'se') {
         </button>
         <slot name="ne"><RoombaCamera v-if="shouldShowCamera" :node="targetDev" :active="active" :listening="listening" /></slot>
       </div>
-      <div v-if="shouldShowTelemetry || shouldShowKindle" class="quad" :style="isNarrow ? undefined : cellStyle('sw')">
+      <div v-if="shouldShowTelemetry || shouldShowKindle" class="quad" :class="{ 'quad--headed': headed.sw }" :style="isNarrow ? undefined : cellStyle('sw')">
         <button v-if="canMax('sw')" class="quad-max" :class="{ on: maxCell === 'sw' }"
           @click="toggleMax('sw')"
           :title="maxCell === 'sw' ? 'Exit fullscreen (Esc)' : 'Fullscreen'"
@@ -219,6 +227,18 @@ function cellStyle(cell: 'nw' | 'ne' | 'sw' | 'se') {
   opacity: 0.5;
   transition: opacity 0.12s, background 0.12s;
 }
+/* Titled panels: the button joins the title row (16px panel padding, ~18px row -> centre
+   at ~25px), light like the other page buttons, and the row keeps room for it on the right. */
+.quad--headed .quad-max {
+  top: 11px;
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text-muted);
+}
+.quad--headed .quad-max:hover { background: var(--surface-2); color: var(--accent); }
+.quad--headed :deep(.cam__head),
+.quad--headed :deep(.tel__head),
+.quad--headed :deep(.knd__head) { padding-right: 40px; }
 .quad:hover .quad-max,
 .quad-max:focus-visible,
 .quad-max.on {

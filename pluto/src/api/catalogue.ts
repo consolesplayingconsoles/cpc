@@ -6,7 +6,7 @@ import { API_BASE } from '../composables/useNodes'
 const BASE = `${API_BASE}/catalogue`
 const enc = encodeURIComponent
 
-export interface Variant { kind: 'mod' | 'translation'; name: string; version: string | null; author?: string | null }
+export interface Variant { kind: 'mod' | 'translation'; name: string; version: string | null; author?: string | null; lang?: string }
 
 export interface CatalogueFile {
   node: string
@@ -19,6 +19,7 @@ export interface CatalogueFile {
   id: string | null
   headerTitle: string | null
   status: 'present' | 'deleted'
+  card?: string | null            // SD card label when the node's games live on several cards
   firstSeen: string
   lastSeen: string
   save: string[]                  // nodes holding a save for this file's stem
@@ -37,6 +38,8 @@ export interface Game {
   regions: string[]
   saves: string[]
   favourite: boolean
+  label?: string | null           // Pluto's name for the game (labels.json); title already shows it
+  fileTitle?: string              // the title read from its files, when a label overrides it
   meta: { genre?: string; developer?: string; publisher?: string; year?: string }
   cover: 'custom' | 'cached' | 'miss' | null   // custom = uploaded; null = never tried (URL fetches on first ask)
 }
@@ -50,14 +53,24 @@ async function getJson<T>(url: string): Promise<T> {
   return r.json() as Promise<T>
 }
 
+export interface MissingCover { system: string; key: string; title: string }
+
 export const catalogueApi = {
   systems: () => getJson<{ systems: SystemSummary[] }>(BASE),
   system:  (system: string) => getJson<SystemView>(`${BASE}/${enc(system)}`),
+  missingCovers: () => getJson<{ games: MissingCover[] }>(`${BASE}/missing-covers`),
   setFavourite: async (system: string, game: string, on: boolean) => {
     const r = await fetch(`${BASE}/${enc(system)}/favourite`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game, on }),
     })
     if (!r.ok) throw new Error(`favourite ${system}/${game} -> ${r.status}`)
+  },
+  // Set or clear ('') a game's label: Pluto's name for it, also what its art is matched on.
+  setLabel: async (system: string, game: string, label: string) => {
+    const r = await fetch(`${BASE}/${enc(system)}/label`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game, label }),
+    })
+    if (!r.ok) throw new Error(`label ${system}/${game} -> ${r.status}`)
   },
   play: async (system: string, path: string) => {
     const r = await fetch(`${BASE}/${enc(system)}/play`, {
@@ -78,6 +91,13 @@ export const catalogueApi = {
       method: 'POST', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file,
     })
     if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `upload -> ${r.status}`)
+  },
+  // The API downloads the image at a pasted link and stores it like an upload.
+  coverFromUrl: async (system: string, game: string, url: string) => {
+    const r = await fetch(`${BASE}/${enc(system)}/cover/${enc(game)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+    })
+    if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `cover link -> ${r.status}`)
   },
   // SSE, read-only against nodes. '*' = everything Batocera has.
   syncUrl: (system: string) => `${BASE}/sync/stream?system=${enc(system)}`,

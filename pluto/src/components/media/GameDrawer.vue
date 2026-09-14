@@ -19,7 +19,7 @@ import { names } from '../../lib/catalogueNames'
 // entry by design -- the grouping below is what makes that readable (where Batocera
 // shows each file as its own game).
 const props = defineProps<{ system: string; game: Game; nodes: NodeMap; systemIcon?: string; coverVersion?: number }>()
-const emit = defineEmits<{ close: []; favourite: [on: boolean]; 'cover-changed': [] }>()
+const emit = defineEmits<{ close: []; favourite: [on: boolean]; 'cover-changed': []; relabeled: [] }>()
 
 interface Group { label: string; kind: 'original' | 'translation' | 'mod'; versions: string[]; authors: string[]; files: CatalogueFile[] }
 
@@ -60,6 +60,27 @@ const coverSrc = computed(() => props.game.cover === 'miss' || coverFailed.value
 const fileEl = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const uploadError = ref('')
+// No cover yet: paste an image link and the API downloads it (same store as an upload).
+const coverLink = ref('')
+async function saveCoverLink() {
+  const url = coverLink.value.trim()
+  if (!url) return
+  uploading.value = true
+  uploadError.value = ''
+  try {
+    await catalogueApi.coverFromUrl(props.system, props.game.key, url)
+    coverLink.value = ''
+    coverFailed.value = false
+    coverLoaded.value = false
+    emit('cover-changed')
+  } catch (err) {
+    uploadError.value = (err as Error).message
+  } finally {
+    uploading.value = false
+  }
+}
+watch(() => props.game.key, () => { coverLink.value = '' })
+
 async function onPick(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
@@ -94,8 +115,9 @@ onMounted(() => {
 })
 function projectFor(g: Group): ProjectSummary | null {
   if (g.kind !== 'translation') return null
-  const lang = (g.files[0]?.variants.find(v => v.kind === 'translation')?.name ?? '').toLowerCase()
-  const sameLang = (p: ProjectSummary) => !!p.lang && lang.startsWith(p.lang.toLowerCase())
+  // lang = the ISO code the catalogue folded [T-Cat]/[T-Eng] into (config/languages.json)
+  const lang = g.files[0]?.variants.find(v => v.kind === 'translation')?.lang ?? ''
+  const sameLang = (p: ProjectSummary) => !!p.lang && p.lang.toLowerCase() === lang
   const pool = projects.value.filter(p => p.system === props.system && sameLang(p))
   return pool.find(p => p.meta?.product && props.game.ids.includes(p.meta.product))
     ?? pool.find(p => names.key(names.title(p.gameName)) === names.key(props.game.title))
@@ -111,6 +133,29 @@ function fileName(path: string) { return path.split('/').pop() ?? path }
 function day(ts: string) { return ts ? ts.slice(0, 10) : '' }
 function version(f: CatalogueFile) { return f.variants.map(v => v.version).filter(Boolean).join(' + ') }
 
+// Label: Pluto's own name for the game (global, not per node); its art is matched on it.
+const labelEditing = ref(false)
+const labelText = ref('')
+const labelBusy = ref(false)
+const labelError = ref('')
+watch(() => props.game.key, () => { labelEditing.value = false })
+function editLabel() { labelEditing.value = !labelEditing.value; labelText.value = props.game.label || props.game.title; labelError.value = '' }
+async function saveLabel() {
+  const text = labelText.value.trim() === (props.game.fileTitle ?? props.game.title) ? '' : labelText.value.trim()
+  if (text === (props.game.label || '')) { labelEditing.value = false; return }
+  labelBusy.value = true
+  try {
+    await catalogueApi.setLabel(props.system, props.game.key, text)
+    labelEditing.value = false
+    emit('relabeled')
+  } catch (e) {
+    labelError.value = (e as Error).message
+  } finally {
+    labelBusy.value = false
+  }
+}
+const focusEl = (el: unknown) => { if (el instanceof HTMLInputElement) el.focus() }
+
 const { emulator, canPlay, canOpen, play, openFolder, actionError } =
   useRomActions(toRef(props, 'system'), toRef(props, 'nodes'))
 </script>
@@ -118,7 +163,7 @@ const { emulator, canPlay, canOpen, play, openFolder, actionError } =
 <template>
   <aside class="gd" @click.stop>
     <header class="gd__head">
-      <button class="gd__cover" :title="game.cover === 'custom' ? 'Replace cover' : 'Upload cover'" :disabled="uploading" @click="fileEl?.click()">
+      <button class="gd__cover" :class="{ 'gd__cover--art': coverSrc }" :title="game.cover === 'custom' ? 'Replace cover' : 'Upload cover'" :disabled="uploading" @click="fileEl?.click()">
         <template v-if="coverSrc">
           <img :src="coverSrc" alt="" :class="{ 'is-loading': !coverLoaded }" @load="coverLoaded = true" @error="coverFailed = true" />
           <UiSpinner v-if="!coverLoaded" class="gd__cover-spin" :size="20" />
@@ -134,6 +179,9 @@ const { emulator, canPlay, canOpen, play, openFolder, actionError } =
       </div>
 
       <div class="gd__tools">
+        <UiIconButton variant="ghost" :active="!!game.label" :title="game.label ? 'Edit label' : 'Set label'" @click="editLabel">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 12.5V4a1 1 0 0 1 1-1h8.5l8.5 8.5-9.5 9.5z"/><circle cx="7.5" cy="7.5" r="1.3" fill="currentColor"/></svg>
+        </UiIconButton>
         <UiIconButton variant="ghost" :active="game.favourite" :title="game.favourite ? 'Unfavourite' : 'Favourite'"
                       @click="emit('favourite', !game.favourite)">
           <svg width="16" height="16" viewBox="0 0 24 24" :fill="game.favourite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
@@ -142,6 +190,18 @@ const { emulator, canPlay, canOpen, play, openFolder, actionError } =
       </div>
     </header>
 
+    <form v-if="labelEditing" class="gd__label-edit" @submit.prevent="saveLabel">
+      <input :ref="focusEl" v-model="labelText" class="gd__label-input" :disabled="labelBusy"
+             placeholder="Title (Region)" @keydown.esc.stop="labelEditing = false" />
+      <UiSpinner v-if="labelBusy" :size="14" />
+    </form>
+    <p v-if="labelEditing" class="gd__label-hint">Enter saves · Esc cancels · empty resets to the file name</p>
+    <p v-if="labelError" class="gd__upload-err">{{ labelError }}</p>
+    <p v-if="game.label && !labelEditing" class="gd__label-hint">Label · files read as {{ game.fileTitle }}</p>
+    <form v-if="!coverSrc" class="gd__label-edit" @submit.prevent="saveCoverLink">
+      <input v-model="coverLink" class="gd__label-input" type="url" :disabled="uploading" placeholder="No cover: paste an image link, Enter" />
+      <UiSpinner v-if="uploading" :size="14" />
+    </form>
     <p v-if="uploadError" class="gd__upload-err">{{ uploadError }}</p>
     <p v-if="actionError" class="gd__upload-err">{{ actionError }}</p>
 
@@ -161,6 +221,7 @@ const { emulator, canPlay, canOpen, play, openFolder, actionError } =
             <img v-if="ICONS[f.node]" :src="ICONS[f.node]" class="gd__node-ic" alt="" />
             <span class="gd__node">{{ nodeName(f.node) }}</span>
           </button>
+          <span v-if="f.card" class="gd__card" title="SD card this copy is on">{{ f.card }}</span>
           <UiPill v-if="f.status === 'deleted'" tone="bad" :title="'Last seen ' + day(f.lastSeen)">Deleted</UiPill>
           <span v-if="f.version" class="gd__ver" title="Release version">v{{ f.version }}</span>
           <span v-if="version(f)" class="gd__ver" :title="g.kind === 'original' ? '' : KIND_LABEL[g.kind] + ' version'">{{ g.kind === 'original' ? '' : KIND_LABEL[g.kind].toLowerCase() + ' ' }}v{{ version(f) }}</span>
@@ -229,6 +290,10 @@ const { emulator, canPlay, canOpen, play, openFolder, actionError } =
   display: flex; align-items: center; justify-content: center;
   background: var(--surface-3); color: var(--text-faint); font-size: 26px; font-weight: 600;
 }
+.gd__head:has(.gd__cover--art) { flex-wrap: wrap; }
+/* real art: its own full-width row under the title, never upscaled past its resolution */
+.gd__cover.gd__cover--art { order: 1; flex: 0 0 100%; width: 100%; height: auto; min-height: 128px; background: transparent; }
+.gd__cover--art img:not(.is-loading) { width: auto; height: auto; max-width: 100%; }
 .gd__titles { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .gd__genre { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-hover); }
 /* same badge as MetadataCard's region */
@@ -244,6 +309,7 @@ const { emulator, canPlay, canOpen, play, openFolder, actionError } =
 .gd__file.is-deleted { border-style: dashed; }
 .gd__file.is-deleted .gd__path { text-decoration: line-through; color: var(--text-faint); }
 .gd__file-main { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+.gd__card { font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: var(--surface-3); color: var(--text-muted); }
 .gd__node-link { display: inline-flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
 .gd__node-link:hover .gd__node { color: var(--accent); text-decoration: underline; }
 .gd__project { margin-left: auto; padding: 0; border: 0; background: none; font: inherit; font-size: 12px; font-weight: 600; color: var(--accent); cursor: pointer; }
@@ -253,6 +319,10 @@ const { emulator, canPlay, canOpen, play, openFolder, actionError } =
 .gd__ver { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 .gd__save { font-size: 11px; font-weight: 600; color: var(--ok); }
 .gd__open { margin-left: auto; }
+.gd__label-edit { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
+.gd__label-hint { margin: 6px 0 0; font-size: 11.5px; color: var(--text-faint); }
+.gd__label-input { flex: 1; min-width: 0; font: inherit; font-size: 12.5px; padding: 5px 8px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-sm); }
+.gd__label-input:focus { outline: none; border-color: var(--accent); }
 .gd__path { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin: 4px 0 0; word-break: break-all; }
 .gd__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0 0; font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
 .gd__meta:empty { display: none; }
