@@ -8,6 +8,7 @@ import consolesConfig from '../../../config/consoles.json'
 import UiButton from '../ui/UiButton.vue'
 import UiSpinner from '../ui/UiSpinner.vue'
 import UiIconButton from '../ui/UiIconButton.vue'
+import UiSelect from '../ui/UiSelect.vue'
 import Terminal, { type TerminalOutput } from '../Terminal.vue'
 import GameDrawer from './GameDrawer.vue'
 import { useRomActions } from '../../composables/useRomActions'
@@ -71,7 +72,29 @@ const sortedSystems = computed(() => [...systems.value].sort((a, b) => {
 }))
 
 const favOnly = ref(false)
-watch(system, () => { favOnly.value = false })
+watch(system, () => { favOnly.value = false; groupBy.value = '' })
+
+// Group by a metadata field. Which fields: systems.<x>.filters, else defaultFilters, and
+// only those with at least one value among this system's games (coverage is uneven).
+type MetaField = 'genre' | 'developer' | 'publisher' | 'year'
+const FIELD_LABEL: Record<MetaField, string> = { genre: 'Genre', developer: 'Developer', publisher: 'Publisher', year: 'Year' }
+const groupBy = ref<'' | MetaField>('')
+const groupFields = computed<MetaField[]>(() => {
+  const wanted = ((SYSTEMS[system.value] as { filters?: string[] } | undefined)?.filters ?? consolesConfig.defaultFilters) as MetaField[]
+  const all = view.value?.games ?? []
+  return wanted.filter(f => all.some(g => g.meta?.[f]))
+})
+const sections = computed(() => {
+  if (!groupBy.value) return [{ label: '', games: games.value }]
+  const by = new Map<string, Game[]>()
+  for (const g of games.value) {
+    const k = g.meta?.[groupBy.value] ?? ''
+    by.set(k, [...(by.get(k) ?? []), g])
+  }
+  return [...by.entries()]
+    .sort(([a], [b]) => (a ? 0 : 1) - (b ? 0 : 1) || a.localeCompare(b))
+    .map(([k, gs]) => ({ label: k || 'Unknown', games: gs }))
+})
 
 // Card shortcuts: Play / Open folder act on the game's ROM when there is exactly ONE
 // present copy; with several (regions, mods, nodes) they're disabled and the drawer picks.
@@ -85,7 +108,8 @@ const pickHint = (g: Game) => g.files.some(f => f.status === 'present') ? 'Sever
 const games = computed<Game[]>(() => {
   const q = filter.value.trim().toLowerCase()
   const all = (view.value?.games ?? []).filter(g => !favOnly.value || g.favourite)
-  return q ? all.filter(g => g.title.toLowerCase().includes(q) || g.files.some(f => f.path.toLowerCase().includes(q))) : all
+  return q ? all.filter(g => g.title.toLowerCase().includes(q) || g.files.some(f => f.path.toLowerCase().includes(q))
+                          || Object.values(g.meta ?? {}).some(v => v.toLowerCase().includes(q))) : all
 })
 const openGame = computed(() => view.value?.games.find(g => g.key === gameKey.value) ?? null)
 
@@ -94,11 +118,19 @@ function go(sys?: string, game?: string) {
   if (route.path !== path) router.push(path)
 }
 
+// "Original + 1 translation · 2 mods": the Original prefix only when variants exist too,
+// so "1 mod" alone means there's no original copy (present files only).
 function variantSummary(g: Game): string {
   const mods = new Set<string>(), tls = new Set<string>()
-  for (const f of g.files) for (const v of f.variants) (v.kind === 'mod' ? mods : tls).add(v.name)
-  return [tls.size ? `${tls.size} translation${tls.size > 1 ? 's' : ''}` : '', mods.size ? `${mods.size} mod${mods.size > 1 ? 's' : ''}` : '']
+  let original = false
+  for (const f of g.files) {
+    if (f.status !== 'present') continue
+    if (!f.variants.length) original = true
+    for (const v of f.variants) (v.kind === 'mod' ? mods : tls).add(v.name)
+  }
+  const parts = [tls.size ? `${tls.size} translation${tls.size > 1 ? 's' : ''}` : '', mods.size ? `${mods.size} mod${mods.size > 1 ? 's' : ''}` : '']
     .filter(Boolean).join(' · ')
+  return parts && original ? `Original + ${parts}` : parts
 }
 const onlyDeleted = (g: Game) => g.files.length > 0 && g.nodes.length === 0
 function nodeName(id: string) { return props.nodes[id]?.name ?? id }
@@ -155,11 +187,11 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
     <template v-if="!system">
       <div class="md__body">
         <div class="md__actions">
-          <UiButton variant="primary" :loading="syncing" loading-text="Syncing…" @click="sync('*')">Sync Batocera</UiButton>
+          <UiButton variant="primary" :loading="syncing" loading-text="Syncing…" @click="sync('*')">Sync all</UiButton>
         </div>
         <p v-if="apiError" class="md__state is-bad">{{ apiError }}</p>
         <p v-else-if="loading && !systems.length" class="md__state"><UiSpinner /> Loading catalogue…</p>
-        <p v-else-if="!systems.length" class="md__state">No games yet. Sync Batocera to build the catalogue.</p>
+        <p v-else-if="!systems.length" class="md__state">No games yet. Sync all to build the catalogue.</p>
         <div class="md__grid">
           <button v-for="s in sortedSystems" :key="s.system" class="md__tile" @click="go(s.system)">
             <img v-if="systemIcon(s.system)" :src="systemIcon(s.system)" class="md__tile-ic" alt="" />
@@ -187,6 +219,12 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
           </span>
         </div>
         <input v-model="filter" class="md__filter" type="search" placeholder="Filter games" />
+        <span v-if="groupFields.length" class="md__group">
+          <UiSelect v-model="groupBy">
+            <option value="">No grouping</option>
+            <option v-for="f in groupFields" :key="f" :value="f">Group by {{ FIELD_LABEL[f].toLowerCase() }}</option>
+          </UiSelect>
+        </span>
         <span class="md__layout">
           <UiIconButton variant="ghost" :active="favOnly" title="Favourites only" @click="favOnly = !favOnly">
             <svg width="15" height="15" viewBox="0 0 24 24" :fill="favOnly ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
@@ -211,8 +249,10 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
       <div class="md__body md__body--list" @click="gameKey && go(system)">
         <p v-if="apiError" class="md__state is-bad">{{ apiError }}</p>
         <p v-else-if="loading && !view" class="md__state"><UiSpinner /> Loading…</p>
+        <template v-for="sec in sections" :key="sec.label">
+        <h3 v-if="sec.label" class="md__section">{{ sec.label }} <span>{{ sec.games.length }}</span></h3>
         <div v-if="layout === 'cards'" class="md__cards">
-          <div v-for="g in games" :id="'media-row-' + g.key" :key="g.key"
+          <div v-for="g in sec.games" :id="'media-row-' + g.key" :key="g.key"
                class="md__card" :class="{ 'is-open': g.key === gameKey, 'is-gone': onlyDeleted(g) }"
                role="button" tabindex="0"
                @click.stop="go(system, g.key)" @keydown.enter.self="go(system, g.key)">
@@ -254,7 +294,7 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
           </div>
         </div>
         <ul v-else class="md__list">
-          <li v-for="g in games" :id="'media-row-' + g.key" :key="g.key"
+          <li v-for="g in sec.games" :id="'media-row-' + g.key" :key="g.key"
               class="md__row" :class="{ 'is-open': g.key === gameKey, 'is-gone': onlyDeleted(g) }"
               @click.stop="go(system, g.key)">
             <span class="md__star" :class="{ 'is-on': g.favourite }">{{ g.favourite ? '★' : '' }}</span>
@@ -271,6 +311,7 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
             </span>
           </li>
         </ul>
+        </template>
       </div>
       <GameDrawer v-if="openGame && view" :system="view.system" :game="openGame" :nodes="nodes" :system-icon="systemIcon(system)"
                   :cover-version="coverVersion[openGame.key]"
@@ -299,6 +340,10 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
 .md__body { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-5); }
 .md__stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .md__body--list { padding: 0; }
+.md__group { width: 170px; }
+.md__section { display: flex; align-items: baseline; gap: 8px; margin: 0; padding: var(--sp-4) var(--sp-5) 0; font-size: 13px; font-weight: 600; color: var(--text); }
+.md__section span { font-family: var(--font-mono); font-size: 11px; font-weight: 400; color: var(--text-faint); }
+.md__section + .md__list { margin-top: var(--sp-2); }
 .md__layout { display: flex; align-items: center; gap: 2px; }
 .md__layout-sep { width: 1px; height: 18px; margin: 0 6px; background: var(--line); }
 

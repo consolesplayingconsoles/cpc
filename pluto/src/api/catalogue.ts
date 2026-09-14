@@ -37,6 +37,7 @@ export interface Game {
   regions: string[]
   saves: string[]
   favourite: boolean
+  meta: { genre?: string; developer?: string; publisher?: string; year?: string }
   cover: 'custom' | 'cached' | 'miss' | null   // custom = uploaded; null = never tried (URL fetches on first ask)
 }
 

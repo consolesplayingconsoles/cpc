@@ -43,7 +43,8 @@ const groups = computed<Group[]>(() => {
 // product line, regions from the header. Title is the catalogue's (filename-derived).
 const meta = computed<GameMeta>(() => ({
   title: props.game.title, titleHex: '', region: props.game.regions,
-  product: props.game.ids.join(' · '), version: '', date: '', maker: '',
+  product: props.game.ids.join(' · '), version: '', date: props.game.meta?.year ?? '',
+  maker: [props.game.meta?.developer, props.game.meta?.publisher].filter((v, i, a) => v && a.indexOf(v) === i).join(' / '),
 }))
 
 const coverFailed = ref(false)
@@ -98,7 +99,10 @@ const { emulator, canPlay, canOpen, play, openFolder, actionError } =
         <span class="gd__cover-edit">{{ uploading ? 'Uploading…' : game.cover === 'custom' ? 'Replace' : 'Upload' }}</span>
         <input ref="fileEl" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="onPick" />
       </button>
-      <MetadataCard class="gd__titles" :meta="meta" wrap empty-text="" />
+      <div class="gd__titles">
+        <MetadataCard :meta="meta" wrap empty-text="" />
+        <span v-if="game.meta?.genre" class="gd__genre">{{ game.meta.genre }}</span>
+      </div>
 
       <div class="gd__tools">
         <UiIconButton variant="ghost" :active="game.favourite" :title="game.favourite ? 'Unfavourite' : 'Favourite'"
@@ -191,7 +195,8 @@ const { emulator, canPlay, canOpen, play, openFolder, actionError } =
   display: flex; align-items: center; justify-content: center;
   background: var(--surface-3); color: var(--text-faint); font-size: 26px; font-weight: 600;
 }
-.gd__titles { flex: 1 1 auto; min-width: 0; }
+.gd__titles { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.gd__genre { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-hover); }
 /* same badge as MetadataCard's region */
 .gd__region { font-family: var(--font-sans); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 1px 6px; }
 .gd__tools { display: flex; gap: 2px; flex: 0 0 auto; }
