@@ -9,7 +9,10 @@ import UiSpinner from '../ui/UiSpinner.vue'
 import MetadataCard, { type GameMeta } from '../MetadataCard.vue'
 import { catalogueApi } from '../../api/catalogue'
 import { useRomActions } from '../../composables/useRomActions'
-import { computed, ref, toRef, watch } from 'vue'
+import { computed, onMounted, ref, toRef, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { translationApi, type ProjectSummary } from '../../api/translation'
+import { names } from '../../lib/catalogueNames'
 
 // One game, everything we know about it: every copy (ROM files per node, grouped by
 // variant) and every shelf copy. Regions, mods, translations and physical are ONE
@@ -75,6 +78,32 @@ async function onPick(e: Event) {
   }
 }
 
+// ── Cross-tab links ──
+const router = useRouter()
+
+// A node row opens that node's drawer in Network (the node is the entry point there).
+function openNode(id: string) {
+  if (props.nodes[id]) router.push({ path: '/', query: { node: id } })
+}
+
+// A translation variant links to its Translation-tab project, with progress. Match on the
+// disc's header ID + language (both stored by the project), then title + language.
+const projects = ref<ProjectSummary[]>([])
+onMounted(() => {
+  translationApi.listProjects().then(r => { projects.value = (r.projects ?? []) as ProjectSummary[] }).catch(() => { /* no link then */ })
+})
+function projectFor(g: Group): ProjectSummary | null {
+  if (g.kind !== 'translation') return null
+  const lang = (g.files[0]?.variants.find(v => v.kind === 'translation')?.name ?? '').toLowerCase()
+  const sameLang = (p: ProjectSummary) => !!p.lang && lang.startsWith(p.lang.toLowerCase())
+  const pool = projects.value.filter(p => p.system === props.system && sameLang(p))
+  return pool.find(p => p.meta?.product && props.game.ids.includes(p.meta.product))
+    ?? pool.find(p => names.key(names.title(p.gameName)) === names.key(props.game.title))
+    ?? null
+}
+const pct = (p: ProjectSummary) => (p.total ? Math.round((p.done / p.total) * 100) : 0)
+function openProject(p: ProjectSummary) { router.push('/translation/' + encodeURIComponent(p.ns)) }
+
 const KIND_LABEL = { original: 'Original', translation: 'Translation', mod: 'Mod' }
 
 function nodeName(id: string) { return props.nodes[id]?.name ?? id }
@@ -121,12 +150,17 @@ const { emulator, canPlay, canOpen, play, openFolder, actionError } =
         <UiPill :tone="g.kind === 'original' ? 'idle' : 'accent'">{{ KIND_LABEL[g.kind] }}</UiPill>
         <span v-if="g.kind !== 'original'" class="gd__group-name">{{ g.label }}</span>
         <span v-if="g.authors.length" class="gd__group-meta">by {{ g.authors.join(', ') }}</span>
+        <button v-if="projectFor(g)" class="gd__project" :title="'Open the ' + projectFor(g)!.ns + ' project'" @click="openProject(projectFor(g)!)">
+          {{ pct(projectFor(g)!) }}% · Open in Translation &rarr;
+        </button>
       </div>
 
       <div v-for="f in g.files" :key="f.node + f.path" class="gd__file" :class="{ 'is-deleted': f.status === 'deleted' }">
         <div class="gd__file-main">
-          <img v-if="ICONS[f.node]" :src="ICONS[f.node]" class="gd__node-ic" alt="" />
-          <span class="gd__node">{{ nodeName(f.node) }}</span>
+          <button class="gd__node-link" :title="'Open ' + nodeName(f.node) + ' in Network'" @click="openNode(f.node)">
+            <img v-if="ICONS[f.node]" :src="ICONS[f.node]" class="gd__node-ic" alt="" />
+            <span class="gd__node">{{ nodeName(f.node) }}</span>
+          </button>
           <UiPill v-if="f.status === 'deleted'" tone="bad" :title="'Last seen ' + day(f.lastSeen)">Deleted</UiPill>
           <span v-if="f.version" class="gd__ver" title="Release version">v{{ f.version }}</span>
           <span v-if="version(f)" class="gd__ver" :title="g.kind === 'original' ? '' : KIND_LABEL[g.kind] + ' version'">{{ g.kind === 'original' ? '' : KIND_LABEL[g.kind].toLowerCase() + ' ' }}v{{ version(f) }}</span>
@@ -210,6 +244,10 @@ const { emulator, canPlay, canOpen, play, openFolder, actionError } =
 .gd__file.is-deleted { border-style: dashed; }
 .gd__file.is-deleted .gd__path { text-decoration: line-through; color: var(--text-faint); }
 .gd__file-main { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+.gd__node-link { display: inline-flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+.gd__node-link:hover .gd__node { color: var(--accent); text-decoration: underline; }
+.gd__project { margin-left: auto; padding: 0; border: 0; background: none; font: inherit; font-size: 12px; font-weight: 600; color: var(--accent); cursor: pointer; }
+.gd__project:hover { color: var(--accent-hover); text-decoration: underline; }
 .gd__node-ic { width: 18px; height: 18px; object-fit: contain; }
 .gd__node { font-size: 13px; font-weight: 600; color: var(--text); }
 .gd__ver { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }

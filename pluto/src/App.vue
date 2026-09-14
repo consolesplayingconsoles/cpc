@@ -11,6 +11,8 @@ import ControlTab from './components/control/ControlTab.vue'
 import TranslationTable from './components/translation/TranslationTable.vue'
 import MediaTab from './components/media/MediaTab.vue'
 import AchievementToast from './components/AchievementToast.vue'
+import MiniChat from './components/MiniChat.vue'
+import UiIconButton from './components/ui/UiIconButton.vue'
 import { useAchievement } from './composables/useAchievement'
 import plutoLabMark from './assets/avatars/pluto-lab.svg'
 import plutoC2Mark from './assets/avatars/pluto-c2.svg'
@@ -39,11 +41,14 @@ function toggleTheme() {
 }
 
 // The visible panel is driven by the current route name. The router table maps
-// '/' → network, '/chat' → chat, '/control/...' → the Control surface.
-// The Command surface is the chat component (it's the node command bus); route is
-// 'command' but the internal panel key stays 'chat'.
-const activeTab = computed<'network' | 'chat' | 'control' | 'translation' | 'media'>(() => {
-  if (route.name === 'command') return 'chat'
+// '/' → network, '/control/...' → Control, and so on. Chat is no longer a tab: the mini
+// chat dock sits on every tab, and /command opens the full chat as an OVERLAY on top of
+// whichever tab you were on (lastTab), so closing it returns you there.
+type Tab = 'network' | 'control' | 'translation' | 'media'
+const chatOpen = computed(() => route.name === 'command')
+const lastTab = ref<Tab>('network')
+const activeTab = computed<Tab>(() => {
+  if (route.name === 'command') return lastTab.value
   if (route.name === 'media') return 'media'
   if (route.name === 'control') return 'control'
   if (route.name === 'translation') return 'translation'
@@ -62,6 +67,13 @@ function goToTab(tab: 'network' | 'chat' | 'control' | 'translation' | 'media' |
     : '/'
   if (route.path !== path) router.push(path)
 }
+
+watch(() => route.name, (name) => {
+  if (name !== 'command') lastTab.value = activeTab.value
+}, { immediate: true })
+const lastTabPath = ref('/')
+watch(() => route.fullPath, (p) => { if (route.name !== 'command') lastTabPath.value = p }, { immediate: true })
+function closeChat() { router.push(lastTabPath.value) }
 
 const { nodes, loading, error } = useNodes()
 const { connections } = useConnections()
@@ -122,8 +134,9 @@ function latestId() {
   return messages.value[messages.value.length - 1]?.id ?? 0
 }
 
+// Unread = messages since you last looked: at the open mini chat dock or the full chat.
 const unreadCount = computed(() => {
-  if (activeTab.value === 'chat') return 0
+  if (chatOpen.value) return 0
   return messages.value.filter(m => m.id > lastSeenMsgId.value).length
 })
 
@@ -138,13 +151,14 @@ watch(messages, () => {
     lastSeenMsgId.value = latestId()
     baselined.value = true
   }
-  if (activeTab.value === 'chat') lastSeenMsgId.value = latestId()
+  if (chatOpen.value) lastSeenMsgId.value = latestId()
 }, { deep: true, immediate: true })
 
-// Mark chat read whenever the chat route becomes active (including on direct load).
-watch(activeTab, (tab) => {
-  if (tab === 'chat') lastSeenMsgId.value = latestId()
+// Mark chat read whenever the full chat opens (including on direct load of /command).
+watch(chatOpen, (open) => {
+  if (open) lastSeenMsgId.value = latestId()
 }, { immediate: true })
+function markChatSeen() { lastSeenMsgId.value = latestId() }
 
 const displayNodes = computed(() => {
   const src = error.value
@@ -237,14 +251,6 @@ const displayNodes = computed(() => {
         >Network</button>
         <button
           class="tab"
-          :class="{ 'tab--active': activeTab === 'chat' }"
-          @click="goToTab('chat')"
-        >
-          Command
-          <span v-if="unreadCount > 0" class="tab-badge">{{ unreadCount }}</span>
-        </button>
-        <button
-          class="tab"
           :class="{ 'tab--active': activeTab === 'control' }"
           @click="goToTab('control')"
         >Control</button>
@@ -266,17 +272,23 @@ const displayNodes = computed(() => {
           <NetworkDiagram v-show="!loading" :nodes="displayNodes" :connections="connections" @open-tab="goToTab($event as 'network' | 'chat' | 'robutek' | 'dreame')" />
         </div>
 
-        <GroupChat
-          v-show="activeTab === 'chat'"
-          :nodes="nodes"
-          :show-offline="showOffline"
-        />
 
         <ControlTab v-show="activeTab === 'control'" :active="activeTab === 'control'" :nodes="nodes" :show-offline="showOffline" />
 
         <TranslationTable v-show="activeTab === 'translation'" />
 
         <MediaTab v-show="activeTab === 'media'" :active="activeTab === 'media'" :nodes="nodes" />
+
+        <!-- Mini chat dock on every tab; hidden while the full chat overlay is open. -->
+        <MiniChat v-if="!chatOpen" :nodes="nodes" :unread="unreadCount" @expand="goToTab('chat')" @seen="markChatSeen" />
+
+        <!-- Full chat: an overlay over the current tab (/command), not a tab. -->
+        <div v-if="chatOpen" class="chat-overlay">
+          <UiIconButton class="chat-overlay__collapse" title="Collapse to mini chat" @click="closeChat">
+            <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 2.5l-4 4M9.5 3v3.5H13M2.5 13.5l4-4M6.5 13V9.5H3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </UiIconButton>
+          <GroupChat :nodes="nodes" :show-offline="showOffline" />
+        </div>
       </div>
     </main>
 
@@ -469,6 +481,11 @@ const displayNodes = computed(() => {
 
 /* The tab panels fill the rest below the second header. */
 .panels { flex: 1; min-height: 0; position: relative; }
+.chat-overlay { position: absolute; inset: 0; z-index: 6; background: var(--surface); }
+/* collapse = the mirror of the dock's expand arrows: back to the mini chat. The feed's day
+   separator line stops short of it so the two don't collide. */
+.chat-overlay :deep(.day-divider) { margin-right: 44px; }
+.chat-overlay__collapse { position: absolute; top: 12px; right: 16px; z-index: 1; box-shadow: var(--shadow-sm); }
 
 .network-view {
   width: 100%;

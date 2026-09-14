@@ -105,6 +105,16 @@ const soleRom = (g: Game) => {
 }
 const pickHint = (g: Game) => g.files.some(f => f.status === 'present') ? 'Several copies: open the game to pick one' : 'No copy present'
 
+// System tiles + the system page show every node CONFIGURED for the system (nodeConsoles:
+// capable), dimmed when it holds none of its games; game cards show only nodes where the
+// game is PRESENT. Same source as the API's hosts list.
+function hostsFor(sys: string): string[] {
+  const nc = (consolesConfig.nodeConsoles ?? {}) as Record<string, string[]>
+  return Object.keys(nc).filter(n => (nc[n].includes('*') || nc[n].includes(sys)) && ICONS[n]).sort()
+}
+
+const hostsWithGames = computed(() => new Set((view.value?.games ?? []).flatMap(g => g.nodes)))
+
 const games = computed<Game[]>(() => {
   const q = filter.value.trim().toLowerCase()
   const all = (view.value?.games ?? []).filter(g => !favOnly.value || g.favourite)
@@ -200,7 +210,9 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
             <span class="md__tile-name">{{ systemName(s.system) }}</span>
             <span class="md__tile-count">{{ s.games }} game{{ s.games === 1 ? '' : 's' }}<template v-if="s.physical"> · {{ s.physical }} physical</template></span>
             <span class="md__tile-nodes">
-              <img v-for="n in s.nodes" :key="n" :src="ICONS[n]" :title="nodeName(n)" alt="" />
+              <img v-for="n in hostsFor(s.system)" :key="n" :src="ICONS[n]" alt=""
+                   :class="{ 'is-idle': !s.nodes.includes(n) }"
+                   :title="nodeName(n) + (s.nodes.includes(n) ? '' : ' (configured, no games yet)')" />
             </span>
           </button>
         </div>
@@ -241,7 +253,11 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
       </header>
       <div class="md__meta-bar">
         <span v-if="view">{{ view.games.length }} games</span>
-        <span v-if="view?.hosts.length">Hosted by {{ view.hosts.map(nodeName).join(', ') }}</span>
+        <span v-if="view?.hosts.length" class="md__hosts">
+          <img v-for="n in view.hosts" :key="n" :src="ICONS[n]" alt=""
+               :class="{ 'is-idle': !hostsWithGames.has(n) }"
+               :title="nodeName(n) + (hostsWithGames.has(n) ? '' : ' (configured, no games yet)')" />
+        </span>
         <span v-if="view?.syncedAt">Synced {{ view.syncedAt.slice(0, 16).replace('T', ' ') }}</span>
       </div>
       <!-- stage = the non-scrolling frame: the drawer pins to it, the body scrolls inside -->
@@ -335,7 +351,10 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
 .md__head-title { font-size: 15px; font-weight: 600; }
 .md__filter { font: inherit; font-size: 13px; padding: 6px 10px; width: min(240px, 100%); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--text); }
 .md__filter:focus { outline: none; border-color: var(--accent); }
-.md__meta-bar { display: flex; gap: var(--sp-4); padding: 6px var(--sp-5); font-size: 12px; color: var(--text-faint); border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
+.md__hosts { display: inline-flex; align-items: center; gap: 8px; }
+.md__hosts img { width: 22px; height: 22px; object-fit: contain; }
+.md__hosts img.is-idle { opacity: 0.35; filter: grayscale(1); }
+.md__meta-bar { display: flex; align-items: center; gap: var(--sp-4); padding: 6px var(--sp-5); font-size: 12px; color: var(--text-faint); border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
 
 .md__body { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-5); }
 .md__stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -380,6 +399,7 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
 .md__tile-count { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 .md__tile-nodes { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; min-height: 32px; }
 .md__tile-nodes img { width: 32px; height: 32px; object-fit: contain; }
+.md__tile-nodes img.is-idle { opacity: 0.35; filter: grayscale(1); }
 
 .md__list { list-style: none; }
 .md__row { display: flex; align-items: center; gap: var(--sp-3); padding: 9px var(--sp-5); border-bottom: 1px solid var(--line); background: var(--surface); cursor: pointer; }

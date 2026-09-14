@@ -3710,6 +3710,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 else:
                     total = sum(len(v) for v in (st.get("sources") or {}).values()) \
                         or len(st.get("blocks", []))
+                # done: lines carrying a translation or marked done -- the same rule the
+                # workbench's progress header uses -- so other tabs (Media) can show progress.
+                done = 0
+                for src in (st.get("sources") or {}).values():
+                    for b in (src if isinstance(src, list) else (src or {}).get("blocks", [])):
+                        if str(b.get("ca") or "").strip() or b.get("done"):
+                            done += 1
                 projects.append({
                     "ns":       name,
                     "gameName": st.get("gameName", name),
@@ -3718,6 +3725,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "path":     st.get("path", ""),
                     "meta":     st.get("meta"),
                     "total":    total,
+                    "done":     done,
                 })
         self._send(200, {"projects": projects})
 

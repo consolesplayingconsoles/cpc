@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import type { NodeMap } from '../../composables/useNodes'
 import type { Connection } from '../../composables/useConnections'
 import { useDeploy } from '../../composables/useDeploy'
@@ -8,19 +9,12 @@ import { BUBBLE_R } from '../../composables/bubbleConstants'
 import NodeBubble from './NodeBubble.vue'
 import NodeDrawer from './NodeDrawer.vue'
 import Terminal from '../Terminal.vue'
-import RecentActivity from '../RecentActivity.vue'
 
-import { useMessages } from '../../composables/useMessages'
 import { ICONS } from '../../composables/useIcons'
 import layout from '../../../config/layout.json'
 
 const props = defineProps<{ nodes: NodeMap; connections: Connection[] }>()
 const emit = defineEmits<{ 'open-tab': [tab: string] }>()
-
-// Shared chat feed (module-level singleton in useMessages — no second poll started).
-// Powers the bottom-left "Recent Activity" tail so a command fired from a node
-// drawer can show its reply without leaving the diagram.
-const { messages } = useMessages()
 
 // Diagram geometry lives in layout.json (hand-edited, like connections.json). The
 // gateway is the origin everything hangs off — only its spot on the canvas is fixed
@@ -213,7 +207,15 @@ const floatTermStyle = computed(() => ({
 function closeMenu() {
   if (panMoved) { panMoved = false; return }   // a pan-drag, not a real click
   activeMenu.value = null
+  if (route.query.node) router.replace({ query: {} })
 }
+
+// Deep link: /?node=<id> opens that node's drawer (the Media drawer links here).
+const route = useRoute()
+const router = useRouter()
+watch([() => route.query.node, () => Object.keys(props.nodes).length], ([id]) => {
+  if (typeof id === 'string' && props.nodes[id]) activeMenu.value = id
+}, { immediate: true })
 function toggleMenu(id: string) {
   if (!isClickable(id)) return
   activeMenu.value === id ? closeMenu() : (activeMenu.value = id)
@@ -362,11 +364,6 @@ watch(hoveredNode, () => nextTick(updatePeekPos))
       @close="closeDeployTerm"
     />
 
-    <!-- recent activity tail (bottom-left): a peek at the chat feed so a command
-         fired from a node drawer shows its reply without leaving the diagram -->
-    <div class="activity-dock">
-      <RecentActivity :messages="messages" @expand="emit('open-tab', 'chat')" />
-    </div>
 
     <!-- zoom controls (fit-to-view by default; zoom in for detail, then pan) -->
     <div class="zoom-controls" @click.stop>
@@ -397,13 +394,6 @@ watch(hoveredNode, () => nextTick(updatePeekPos))
   pointer-events: none;
 }
 
-/* recent-activity dock — mirrors .zoom-controls but on the bottom-left */
-.activity-dock {
-  position: absolute;
-  left: 16px;
-  bottom: 16px;
-  z-index: 2;
-}
 
 /* zoom control cluster — quiet glass chips, bottom-right */
 .zoom-controls {
