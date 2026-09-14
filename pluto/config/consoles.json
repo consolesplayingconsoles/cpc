@@ -61,6 +61,8 @@
     "mame":          { "name": "Arcade (MAME)", "thumbnails": "MAME" }
   },
   "_emulatorsComment": "Desktop emulators on the Lab (macOS) for the Media drawer's Play button, like a file association: `defaultEmulator` for every system, systems.<x>.emulator overrides it. app = the .app name for `open -a`. args = launch arguments with {rom} for the ROM path, passed via `open -a <app> --args ...`; omit to hand the ROM over as a document (OpenEmu imports and starts it). Remote start on real consoles will be per node, not here.",
+  "_filtersComment": "Metadata fields a system's Media page offers to Group by (libretro-database: genre, developer, publisher, year). defaultFilters for every system; systems.<x>.filters overrides it. A field with no values for that system's games is hidden anyway, so this only narrows or reorders.",
+  "defaultFilters": ["genre", "developer", "publisher", "year"],
   "defaultEmulator": "openemu",
   "emulators": {
     "openemu": { "name": "OpenEmu", "app": "OpenEmu" },
