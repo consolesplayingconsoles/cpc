@@ -24,6 +24,8 @@ const router = createRouter({
     // :ns is the project namespace (game + language) — rides the URL so a reload /
     // HMR / bookmark restores the open table instead of dropping to the picker.
     { path: '/translation/:ns?', name: 'translation', component: Blank, meta: { hashtag: '#consolas-traduciendo-consolas' } },
+    // Media: the game catalogue. :system/:game ride the URL so a reload keeps the open drawer.
+    { path: '/media/:system?/:game?', name: 'media', component: Blank, meta: { hashtag: '#consoles-collecting-consoles' } },
     { path: '/dreame', redirect: '/control/dreame' },   // back-compat
     // Anything else falls back to the network view.
     { path: '/:pathMatch(.*)*', redirect: '/' },

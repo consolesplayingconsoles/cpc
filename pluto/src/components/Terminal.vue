@@ -1,11 +1,22 @@
+<script lang="ts">
+// A floating streaming console: a titled bar (step + elapsed timer) over a live log.
+// Knows nothing about what produced the stream -- deploys, catalogue syncs, save syncs
+// all feed it the same shape. Exported so callers can type their output.
+export interface TerminalOutput {
+  raw:       string
+  ok:        boolean | null  // null = in progress
+  step:      string          // current step label, shown as-is
+  startedAt: number          // epoch ms when the run began
+}
+</script>
+
 <script setup lang="ts">
 import { ref, watch, computed, nextTick, onUnmounted } from 'vue'
-import type { DeployResult } from '../composables/useDeploy'
 
 const props = defineProps<{
-  consoleId: string
-  output:    DeployResult
-  lastMs?:   number | null
+  title:     string          // bar label, e.g. "deploy", "sync"
+  output:    TerminalOutput
+  lastMs?:   number | null   // previous run's duration, shown as "~last"
   cardStyle: Record<string, string>
 }>()
 
@@ -15,9 +26,9 @@ const bodyEl = ref<HTMLElement | null>(null)
 const copied = ref(false)
 
 // ── Live elapsed timer ────────────────────────────────────────────────────────
-// Ticks once a second while the deploy is in flight so the slow sync step shows
-// visible progress; frozen on finish. Paired with the "~last" reference it turns
-// an opaque wait into a predictable one.
+// Ticks once a second while the run is in flight so slow steps show visible
+// progress; frozen on finish. Paired with the "~last" reference it turns an opaque
+// wait into a predictable one.
 const now    = ref(Date.now())
 let   timer: ReturnType<typeof setInterval> | null = null
 
@@ -62,15 +73,6 @@ async function copyOutput() {
     setTimeout(() => { copied.value = false }, 1500)
   } catch { /* clipboard blocked */ }
 }
-
-const STEP_LABELS: Record<string, string> = {
-  starting: 'starting',
-  vendor:   'vendoring',
-  sync:     'syncing',
-  deps:     'linux deps',
-  done:     'done',
-  failed:   'failed',
-}
 </script>
 
 <template>
@@ -87,8 +89,8 @@ const STEP_LABELS: Record<string, string> = {
   >
     <div class="term__bar">
       <span class="term__title">
-        ▶ deploy ·
-        <span class="term__step">{{ STEP_LABELS[output.step] ?? output.step }}</span>
+        ▶ {{ title }} ·
+        <span class="term__step">{{ output.step }}</span>
         <span class="term__timer">
           {{ elapsed }}<span v-if="lastRef" class="term__last"> / ~{{ lastRef }}</span>
         </span>

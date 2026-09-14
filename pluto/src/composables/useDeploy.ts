@@ -30,6 +30,13 @@ function loadLastAt(): Record<string, number> {
   try { return JSON.parse(localStorage.getItem(LASTAT_KEY) || '{}') } catch { return {} }
 }
 
+// deploy.sh ##STEP names -> the label the terminal shows.
+const STEP_LABELS: Record<string, string> = {
+  vendor: 'vendoring',
+  sync:   'syncing',
+  deps:   'linux deps',
+}
+
 const SUCCESS_BANNER = `
 ──────────────────────────────────────────────────
   DEPLOY SUCCESSFUL
@@ -71,7 +78,7 @@ export function useDeploy(getNodes: () => NodeMap = () => ({})) {
     es.addEventListener('step', (e: MessageEvent) => {
       const c = current()
       if (!c) return
-      deployOutput.value = { ...deployOutput.value, [id]: { ...c, step: e.data } }
+      deployOutput.value = { ...deployOutput.value, [id]: { ...c, step: STEP_LABELS[e.data] ?? e.data } }
     })
 
     es.addEventListener('done', (e: MessageEvent) => {

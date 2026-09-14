@@ -41,6 +41,7 @@ from modules.dreame import commands as vacuum
 from modules.substack import sender as substack
 from modules.google import scanner as google_scanner
 from modules.vmu import vmufs
+from modules.catalogue import service as catalogue
 
 
 def open_path(path):
@@ -205,7 +206,7 @@ def _claude_reply(messages_snapshot):
 
 # Dropbox saves live under one canonical namespace, keyed by REAL console name
 # (not node name -- one node hosts many consoles, e.g. wii runs wii + gamecube).
-# The console list + node->console map are Pluto-owned (config/consoles.json); the
+# The system list (`systems`) + node->system map are Pluto-owned (config/consoles.json); the
 # @dropbox dropup shows them client-side, so bare/unknown forms here just print a
 # usage hint. Per-console metadata (_cpc.json, the conflict ledger) is hidden from
 # listings. Folders are lazy: absent on read -> "empty", created on write.
@@ -1015,7 +1016,7 @@ def _dropbox_dispatch(verb, text, roster, consoles_cfg):
     The dropup owns discovery client-side, so a bare or malformed form just prints a
     short usage hint here."""
     cfg      = consoles_cfg or {}
-    consoles = cfg.get("consoles", [])
+    consoles = list((cfg.get("systems") or {}).keys())
     try:
         token = _dropbox_access_token(roster)
     except DropboxAuthError as exc:
@@ -2245,13 +2246,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/translate/projects"), ("GET", "/translate/systems"), ("GET", "/translate/games"),
         ("GET", "/translate/extract"), ("GET", "/translate/sources"), ("GET", "/translate/meta"),
         ("GET", "/translate/{game}/textures"), ("GET", "/translate/{game}"),
+        ("GET", "/catalogue"), ("GET", "/catalogue/sync/stream"), ("GET", "/catalogue/{system}"),
+        ("GET", "/catalogue/{system}/cover/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
         ("POST", "/messages"), ("POST", "/dreame/login"), ("POST", "/dreame/logout"),
         ("POST", "/control/signal"), ("POST", "/control/capture"),
         ("POST", "/control/capture/grab"), ("POST", "/control/google/lens"),
         ("POST", "/control/google/translate"), ("POST", "/control/google/translate-last"),
         ("POST", "/workspace/{node}"), ("POST", "/config/open"), ("POST", "/native/{node}/{action}"),
-        ("POST", "/sd/{node}"),
+        ("POST", "/sd/{node}"), ("POST", "/catalogue/{system}/favourite"), ("POST", "/catalogue/{system}/open"),
+        ("POST", "/catalogue/{system}/cover/{game}"), ("POST", "/catalogue/{system}/play"),
         ("POST", "/translate/run"), ("POST", "/translate/open"), ("POST", "/translate/delete"),
         ("POST", "/translate/upload"), ("POST", "/translate/{game}"),
         ("PUT", "/translate/{game}"),
@@ -2291,6 +2295,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except ValueError:
                 since = None
             self._send(200, _get_messages(since))
+
+        elif parsed.path == "/catalogue":
+            self._send(200, {"systems": catalogue.systems(self._catalogue_root())})
+
+        elif parsed.path == "/catalogue/sync/stream":
+            qs = urllib.parse.parse_qs(parsed.query)
+            self._handle_catalogue_sync_stream((qs.get("system") or ["*"])[0])
+
+        elif len(parts) == 2 and parts[0] == "catalogue":
+            self._handle_catalogue_system(parts[1])
+
+        elif len(parts) == 4 and parts[0] == "catalogue" and parts[2] == "cover":
+            self._handle_catalogue_cover(urllib.parse.unquote(parts[1]), urllib.parse.unquote(parts[3]))
 
         elif len(parts) == 3 and parts[0] == "deploy" and parts[2] == "stream":
             self._handle_deploy_stream(parts[1])
@@ -2415,6 +2432,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_sync(parts[1])
         elif len(parts) == 2 and parts[0] == "sd":
             self._handle_sd_backup(parts[1])
+        elif len(parts) == 4 and parts[0] == "catalogue" and parts[2] == "cover":
+            self._handle_catalogue_cover_upload(urllib.parse.unquote(parts[1]), urllib.parse.unquote(parts[3]))
+        elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "play":
+            body = self._read_json_body()
+            if body is not None:
+                self._handle_catalogue_play(parts[1], str(body.get("path", "")))
+        elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "open":
+            body = self._read_json_body()
+            if body is not None:
+                self._handle_catalogue_open(parts[1], str(body.get("path", "")))
+        elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "favourite":
+            body = self._read_json_body()
+            if body is not None:
+                catalogue.set_favourite(self._catalogue_root(), parts[1], str(body.get("game", "")), bool(body.get("on")))
+                self._send(200, {"ok": True})
         elif len(parts) == 3 and parts[0] == "native":
             self._handle_native(parts[1], parts[2])
         elif parsed.path == "/translate/run":
@@ -3429,12 +3461,161 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             emit("done", "failed:%s" % e)
 
+    # ── Media catalogue ─────────────────────────────────────────────────────────
+    # Data lives in <repo>/catalogue (its own private repo, gitignored); the logic in
+    # modules/catalogue. Sync only READS nodes and only writes that local dir.
+
+    _catalogue_lock = threading.Lock()
+
+    def _catalogue_root(self):
+        return os.path.join(os.path.dirname(self.__class__.base_dir), "catalogue")
+
+    def _catalogue_hosts(self, system):
+        nc = self.__class__.consoles_config.get("nodeConsoles", {})
+        return [n for n, cs in sorted(nc.items()) if "*" in cs or system in cs]
+
+    def _handle_catalogue_system(self, system):
+        if not re.match(r"^[A-Za-z0-9_.-]+$", system):
+            self._send(400, {"error": "bad system"}); return
+        view = catalogue.system_view(self._catalogue_root(), system)
+        view["hosts"] = self._catalogue_hosts(system)
+        self._send(200, view)
+
+    def _handle_catalogue_cover(self, system, game):
+        """Box art, fetched from libretro-thumbnails on first ask and cached in the catalogue."""
+        if not re.match(r"^[A-Za-z0-9_.-]+$", system) or "/" in game or game.startswith("."):
+            self._send(400, {"error": "bad path"}); return
+        path = catalogue.cover(self._catalogue_root(), system, game, self.__class__.consoles_config)
+        if not path:
+            self._send(404, {"error": "no cover"}); return
+        with open(path, "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", catalogue.covers.ART_TYPES.get(os.path.splitext(path)[1], "image/png"))
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "max-age=86400")
+        self._cors_headers()
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_catalogue_cover_upload(self, system, game):
+        """Raw image body (PNG/JPEG/WebP, max 10 MB) -> catalogue/<system>/art/<game>.*,
+        which takes priority over libretro art for that game."""
+        if not re.match(r"^[A-Za-z0-9_.-]+$", system) or not re.match(r"^[A-Za-z0-9_.~+-]+$", game) or game.startswith("."):
+            self._send(400, {"error": "bad path"}); return
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if not 0 < length <= 10 * 1024 * 1024:
+            self._send(413, {"error": "image must be 1 byte to 10 MB"}); return
+        try:
+            path = catalogue.covers.save_custom(self._catalogue_root(), system, game, self.rfile.read(length))
+        except ValueError as exc:
+            self._send(415, {"error": str(exc)}); return
+        print("  [CATALOGUE:cover] %s/%s -> %s" % (system, game, path))
+        self._send(200, {"ok": True})
+
+    def _lab_rom(self, system, rel):
+        """<ROMS_PATH>/<system>/roms/<rel>, or None when unset / escaping / missing."""
+        roms = os.path.expanduser((self.__class__.config.get("ROMS_PATH") or "").strip())
+        if not roms or not re.match(r"^[A-Za-z0-9_.-]+$", system):
+            return None
+        base = os.path.normpath(os.path.join(roms, system, "roms"))
+        path = os.path.normpath(os.path.join(base, rel))
+        if os.path.commonpath([base, path]) != base or not os.path.exists(path):
+            return None
+        return path
+
+    def _handle_catalogue_play(self, system, rel):
+        """Launch a lab ROM in the system's associated desktop emulator on this Mac
+        (config/consoles.json systems.<x>.emulator, else defaultEmulator). Local launch on
+        the API host, like /catalogue/{system}/open."""
+        cfg = self.__class__.consoles_config
+        key = ((cfg.get("systems") or {}).get(system) or {}).get("emulator") or cfg.get("defaultEmulator")
+        emu = (cfg.get("emulators") or {}).get(key or "")
+        if not emu:
+            self._send(400, {"error": "no emulator associated with %s" % system}); return
+        path = self._lab_rom(system, rel)
+        if not path:
+            self._send(400, {"error": "not a lab ROM"}); return
+        if platform.system() != "Darwin":
+            self._send(501, {"error": "desktop emulator launch is macOS only"}); return
+        cmd = ["open", "-a", emu["app"]]
+        cmd += (["--args"] + [a.replace("{rom}", path) for a in emu["args"]]) if emu.get("args") else [path]
+        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if r.returncode != 0:
+            self._send(502, {"error": (r.stdout or "open failed").strip()}); return
+        print("  [PLAY:%s] %s" % (key, path))
+        self._send(200, {"ok": True})
+
+    def _handle_catalogue_open(self, system, rel):
+        """Open a lab ROM's folder on this host (the lab node has no SMB share: it IS this
+        machine). Guarded to stay under <ROMS_PATH>/<system>/roms, like /config/open."""
+        roms = os.path.expanduser((self.__class__.config.get("ROMS_PATH") or "").strip())
+        if not roms or not re.match(r"^[A-Za-z0-9_.-]+$", system):
+            self._send(400, {"error": "no ROMS_PATH"}); return
+        base = os.path.normpath(os.path.join(roms, system, "roms"))
+        path = os.path.normpath(os.path.join(base, os.path.dirname(rel)))
+        if os.path.commonpath([base, path]) != base or not os.path.isdir(path):
+            self._send(400, {"error": "bad path"}); return
+        print("  [OPEN:catalogue] -> %s" % path)
+        open_path(path)
+        self._send(200, {"status": "opened", "path": path})
+
+    def _catalogue_saves(self, system):
+        """{rom stem (lower): [nodes holding a save]} from the Dropbox ledger, or None."""
+        try:
+            token = _dropbox_access_token(self.__class__.node_roster)
+        except DropboxAuthError:
+            return None
+        if not token:
+            return None
+        out = {}
+        for rel, entry in _load_ledger(token, "%s/%s/%s" % (_SAVES_ROOT, system, _LEDGER_NAME)).items():
+            stem = os.path.splitext(os.path.basename(rel))[0].lower()
+            out[stem] = sorted(set(out.get(stem, [])) | set((entry.get("seen") or {}).keys()))
+        return out
+
+    def _handle_catalogue_sync_stream(self, system):
+        """SSE: sync one system (or '*') into the local catalogue. Same line/done events
+        as the deploy stream, so the console component can show it."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self._cors_headers()
+        self.end_headers()
+
+        def emit(event, data):
+            try:
+                self.wfile.write(("event: %s\ndata: %s\n\n" % (event, data)).encode("utf-8"))
+                self.wfile.flush()
+            except Exception:
+                pass
+
+        if not self._catalogue_lock.acquire(blocking=False):
+            emit("line", "a catalogue sync is already running")
+            emit("done", "failed:busy"); return
+        try:
+            now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            catalogue.sync(
+                self._catalogue_root(), system,
+                self.__class__.consoles_config,
+                lambda node, argv: self._node_ssh(node, argv, timeout=600, connect_timeout=10),
+                self._catalogue_saves, lambda line: emit("line", line), now,
+                lab_roms=(self.__class__.config.get("ROMS_PATH") or "").strip() or None)
+            emit("done", "ok")          # per-node / per-system failures are WARN lines above
+        except Exception as exc:
+            emit("line", "sync crashed: %s" % exc)
+            emit("done", "failed:%s" % exc)
+        finally:
+            self._catalogue_lock.release()
+
     # ── Translation flow (Batocera fast flow) ──────────────────────────────────
 
-    def _node_ssh(self, node_id, argv, timeout=300):
+    def _node_ssh(self, node_id, argv, timeout=300, connect_timeout=None):
         """Run argv on a node over SSH, using its .env -- the same local/remote
         rule as deploy.sh: CUSTOM_SSH_ALIAS wins, else SSH_USER@HOST_IP + key.
         Args are shell-quoted for the remote side (roms paths have spaces).
+        connect_timeout (s) fails fast on a powered-off box instead of the OS's ~75s.
         Returns (returncode, combined_output)."""
         import shlex
         cfg   = self.__class__.node_roster.get(node_id) or {}
@@ -3448,6 +3629,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             prefix = ["ssh", "-i", key, "-o", "StrictHostKeyChecking=no", "%s@%s" % (user, host)]
         else:
             return (1, "node '%s' has no ssh config" % node_id)
+        if connect_timeout:
+            prefix[1:1] = ["-o", "ConnectTimeout=%d" % connect_timeout]
         remote = " ".join(shlex.quote(a) for a in argv)
         try:
             r = subprocess.run(prefix + [remote], stdout=subprocess.PIPE,
@@ -3957,7 +4140,7 @@ def run():
         with open(consoles_path) as f:
             Handler.consoles_config = json.load(f)
         _load_save_formats(Handler.consoles_config)
-        print("  consoles.json: %d consoles" % len(Handler.consoles_config.get("consoles", [])))
+        print("  consoles.json: %d systems" % len(Handler.consoles_config.get("systems", {})))
     except Exception as exc:
         print("  consoles.json: not loaded (%s)" % exc)
 

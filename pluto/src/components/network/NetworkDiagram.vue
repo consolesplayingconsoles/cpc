@@ -7,7 +7,7 @@ import { API_BASE } from '../../composables/useNodes'
 import { BUBBLE_R } from '../../composables/bubbleConstants'
 import NodeBubble from './NodeBubble.vue'
 import NodeDrawer from './NodeDrawer.vue'
-import DeployTerminal from '../DeployTerminal.vue'
+import Terminal from '../Terminal.vue'
 import RecentActivity from '../RecentActivity.vue'
 
 import { useMessages } from '../../composables/useMessages'
@@ -353,9 +353,9 @@ watch(hoveredNode, () => nextTick(updatePeekPos))
     </Transition>
 
     <!-- deploy terminal: floats over the map (closable), out of the drawer -->
-    <DeployTerminal
+    <Terminal
       v-if="floatingDeploy"
-      :console-id="floatingDeploy.id"
+      title="deploy"
       :output="floatingDeploy.output"
       :last-ms="floatingDeploy.lastMs"
       :card-style="floatTermStyle"
