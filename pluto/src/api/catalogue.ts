@@ -72,9 +72,10 @@ export const catalogueApi = {
     })
     if (!r.ok) throw new Error(`label ${system}/${game} -> ${r.status}`)
   },
-  play: async (system: string, path: string) => {
+  // node 'lab' = desktop emulator on the API host; 'batocera' = remote boot on the box.
+  play: async (system: string, path: string, node = 'lab') => {
     const r = await fetch(`${BASE}/${enc(system)}/play`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, node }),
     })
     if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `play -> ${r.status}`)
   },

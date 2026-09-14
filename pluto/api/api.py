@@ -2452,7 +2452,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "play":
             body = self._read_json_body()
             if body is not None:
-                self._handle_catalogue_play(parts[1], str(body.get("path", "")))
+                self._handle_catalogue_play(parts[1], str(body.get("path", "")), str(body.get("node") or "lab"))
         elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "open":
             body = self._read_json_body()
             if body is not None:
@@ -3486,6 +3486,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # modules/catalogue. Sync only READS nodes and only writes that local dir.
 
     _catalogue_lock = threading.Lock()
+    _boot_lock = threading.Lock()                # one remote boot at a time (ES queues launches)
 
     def _catalogue_root(self):
         return os.path.join(os.path.dirname(self.__class__.base_dir), "catalogue")
@@ -3558,10 +3559,39 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return None
         return path
 
-    def _handle_catalogue_play(self, system, rel):
-        """Launch a lab ROM in the system's associated desktop emulator on this Mac
-        (config/consoles.json systems.<x>.emulator, else defaultEmulator). Local launch on
-        the API host, like /catalogue/{system}/open."""
+    def _handle_catalogue_play(self, system, rel, node="lab"):
+        """Launch a ROM. node "lab": in the system's associated desktop emulator on this Mac
+        (config/consoles.json systems.<x>.emulator, else defaultEmulator). node "batocera":
+        remote boot on the box through EmulationStation's web API (POST /launch <rom path>),
+        which only listens on the box's localhost, so it's called over SSH. A game already
+        running is quit first."""
+        if node == "batocera":
+            rel_n = os.path.normpath(rel)
+            if not re.match(r"^[A-Za-z0-9_.-]+$", system) or not rel or rel_n.startswith("..") or os.path.isabs(rel_n):
+                self._send(400, {"error": "bad path"}); return
+            rom = "/userdata/roms/%s/%s" % (system, rel_n)
+            # A running game blocks /launch: quit it first (GET /emukill; POST does nothing) and
+            # wait until ES reports no game, so a rebuilt translation replaces the old session.
+            # ES runs /launch on its UI thread, which is blocked while a game runs: a launch sent
+            # then is queued inside ES (no endpoint clears it) and fires when the game ends. So
+            # never send one while a game is up -- and one boot at a time from Pluto.
+            script = ('api=http://127.0.0.1:1234; idle() { case "$(curl -s -m 5 $api/runningGame)" in *"NO GAME"*) return 0;; esac; return 1; }; '
+                      'if ! idle; then curl -s -m 10 $api/emukill >/dev/null; '
+                      'for i in $(seq 1 20); do idle && break; sleep 0.5; done; '
+                      'idle || { echo "the running game did not quit, not launching"; exit 1; }; sleep 1; fi; '
+                      'curl -s -m 10 -X POST $api/launch -d "$1"')
+            if not self._boot_lock.acquire(blocking=False):
+                self._send(409, {"error": "a boot is already in progress"}); return
+            try:
+                rc, out = self._node_ssh("batocera", ["sh", "-c", script, "launch", rom], timeout=45, connect_timeout=5)
+            finally:
+                self._boot_lock.release()
+            if rc != 0 or out.strip():
+                self._send(502, {"error": "batocera did not launch it: %s" % (out.strip()[-200:] or "rc %d" % rc)}); return
+            print("  [PLAY:batocera] %s" % rom)
+            self._send(200, {"ok": True}); return
+        if node != "lab":
+            self._send(400, {"error": "remote boot is not available on %s yet" % node}); return
         cfg = self.__class__.consoles_config
         key = ((cfg.get("systems") or {}).get(system) or {}).get("emulator") or cfg.get("defaultEmulator")
         emu = (cfg.get("emulators") or {}).get(key or "")

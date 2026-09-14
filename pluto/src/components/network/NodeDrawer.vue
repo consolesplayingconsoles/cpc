@@ -395,4 +395,8 @@ function postCommand(text: string) {
 /* HID mode (generic/ps3/switch): the profile the board presents to the console. */
 .nd__pico-badge.is-iface { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
 .nd__pico-uart { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+/* phone: the drawer IS the screen (fixed over the app chrome), its own close stays on top */
+@media (max-width: 640px) {
+  .nd { position: fixed; inset: 0; width: 100%; z-index: 50; border-left: 0; box-shadow: none; }
+}
 </style>

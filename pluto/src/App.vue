@@ -78,7 +78,7 @@ function closeChat() { router.push(lastTabPath.value) }
 const { nodes, loading, error } = useNodes()
 const { connections } = useConnections()
 const { messages } = useMessages()
-const { show: showToast, desc: toastDesc, points: toastPoints, dismiss: dismissToast } = useAchievement()
+const { show: showToast, desc: toastDesc, points: toastPoints, action: toastAction, dismiss: dismissToast } = useAchievement()
 
 // ── Global second header: a per-tab channel hashtag + your identity. Both headers
 // live HERE in the parent so the top is uniform across tabs (no per-page stacking).
@@ -300,6 +300,8 @@ const displayNodes = computed(() => {
       :show="showToast"
       :desc="toastDesc"
       :points="toastPoints"
+      :action-label="toastAction?.label"
+      @action="toastAction?.run()"
       @dismiss="dismissToast"
     />
   </div>

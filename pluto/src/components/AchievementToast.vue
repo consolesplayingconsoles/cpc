@@ -1,6 +1,6 @@
 <script setup lang="ts">
-defineProps<{ show: boolean; desc: string; points?: string }>()
-defineEmits<{ dismiss: [] }>()
+defineProps<{ show: boolean; desc: string; points?: string; actionLabel?: string }>()
+defineEmits<{ dismiss: []; action: [] }>()
 </script>
 
 <template>
@@ -19,6 +19,7 @@ defineEmits<{ dismiss: [] }>()
         <div class="achievement-toast__title">ACHIEVEMENT UNLOCKED</div>
         <div class="achievement-toast__desc">{{ desc }}</div>
       </div>
+      <button v-if="actionLabel" class="achievement-toast__action" @click.stop="$emit('action'); $emit('dismiss')">{{ actionLabel }}</button>
       <div class="achievement-toast__points">{{ points }}</div>
     </div>
   </Transition>
@@ -69,6 +70,19 @@ defineEmits<{ dismiss: [] }>()
   color: #ffffff;
   margin-top: 1px;
 }
+.achievement-toast__action {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 14px;
+  color: #090d0a;
+  background: #3deb76;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.achievement-toast__action:hover { background: #6ff39a; }
 .achievement-toast__points {
   font-family: var(--font-mono);
   font-size: 12px;
