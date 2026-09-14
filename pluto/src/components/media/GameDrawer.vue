@@ -156,7 +156,7 @@ async function saveLabel() {
 }
 const focusEl = (el: unknown) => { if (el instanceof HTMLInputElement) el.focus() }
 
-const { emulator, canPlay, canOpen, play, openFolder, actionError } =
+const { canPlay, playTitle, canOpen, play, openFolder, actionError } =
   useRomActions(toRef(props, 'system'), toRef(props, 'nodes'))
 </script>
 
@@ -226,7 +226,7 @@ const { emulator, canPlay, canOpen, play, openFolder, actionError } =
           <span v-if="f.version" class="gd__ver" title="Release version">v{{ f.version }}</span>
           <span v-if="version(f)" class="gd__ver" :title="g.kind === 'original' ? '' : KIND_LABEL[g.kind] + ' version'">{{ g.kind === 'original' ? '' : KIND_LABEL[g.kind].toLowerCase() + ' ' }}v{{ version(f) }}</span>
           <span v-if="f.save.length" class="gd__save" :title="'Save on ' + f.save.map(nodeName).join(', ')">Save</span>
-          <UiIconButton v-if="canPlay(f)" class="gd__open" :title="'Play in ' + emulator?.name" @click="play(f)">
+          <UiIconButton v-if="canPlay(f)" class="gd__open" :title="playTitle(f)" @click="play(f)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a.8.8 0 0 0 1.2.7l10.4-6.5a.8.8 0 0 0 0-1.4L9.2 4.8A.8.8 0 0 0 8 5.5z"/></svg>
           </UiIconButton>
           <UiIconButton v-if="canOpen(f)" :class="{ 'gd__open': !canPlay(f) }" :title="f.node === 'lab' ? 'Open folder' : 'Open folder (SMB)'" @click="openFolder(f)">
@@ -328,4 +328,10 @@ const { emulator, canPlay, canOpen, play, openFolder, actionError } =
 .gd__meta:empty { display: none; }
 .gd__notes { font-size: 12px; color: var(--text-muted); margin: 4px 0 0; }
 .gd__foot { margin-top: 16px; font-size: 12px; color: var(--text-faint); }
+/* phone: the drawer IS the screen (fixed over the app chrome), its own close stays on top */
+@media (max-width: 640px) {
+  .gd { position: fixed; inset: 0; width: 100%; z-index: 50; border-left: 0; box-shadow: none; }
+  /* full-width art would push the files below the fold: cap it, keep its proportions */
+  .gd__cover--art img:not(.is-loading) { max-height: 40vh; }
+}
 </style>

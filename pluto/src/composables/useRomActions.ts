@@ -24,21 +24,24 @@ export function useRomActions(system: Ref<string>, nodes: Ref<NodeMap>) {
     return [base.replace(/\/+$/, ''), ...parts.map(encodeURIComponent)].join('/') + '/'
   }
 
-  // Play: lab files only (the ROM is on this Mac), in the desktop emulator config associates
-  // with the system (systems.<x>.emulator, else defaultEmulator). Remote start on consoles
-  // comes later, per node.
+  // Play: lab files in the desktop emulator config associates with the system
+  // (systems.<x>.emulator, else defaultEmulator); Batocera files boot remotely on the box.
+  // Not gated on the node's ping status: you can always press it, a failure says why.
   const emulator = computed(() => {
     const key = (consolesConfig.systems as Record<string, { emulator?: string }>)[system.value]?.emulator ?? consolesConfig.defaultEmulator
     return key ? (consolesConfig.emulators as Record<string, { name: string }>)[key] ?? null : null
   })
 
-  const canPlay = (f: CatalogueFile) => !!emulator.value && f.node === 'lab' && f.status === 'present'
+  const REMOTE_BOOT = ['batocera']
+  const canPlay = (f: CatalogueFile) => f.status === 'present' &&
+    ((f.node === 'lab' && !!emulator.value) || REMOTE_BOOT.includes(f.node))
+  const playTitle = (f: CatalogueFile) => f.node === 'lab' ? 'Play in ' + (emulator.value?.name ?? 'emulator') : 'Play on ' + (nodes.value[f.node]?.name ?? f.node)
   const canOpen = (f: CatalogueFile) => f.status === 'present' && (f.node === 'lab' || !!smbUrl(f))
 
   const actionError = ref('')
   function play(f: CatalogueFile) {
     actionError.value = ''
-    catalogueApi.play(system.value, f.path).catch(err => { actionError.value = (err as Error).message })
+    catalogueApi.play(system.value, f.path, f.node).catch(err => { actionError.value = (err as Error).message })
   }
   function openFolder(f: CatalogueFile) {
     actionError.value = ''
@@ -56,5 +59,5 @@ export function useRomActions(system: Ref<string>, nodes: Ref<NodeMap>) {
     a.remove()
   }
 
-  return { emulator, canPlay, canOpen, play, openFolder, actionError }
+  return { emulator, canPlay, playTitle, canOpen, play, openFolder, actionError }
 }

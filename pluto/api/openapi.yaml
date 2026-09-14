@@ -153,7 +153,7 @@ paths:
   /catalogue/{system}/play:
     post:
       tags: [catalogue]
-      summary: Launch a lab ROM in its system's associated desktop emulator on the API host (body {path}; macOS)
+      summary: Launch a ROM (body {path, node}) -- node lab = desktop emulator on the API host (macOS); node batocera = remote boot via EmulationStation
       parameters: [{ name: system, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: Launched }, '400': { description: No emulator associated, or not a lab ROM }, '502': { description: The emulator failed to open } }
   /catalogue/{system}/open:

@@ -16,6 +16,7 @@ import TranslationRow from './TranslationRow.vue'
 import { type Block, caBytes } from '../../lib/translation'
 import { formatOffset, buildSourcesPayload, reconcileByOffset, applyPoll } from './TranslationTable.logic'
 import { translationApi } from '../../api/translation'
+import { catalogueApi } from '../../api/catalogue'
 import { LANGUAGES } from '../../lib/languages'
 
 const route  = useRoute()
@@ -835,7 +836,7 @@ async function runBuild() {
       buildMsg.value = `Build failed: ${data.error}`.slice(0, 80)
     } else {
       const secs = Math.round((Date.now() - startedAt) / 1000)
-      unlock(`Released to Batocera — ${selGameName.value || 'game'}`, `${secs}s`)
+      unlock(`Released to Batocera — ${selGameName.value || 'game'}`, `${secs}s`, bootAction(data.dest))
     }
   } catch {
     buildFailed.value = true
@@ -843,6 +844,24 @@ async function runBuild() {
   } finally {
     building.value = false
     if (buildFailed.value) setTimeout(() => { buildMsg.value = '' }, 8000)
+  }
+}
+
+// The build's DONE: folder (/userdata/roms/<system>/<name>) holds <name>.gdi: Boot launches
+// it on Batocera, same remote boot as the Media tab's Play.
+function bootAction(dest?: string) {
+  const m = /^\/userdata\/roms\/([^/]+)\/(.+)$/.exec(dest ?? '')
+  if (!m) return null
+  const [, system, name] = m
+  return {
+    label: 'Boot',
+    run: () => {
+      catalogueApi.play(system, `${name}/${name.split('/').pop()}.gdi`, 'batocera').catch(err => {
+        buildFailed.value = true
+        buildMsg.value = `Boot failed: ${(err as Error).message}`.slice(0, 80)
+        setTimeout(() => { buildMsg.value = '' }, 8000)
+      })
+    },
   }
 }
 

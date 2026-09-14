@@ -96,18 +96,20 @@ const isFolded = (sys: string, n: number) => missingFolded.value[sys] ?? n > 20
 function toggleFold(sys: string, n: number) { missingFolded.value[sys] = !isFolded(sys, n) }
 const missingBySystem = computed(() => {
   const by = new Map<string, MissingCover[]>()
-  for (const m of missing.value ?? []) by.set(m.system, [...(by.get(m.system) ?? []), m])
+  for (const m of missing.value ?? []) if (matchesSystem(m.system)) by.set(m.system, [...(by.get(m.system) ?? []), m])
   return [...by.entries()].sort(([a], [b]) => systemName(a).localeCompare(systemName(b)))
 })
 
-// Grid filter: system name, brand or folder key ("sega", "dreamcast", "ngpc").
+// Grid filter: system name, brand or folder key ("sega", "dreamcast", "ngpc"). It stays
+// on screen in the Missing covers view too (filtering those sections), so nothing jumps.
 const systemFilter = ref('')
+function matchesSystem(system: string) {
+  const q = systemFilter.value.trim().toLowerCase()
+  return !q || [system, systemName(system), SYSTEMS[system]?.brand ?? ''].some(t => t.toLowerCase().includes(q))
+}
 
 // Families: brand, then name. Systems without a brand (arcade) go last.
-const sortedSystems = computed(() => [...systems.value].filter(s => {
-  const q = systemFilter.value.trim().toLowerCase()
-  return !q || [s.system, systemName(s.system), SYSTEMS[s.system]?.brand ?? ''].some(t => t.toLowerCase().includes(q))
-}).sort((a, b) => {
+const sortedSystems = computed(() => [...systems.value].filter(s => matchesSystem(s.system)).sort((a, b) => {
   const ba = SYSTEMS[a.system]?.brand, bb = SYSTEMS[b.system]?.brand
   if (!!ba !== !!bb) return ba ? -1 : 1
   return (ba ?? '').localeCompare(bb ?? '') || systemName(a.system).localeCompare(systemName(b.system))
@@ -152,7 +154,7 @@ const sections = computed(() => {
 
 // Card shortcuts: Play / Open folder act on the game's ROM when there is exactly ONE
 // present copy; with several (regions, mods, nodes) they're disabled and the drawer picks.
-const { emulator, canPlay, canOpen, play, openFolder } = useRomActions(system, nodesRef)
+const { canPlay, playTitle, canOpen, play, openFolder } = useRomActions(system, nodesRef)
 const soleRom = (g: Game) => {
   const present = g.files.filter(f => f.status === 'present')
   return present.length === 1 ? present[0] : null
@@ -251,11 +253,11 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
     <template v-if="!system">
       <div class="md__body">
         <div class="md__actions">
-          <input v-if="!missingOpen" v-model="systemFilter" class="md__filter md__filter--grid" type="search" placeholder="Filter systems" />
-          <UiButton :class="{ 'is-on': missingOpen }" @click="toggleMissing">
+          <input v-model="systemFilter" class="md__filter md__filter--grid" type="search" placeholder="Filter systems" />
+          <UiButton class="md__action" :class="{ 'is-on': missingOpen }" @click="toggleMissing">
             {{ missingOpen ? 'All systems' : 'Missing covers' }}<template v-if="missing && !missingOpen"> ({{ missing.length }})</template>
           </UiButton>
-          <UiButton variant="primary" :loading="syncing" loading-text="Syncing…" @click="sync('*')">Sync all</UiButton>
+          <UiButton class="md__action" variant="primary" :loading="syncing" loading-text="Syncing…" @click="sync('*')">Sync all</UiButton>
         </div>
         <template v-if="missingOpen">
           <p v-if="missingLoading" class="md__state"><UiSpinner /> Checking covers…</p>
@@ -310,7 +312,9 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
           </span>
         </div>
         <input v-model="filter" class="md__filter" type="search" placeholder="Filter games" />
-        <span v-if="groupFields.length" class="md__group">
+        <!-- desktop: part of the bar's flow (display: contents); phone: one scrollable chip row -->
+        <div class="md__chips">
+        <span v-if="groupFields.length" class="md__group md__group--desk">
           <UiSelect v-model="groupBy">
             <option value="">No grouping</option>
             <option v-for="f in groupFields" :key="f" :value="f">Group by {{ FIELD_LABEL[f].toLowerCase() }}</option>
@@ -328,9 +332,17 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 6h14M5 12h14M5 18h14"/></svg>
           </UiIconButton>
         </span>
-        <UiButton :loading="syncing" loading-text="Syncing…" @click="sync(system)">Sync</UiButton>
+        </div>
+        <UiButton class="md__sync" :loading="syncing" loading-text="Syncing…" @click="sync(system)">Sync</UiButton>
       </header>
       <div class="md__meta-bar">
+        <!-- phone: Group by lives here instead of taking a header row of its own -->
+        <span v-if="groupFields.length" class="md__group md__group--phone">
+          <UiSelect v-model="groupBy">
+            <option value="">No grouping</option>
+            <option v-for="f in groupFields" :key="f" :value="f">Group by {{ FIELD_LABEL[f].toLowerCase() }}</option>
+          </UiSelect>
+        </span>
         <span v-if="view">{{ view.games.length }} games</span>
         <span v-if="view?.hosts.length" class="md__hosts">
           <img v-for="n in view.hosts" :key="n" :src="ICONS[n]" alt=""
@@ -375,7 +387,7 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
               </span>
               <span class="md__card-actions" @click.stop>
                 <UiIconButton :disabled="!soleRom(g) || !canPlay(soleRom(g)!)"
-                              :title="soleRom(g) ? (canPlay(soleRom(g)!) ? 'Play in ' + emulator?.name : 'Not playable from here') : pickHint(g)"
+                              :title="soleRom(g) ? (canPlay(soleRom(g)!) ? playTitle(soleRom(g)!) : 'Not playable from here') : pickHint(g)"
                               @click="play(soleRom(g)!)">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a.8.8 0 0 0 1.2.7l10.4-6.5a.8.8 0 0 0 0-1.4L9.2 4.8A.8.8 0 0 0 8 5.5z"/></svg>
                 </UiIconButton>
@@ -455,6 +467,8 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
 .md__section span { font-family: var(--font-mono); font-size: 11px; font-weight: 400; color: var(--text-faint); }
 .md__section + .md__list { margin-top: var(--sp-2); }
 .md__layout { display: flex; align-items: center; gap: 2px; }
+.md__chips { display: contents; }
+.md__group--phone { display: none; }
 .md__layout-sep { width: 1px; height: 18px; margin: 0 6px; background: var(--line); }
 
 .md__cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--sp-4); padding: var(--sp-5); }
@@ -513,6 +527,24 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
 
 @media (max-width: 640px) {
   .md__bar, .md__row { padding-left: var(--sp-4); padding-right: var(--sp-4); }
+  /* phone header: [back · icon · name ........ Sync] / [search, full width] / [chips, scroll] */
+  .md__bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-2) var(--sp-3); }
+  .md__title-row { grid-column: 1; min-width: 0; margin-right: 0; }
+  .md__head-name { min-width: 0; }
+  .md__head-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .md__back { margin-right: 4px; white-space: nowrap; flex: none; }
+  .md__sync { grid-column: 2; grid-row: 1; }
+  .md__bar > .md__filter { grid-column: 1; grid-row: 2; width: 100%; }
+  .md__chips { grid-column: 2; grid-row: 2; display: flex; align-items: center; }
+  .md__layout-sep { margin: 0 2px; }
+  .md__group--desk { display: none; }
+  .md__group--phone { display: block; width: 150px; flex: none; }
+  .md__meta-bar { flex-wrap: nowrap; overflow-x: auto; white-space: nowrap; gap: var(--sp-3); padding: 6px var(--sp-4); scrollbar-width: none; }
+  .md__meta-bar::-webkit-scrollbar { display: none; }
+  /* systems grid: filter on its own full-width row, the two buttons share the next */
+  .md__actions { flex-wrap: wrap; }
+  .md__filter--grid { flex: 1 1 100%; width: 100%; }
+  .md__action { flex: 1 1 0; }
   .md__row { flex-wrap: wrap; }
   .md__badges { margin-left: 24px; justify-content: flex-start; }
   .md__variants { display: none; }
