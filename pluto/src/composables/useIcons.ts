@@ -20,6 +20,15 @@ import imgSubstack    from '../assets/avatars/substack.svg'
 import imgGoogle      from '../assets/avatars/google.svg'
 import imgGateway     from '../assets/avatars/gateway.svg'
 import imgRoombaWheel from '../assets/avatars/roomba-wheel.svg'
+import imgGamecube from '../assets/avatars/gamecube.png'
+import imgGamegear from '../assets/avatars/gamegear.png'
+import imgNes      from '../assets/avatars/nes.png'
+import imgSnes     from '../assets/avatars/snes.png'
+import imgNgp      from '../assets/avatars/ngp.png'
+import imgNgpc     from '../assets/avatars/ngpc.png'
+import imgGbc      from '../assets/avatars/gbc.png'
+import imgPsx      from '../assets/avatars/psx.png'
+import imgPs2      from '../assets/avatars/ps2.png'
 
 export const ICONS: Record<string, string> = {
   wii:       imgWii,
@@ -46,4 +55,14 @@ export const ICONS: Record<string, string> = {
   gateway:        imgGateway,   // its own signal/router mark — so it doesn't fall back to the guest icon
   'roomba-rally': imgRoombaWheel,
   'crazy-roomba': imgRoombaWheel,
+  // system-only icons (Media catalogue tiles; consoles.json systems.<x>.icon)
+  gamecube: imgGamecube,
+  gamegear: imgGamegear,
+  nes: imgNes,
+  snes: imgSnes,
+  ngp: imgNgp,
+  ngpc: imgNgpc,
+  gbc: imgGbc,
+  psx: imgPsx,
+  ps2: imgPs2,
 }

@@ -247,3 +247,5 @@ dist
 .vite
 sandbox
 music-lib
+# Media catalogue: separate private repo, cloned here
+catalogue/

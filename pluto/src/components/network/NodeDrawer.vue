@@ -13,8 +13,8 @@ import consolesConfig from '../../../config/consoles.json'
 
 interface Cmd  { verb: string; desc?: string; target?: string; pick?: 'node' | 'console'; multiline?: boolean; url?: string; script?: string; credit?: string }
 const NODE_ACTIONS = (chatConfig.nodeActions ?? {}) as Record<string, Cmd[]>
-// Canonical console list (Batocera-native names) for the @dropbox cloud picker.
-const CONSOLES = ((consolesConfig.consoles ?? []) as string[]).map(c => ({ label: c, value: c }))
+// Canonical system list (Batocera-native names, config `systems`) for the @dropbox cloud picker.
+const CONSOLES = Object.keys(consolesConfig.systems ?? {}).map(c => ({ label: c, value: c }))
 const HANDLES      = (chatConfig.mentions.handles ?? {}) as Record<string, string>
 
 const props = defineProps<{
