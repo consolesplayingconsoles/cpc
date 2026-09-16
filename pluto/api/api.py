@@ -2268,6 +2268,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("POST", "/workspace/{node}"), ("POST", "/config/open"), ("POST", "/native/{node}/{action}"),
         ("POST", "/sd/{node}"), ("POST", "/catalogue/{system}/favourite"), ("POST", "/catalogue/{system}/favourite-system"), ("POST", "/catalogue/{system}/label"), ("POST", "/catalogue/{system}/open"),
         ("POST", "/catalogue/{system}/cover/{game}"), ("POST", "/catalogue/{system}/play"),
+        ("POST", "/catalogue/{system}/send"), ("POST", "/catalogue/{system}/scan/{node}"), ("POST", "/catalogue/{system}/forget"),
         ("POST", "/translate/run"), ("POST", "/translate/open"), ("POST", "/translate/delete"),
         ("POST", "/translate/upload"), ("POST", "/translate/{game}"),
         ("PUT", "/translate/{game}"),
@@ -2451,6 +2452,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_sd_backup(parts[1])
         elif len(parts) == 4 and parts[0] == "catalogue" and parts[2] == "cover":
             self._handle_catalogue_cover_upload(urllib.parse.unquote(parts[1]), urllib.parse.unquote(parts[3]))
+        elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "send":
+            body = self._read_json_body()
+            if body is not None:
+                self._handle_catalogue_send(parts[1], str(body.get("path", "")), str(body.get("node") or ""), bool(body.get("all")))
+        elif len(parts) == 4 and parts[0] == "catalogue" and parts[2] == "scan":
+            body = self._read_json_body()
+            if body is not None:
+                self._handle_catalogue_scan_post(parts[1], parts[3], body)
+        elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "forget":
+            body = self._read_json_body()
+            if body is not None:
+                self._handle_catalogue_forget(parts[1], str(body.get("game", "")), str(body.get("node", "")), str(body.get("path", "")))
         elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "play":
             body = self._read_json_body()
             if body is not None:
@@ -3662,6 +3675,77 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 out[node] = {"labels": labels, "roms_dir": roms_dir, "hub": "pi"}
         return out
 
+    def _catalogue_admin_nodes(self):
+        """Nodes whose games live on a drive only root can read (PS2_HDD_BYTES: the PS2's
+        APA HDD on this Mac). Pluto never reads it: it hands out a Terminal command
+        (nodes/local/<node>/scripts/ps2hdd.py) that reads/writes the drive and POSTs the
+        drive's game list back to /catalogue/<system>/scan/<node>."""
+        return sorted(n for n, cfg in (self.__class__.node_roster or {}).items()
+                      if (cfg.get("PS2_HDD_BYTES") or "").strip())
+
+    def _admin_command(self, node, args):
+        import shlex
+        script = os.path.normpath(os.path.join(self.__class__.base_dir, "..", "nodes", "local", node, "scripts", "ps2hdd.py"))
+        return "sudo python3 " + " ".join(shlex.quote(a) for a in [script] + args)
+
+    def _handle_catalogue_send(self, system, rel, node, send_all=False):
+        """Send a lab ROM (or, all=true, every present lab ROM of a game the node doesn't have
+        yet) to a node's drive. Only admin-drive nodes can take one, and the API can't write
+        their drive: the answer is the ONE Terminal command that does."""
+        if node not in self._catalogue_admin_nodes():
+            self._send(400, {"error": "sending games to %s is not available" % (node or "that node")}); return
+        if not send_all:
+            path = self._lab_rom(system, rel)
+            if not path:
+                self._send(400, {"error": "not a lab ROM"}); return
+            self._send(200, {"command": self._admin_command(node, ["install", path])}); return
+        if not re.match(r"^[A-Za-z0-9_.-]+$", system):
+            self._send(400, {"error": "bad system"}); return
+        paths = []
+        for g in catalogue.store.load(self._catalogue_root(), system)["games"].values():
+            present = [f for f in g["files"] if f["status"] == "present"]
+            if any(f["node"] == node for f in present):
+                continue
+            paths += [p for p in (self._lab_rom(system, f["path"]) for f in present if f["node"] == "lab") if p]
+        if not paths:
+            self._send(400, {"error": "nothing to send: no lab game missing from %s" % node}); return
+        self._send(200, {"command": self._admin_command(node, ["install"] + sorted(paths)), "count": len(paths)})
+
+    def _handle_catalogue_scan_post(self, system, node, body):
+        """POST /catalogue/<system>/scan/<node> {files: [{path, size}]}: a node's complete game
+        list read outside the API (the admin command), merged like a sync scan."""
+        files = body.get("files")
+        if not re.match(r"^[A-Za-z0-9_.-]+$", system) or not isinstance(files, list) \
+                or not all(isinstance(f, dict) and f.get("path") for f in files):
+            self._send(400, {"error": "body must be {files: [{path, size}]}"}); return
+        if not self._catalogue_lock.acquire(blocking=False):
+            self._send(409, {"error": "a catalogue sync is already running"}); return
+        lines = []
+        try:
+            now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            catalogue.merge_posted(self._catalogue_root(), system, node, files, self.__class__.consoles_config,
+                                   self._catalogue_saves, lines.append, now)
+        except ValueError as exc:
+            self._send(400, {"error": str(exc)}); return
+        finally:
+            self._catalogue_lock.release()
+        print("  [CATALOGUE:%s] %s" % (node, " | ".join(lines)))
+        self._send(200, {"ok": True, "lines": lines})
+
+    def _handle_catalogue_forget(self, system, game, node, rel):
+        """Remove one DELETED copy from the catalogue (it's gone from the node's disk)."""
+        if not re.match(r"^[A-Za-z0-9_.-]+$", system):
+            self._send(400, {"error": "bad system"}); return
+        if not self._catalogue_lock.acquire(blocking=False):
+            self._send(409, {"error": "a catalogue sync is running, try again when it's done"}); return
+        try:
+            catalogue.forget_file(self._catalogue_root(), system, game, node, rel)
+        except ValueError as exc:
+            self._send(400, {"error": str(exc)}); return
+        finally:
+            self._catalogue_lock.release()
+        self._send(200, {"ok": True})
+
     def _catalogue_saves(self, system):
         """{rom stem (lower): [nodes holding a save]} from the Dropbox ledger, or None."""
         try:
@@ -3704,7 +3788,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 lambda node, argv, stdin=None: self._node_ssh(node, argv, timeout=600, connect_timeout=10, stdin=stdin),
                 self._catalogue_saves, lambda line: emit("line", line), now,
                 lab_roms=(self.__class__.config.get("ROMS_PATH") or "").strip() or None,
-                sd_nodes=self._catalogue_sd_nodes())
+                sd_nodes=self._catalogue_sd_nodes(),
+                admin_nodes={n: self._admin_command(n, ["sync"]) for n in self._catalogue_admin_nodes()})
             emit("done", "ok")          # per-node / per-system failures are WARN lines above
         except Exception as exc:
             emit("line", "sync crashed: %s" % exc)
@@ -4151,6 +4236,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "folder": bool(smb),
                 # Set = this console's saves live on a card read via the Pi hub.
                 "sd":     (console_cfg.get("SD_LABEL") or "").strip() or None,
+                # Set = the Media tab can send lab ROMs to this node's drive (PS2 HDD).
+                "send":   bool((console_cfg.get("PS2_HDD_BYTES") or "").strip()),
                 "code":   has_code,
                 # Precedence: .env OS= override > known-by-definition > probe TTL.
                 # (e.g. OS=native on a Wii homebrew build to drop the Tux.)

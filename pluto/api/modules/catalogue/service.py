@@ -289,7 +289,8 @@ def _scan_sd(run_ssh, hub_node, labels, roms_dir, fmt, skip):
     return out
 
 
-def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=BATOCERA_ROMS, lab_roms=None, sd_nodes=None):
+def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=BATOCERA_ROMS, lab_roms=None, sd_nodes=None,
+         admin_nodes=None):
     """Sync one system ('*' = everything). emit(line) streams progress.
     consoles_config = config/consoles.json (nodeConsoles for hosts, systems for headers).
 
@@ -297,6 +298,8 @@ def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=B
     lab_roms = this machine's ROMS_PATH (None = no lab source).
     sd_nodes = {node: {"labels": [...], "roms_dir": "SAROO/ISO", "hub": "pi"}} for consoles
     whose games live on SD cards read through the Pi hub (node .env SD_LABEL / SD_ROMS_DIR).
+    admin_nodes = {node: command} for drives only root can read (the PS2 HDD): sync prints the
+    command to run in Terminal, which reads the drive and POSTs it back (merge_posted).
 
     Two phases. SCANS run in parallel, one thread per node: they only read. MERGES then
     run one at a time on this thread, because two nodes can write the same system's
@@ -326,8 +329,11 @@ def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=B
                 fmt = {ext: formats.get(s) for ext, s in route.items()} if len(systems_of) > 1 else formats.get(systems_of[0])
                 jobs[node] = (lambda sd=sd, route=route, fmt=fmt:
                               {"__sd__": route, "cards": _scan_sd(run_ssh, sd.get("hub", "pi"), sd["labels"], sd["roms_dir"], fmt, skip)})
+    admin_nodes = admin_nodes or {}
     for node in hosts:
-        if node not in jobs and (system != "*" or "*" in node_consoles[node]):
+        if node in admin_nodes:
+            emit("%s: needs admin, run in Terminal: %s" % (node, admin_nodes[node]))
+        elif node not in jobs and (system != "*" or "*" in node_consoles[node]):
             emit("%s: %s, skipped" % (node, "no ROMS_PATH set" if node == "lab" else "not built yet"))
     for node in sorted(jobs):
         emit("%s: scanning %s" % (node, label))
@@ -395,6 +401,37 @@ def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=B
     skipped += len(jobs) - len(results)
     emit("done: %d merged, %d skipped" % (merged, skipped))
     return {"merged": merged, "skipped": skipped}
+
+
+def forget_file(root, system, game_key, node, path):
+    """Drop one copy the last sync marked deleted. A present copy can't be forgotten (the
+    next sync would add it straight back); a game left with no copies goes too, its shelf
+    copies (physical.json) still show it."""
+    doc = store.load(root, system)
+    game = doc["games"].get(game_key)
+    f = next((f for f in (game or {}).get("files", []) if f["node"] == node and f["path"] == path), None)
+    if f is None:
+        raise ValueError("no such copy in the catalogue")
+    if f["status"] != "deleted":
+        raise ValueError("only deleted copies can be removed from the catalogue")
+    game["files"].remove(f)
+    if not game["files"]:
+        del doc["games"][game_key]
+    store.save(root, doc)
+
+
+def merge_posted(root, system, node, files, consoles_config, saves_lookup, emit, now):
+    """Merge a node's complete game list that was read outside the API and POSTed back
+    (the PS2 HDD: only root can read it). files = [{"path", "size"}]. Same merge as a
+    scan: new files added, missing ones marked deleted."""
+    hosts = (consoles_config.get("nodeConsoles") or {}).get(node) or []
+    if system not in hosts:
+        raise ValueError("%s does not host %s (config/consoles.json nodeConsoles)" % (node, system))
+    found = [{"path": str(f["path"]), "size": int(f.get("size") or 0), "inner": None, "header": None} for f in files]
+    favs = store.load_favourites(root)
+    _merge_system(root, system, node, {"files": found, "gamelist": ""}, favs, saves_lookup, emit, now,
+                  ((consoles_config.get("systems") or {}).get(system) or {}).get("thumbnails"))
+    store.save_favourites(root, favs)
 
 
 def _scan_batocera(run_ssh, system, roms, formats, skip):

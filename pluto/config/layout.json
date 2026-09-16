@@ -1,11 +1,10 @@
 {
   "_comment": "Network-diagram geometry -- hand-edited, like connections.json. The gateway is the origin everything hangs off (assumed 0,0; its spot on the canvas is set in NetworkDiagram.vue). The cloud hub sits directly below it (same x) at `cloudDy`. Every other node is an [dx, dy] pixel offset from its anchor: fromGateway (the LAN) or fromCloud (the cloud cluster). Add a node here + an icon in useIcons + (optionally) an edge in connections.json.",
   "cloudDy": 340,
-  "_layout_note": "Mirrors the physical setup. LEFT = eeepc (Pluto C2) hub + its handhelds (wii/ws/gba), leaves facing away from the gateway. RIGHT = Pi hub (Segas), a 3-floor shelf: top batocera / middle SMD+Saturn+DC(+VMU) / bottom PS3 (ICU). Outside devices (birdbuddy+dreame = other room, lab = desk) sit along the bottom. Gateway is the centre everything routes through.",
   "fromGateway": {
     "pluto": [
-      200,
-      -50
+      70,
+      -200
     ],
     "wii": [
       220,
@@ -16,7 +15,7 @@
       240
     ],
     "ws": [
-      0,
+      200,
       -220
     ],
     "lab": [
@@ -33,27 +32,31 @@
     ],
     "dc": [
       600,
-      30
+      -30
     ],
     "vmu": [
       550,
       200
     ],
     "saturn": [
-      550,
+      500,
       -150
     ],
     "sms": [
-     420,
-     -45
+     400,
+     -180
   ],
   "megadrive": [
-      420,
+      300,
       -220
     ],
     "ps3": [
       60,
       210
+    ],
+    "ps2": [
+      -420,
+      -60
     ],
     "birdbuddy": [
       -260,

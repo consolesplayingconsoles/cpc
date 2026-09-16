@@ -68,5 +68,20 @@ export function useRomActions(system: Ref<string>, nodes: Ref<NodeMap>) {
     a.remove()
   }
 
-  return { emulator, canPlay, playTitle, canOpen, canQuit, play, quit, openFolder, actionError }
+  // Send: a lab ROM to a node that takes games on its drive (node.send, the PS2 HDD) and hosts
+  // this system. The API can't write that drive: it answers with the Terminal command to run.
+  const hosts = (consolesConfig as { nodeConsoles?: Record<string, string[]> }).nodeConsoles ?? {}
+  const sendTargets = computed(() => Object.values(nodes.value)
+    .filter(n => n.send && (hosts[n.id] ?? []).includes(system.value)))
+  const canSend = (f: CatalogueFile) => f.status === 'present' && f.node === 'lab'
+  const sendCommand = ref('')
+  function send(f: CatalogueFile | null, node: string) {    // null = every lab game the node lacks
+    actionError.value = ''
+    sendCommand.value = ''
+    catalogueApi.send(system.value, f?.path ?? '', node, !f)
+      .then(r => { sendCommand.value = r.command })
+      .catch(err => { actionError.value = (err as Error).message })
+  }
+
+  return { emulator, canPlay, playTitle, canOpen, canQuit, play, quit, openFolder, actionError, sendTargets, canSend, send, sendCommand }
 }

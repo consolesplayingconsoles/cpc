@@ -97,6 +97,7 @@
     "gba":       ["gba"],
     "ws":        ["wswan", "wswanc"],
     "ps3":       ["ps3"],
+    "ps2":       ["ps2"],
     "batocera":  ["*"],
     "lab":       ["*"]
   }

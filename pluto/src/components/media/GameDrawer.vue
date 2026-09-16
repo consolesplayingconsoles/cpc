@@ -3,6 +3,7 @@ import type { Game, CatalogueFile } from '../../api/catalogue'
 import type { NodeMap } from '../../composables/useNodes'
 import { ICONS } from '../../composables/useIcons'
 import UiClose from '../ui/UiClose.vue'
+import AdminCommand from './AdminCommand.vue'
 import UiIconButton from '../ui/UiIconButton.vue'
 import UiPill from '../ui/UiPill.vue'
 import UiSpinner from '../ui/UiSpinner.vue'
@@ -19,7 +20,7 @@ import { names } from '../../lib/catalogueNames'
 // entry by design -- the grouping below is what makes that readable (where Batocera
 // shows each file as its own game).
 const props = defineProps<{ system: string; game: Game; nodes: NodeMap; systemIcon?: string; coverVersion?: number }>()
-const emit = defineEmits<{ close: []; favourite: [on: boolean]; 'cover-changed': []; relabeled: [] }>()
+const emit = defineEmits<{ close: []; favourite: [on: boolean]; 'cover-changed': []; relabeled: []; changed: [] }>()
 
 interface Group { label: string; kind: 'original' | 'translation' | 'mod'; versions: string[]; authors: string[]; files: CatalogueFile[] }
 
@@ -156,8 +157,20 @@ async function saveLabel() {
 }
 const focusEl = (el: unknown) => { if (el instanceof HTMLInputElement) el.focus() }
 
-const { canPlay, playTitle, canOpen, canQuit, play, quit, openFolder, actionError } =
+const { canPlay, playTitle, canOpen, canQuit, play, quit, openFolder, actionError, sendTargets, canSend, send, sendCommand } =
   useRomActions(toRef(props, 'system'), toRef(props, 'nodes'))
+watch(() => props.game.key, () => { sendCommand.value = '' })
+
+// A copy marked Deleted (gone from its node's disk) can be removed from the catalogue.
+async function forget(f: CatalogueFile) {
+  actionError.value = ''
+  try {
+    await catalogueApi.forget(props.system, props.game.key, f.node, f.path)
+    emit('changed')
+  } catch (e) {
+    actionError.value = (e as Error).message
+  }
+}
 </script>
 
 <template>
@@ -204,6 +217,7 @@ const { canPlay, playTitle, canOpen, canQuit, play, quit, openFolder, actionErro
     </form>
     <p v-if="uploadError" class="gd__upload-err">{{ uploadError }}</p>
     <p v-if="actionError" class="gd__upload-err">{{ actionError }}</p>
+    <AdminCommand v-if="sendCommand" title="Send to the PS2 drive from Terminal" :commands="[sendCommand]" @close="sendCommand = ''" />
 
     <section v-for="g in groups" :key="g.label" class="gd__sec">
       <div class="gd__group-head">
@@ -234,6 +248,15 @@ const { canPlay, playTitle, canOpen, canQuit, play, quit, openFolder, actionErro
           </UiIconButton>
           <UiIconButton v-if="canOpen(f)" :class="{ 'gd__open': !canPlay(f) }" :title="f.node === 'lab' ? 'Open folder' : 'Open folder (SMB)'" @click="openFolder(f)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          </UiIconButton>
+          <template v-if="canSend(f)">
+            <UiIconButton v-for="t in sendTargets" :key="t.id" :class="{ 'gd__open': !canPlay(f) && !canOpen(f) }" :title="'Send to ' + t.name" @click="send(f, t.id)">
+              <img v-if="ICONS[t.id]" :src="ICONS[t.id]" class="gd__send-ic" alt="" />
+              <span v-else>{{ t.name }}</span>
+            </UiIconButton>
+          </template>
+          <UiIconButton v-if="f.status === 'deleted'" class="gd__open" title="Remove from the catalogue" @click="forget(f)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
           </UiIconButton>
         </div>
         <p class="gd__path" :title="f.path">{{ fileName(f.path) }}</p>
@@ -329,6 +352,7 @@ const { canPlay, playTitle, canOpen, canQuit, play, quit, openFolder, actionErro
 .gd__label-input { flex: 1; min-width: 0; font: inherit; font-size: 12.5px; padding: 5px 8px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-sm); }
 .gd__label-input:focus { outline: none; border-color: var(--accent); }
 .gd__path { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin: 4px 0 0; word-break: break-all; }
+.gd__send-ic { width: 18px; height: 18px; object-fit: contain; }
 .gd__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0 0; font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
 .gd__meta:empty { display: none; }
 .gd__notes { font-size: 12px; color: var(--text-muted); margin: 4px 0 0; }

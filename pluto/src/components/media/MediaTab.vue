@@ -12,6 +12,8 @@ import UiSelect from '../ui/UiSelect.vue'
 import UiCopyButton from '../ui/UiCopyButton.vue'
 import Terminal, { type TerminalOutput } from '../Terminal.vue'
 import GameDrawer from './GameDrawer.vue'
+import AdminCommand from './AdminCommand.vue'
+import { useAchievement } from '../../composables/useAchievement'
 import { useRomActions } from '../../composables/useRomActions'
 
 // Media: the game catalogue. Grid of SYSTEMS (not nodes) -> one system's games -> a
@@ -115,7 +117,7 @@ function matchesSystem(system: string) {
 // Grid toggles: ★ starred systems, Owned consoles. Both on = either one (the ones you own
 // plus the ones you starred); neither = all.
 const favSystemsOnly = ref(false)
-const ownedOnly = ref(false)
+const ownedOnly = ref(true)                   // on by default: your own consoles first
 function keepSystem(s: SystemSummary) {
   if (!favSystemsOnly.value && !ownedOnly.value) return true
   return (favSystemsOnly.value && s.favourite) || (ownedOnly.value && s.owned)
@@ -175,7 +177,7 @@ const sections = computed(() => {
 
 // Card shortcuts: Play / Open folder act on the game's ROM when there is exactly ONE
 // present copy; with several (regions, mods, nodes) they're disabled and the drawer picks.
-const { canPlay, playTitle, canOpen, play, openFolder } = useRomActions(system, nodesRef)
+const { canPlay, playTitle, canOpen, play, openFolder, sendTargets, send, sendCommand, actionError } = useRomActions(system, nodesRef)
 const soleRom = (g: Game) => {
   const present = g.files.filter(f => f.status === 'present')
   return present.length === 1 ? present[0] : null
@@ -252,17 +254,26 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 // ── Sync: same SSE line/done contract as deploy, shown in the same console ──
 const syncOut = ref<TerminalOutput | null>(null)
 const syncing = computed(() => syncOut.value?.ok === null)
+const { unlock } = useAchievement()
+// Nodes whose drive only root can read (the PS2 HDD) don't sync from here: the API streams
+// "<node>: needs admin, run in Terminal: <command>" (service.sync admin_nodes), shown as a dialog.
+const ADMIN_LINE = /^\S+: needs admin, run in Terminal: (.+)$/
+const adminCommands = ref<string[]>([])
 function sync(target: string) {
   const startedAt = Date.now()
+  adminCommands.value = []
   syncOut.value = { raw: '', ok: null, step: target === '*' ? 'all systems' : systemName(target), startedAt }
   const es = new EventSource(catalogueApi.syncUrl(target))
   es.addEventListener('line', (e: MessageEvent) => {
     if (syncOut.value) syncOut.value = { ...syncOut.value, raw: syncOut.value.raw + e.data + '\n' }
+    const admin = ADMIN_LINE.exec(e.data)
+    if (admin) adminCommands.value = [...adminCommands.value, admin[1]]
   })
   es.addEventListener('done', (e: MessageEvent) => {
     es.close()
     const ok = e.data === 'ok'
     if (syncOut.value) syncOut.value = { ...syncOut.value, ok, step: ok ? 'done' : 'failed' }
+    if (ok) setTimeout(() => unlock(`Successfully Synced ${target === '*' ? 'All Systems' : systemName(target)}`, `${Math.round((Date.now() - startedAt) / 1000)}s`), 600)
     load()
   })
   es.onerror = () => {
@@ -270,7 +281,12 @@ function sync(target: string) {
     if (syncOut.value?.ok === null) syncOut.value = { ...syncOut.value, raw: syncOut.value.raw + '\n[connection lost]', ok: false, step: 'failed' }
   }
 }
-const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% - 32px))', height: '260px' }
+// Floats bottom-right, left of the game drawer when one is open (as the deploy console does
+// beside the Network drawer), so it never covers the drawer.
+const termStyle = computed(() => ({
+  right: openGame.value ? 'min(432px, calc(100% - 16px))' : '16px', bottom: '16px',
+  width: openGame.value ? 'min(560px, max(240px, calc(100% - 448px)))' : 'min(560px, calc(100% - 32px))', height: '260px',
+}))
 </script>
 
 <template>
@@ -403,7 +419,10 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
           </UiIconButton>
         </span>
         </div>
-        <UiButton class="md__sync" :loading="syncing" loading-text="Syncing…" @click="sync(system)">Sync</UiButton>
+        <span class="md__sync">
+          <UiButton v-for="t in sendTargets" :key="t.id" :title="'One command that sends every lab game ' + t.name + ' doesn\'t have yet'" @click="send(null, t.id)">Send all to {{ t.name }}</UiButton>
+          <UiButton :loading="syncing" loading-text="Syncing…" @click="sync(system)">Sync</UiButton>
+        </span>
       </header>
       <nav class="md__kinds">
         <button class="md__kind-tab" :class="{ 'is-on': kindTab === 'game' }" @click="kindTab = 'game'">Games <span>{{ kindCount('game') }}</span></button>
@@ -428,6 +447,7 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
       <!-- stage = the non-scrolling frame: the drawer pins to it, the body scrolls inside -->
       <div class="md__stage">
       <div class="md__body md__body--list" @click="gameKey && go(system)">
+        <p v-if="actionError" class="md__state is-bad">{{ actionError }}</p>
         <p v-if="apiError" class="md__state is-bad">{{ apiError }}</p>
         <p v-else-if="loading && !view" class="md__state"><UiSpinner /> Loading…</p>
         <template v-for="sec in sections" :key="sec.label">
@@ -497,11 +517,13 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
       </div>
       <GameDrawer v-if="openGame && view" :system="view.system" :game="openGame" :nodes="nodes" :system-icon="systemIcon(system)"
                   :cover-version="coverVersion[openGame.key]"
-                  @close="go(system)" @favourite="toggleFavourite(openGame, $event)" @cover-changed="coverChanged(openGame)" @relabeled="relabeled" />
+                  @close="go(system)" @favourite="toggleFavourite(openGame, $event)" @cover-changed="coverChanged(openGame)" @relabeled="relabeled" @changed="load" />
       </div>
     </template>
 
     <Terminal v-if="syncOut" title="sync" :output="syncOut" :card-style="termStyle" @close="syncOut = null" />
+    <AdminCommand v-if="sendCommand" title="Send the games to the drive from Terminal" :commands="[sendCommand]" @close="sendCommand = ''" />
+    <AdminCommand v-if="adminCommands.length && !syncing" title="Sync the PS2 drive from Terminal" :commands="adminCommands" @close="adminCommands = []" />
   </div>
 </template>
 
@@ -539,9 +561,10 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
 .md__kind-tab.is-on { color: var(--text); border-bottom-color: var(--accent); }
 .md__meta-bar { display: flex; align-items: center; gap: var(--sp-4); padding: 6px var(--sp-5); font-size: 12px; color: var(--text-faint); border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
 
-.md__body { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-5); }
+.md__body { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-5) var(--sp-5) calc(var(--sp-5) + 80px); }   /* bottom: same room as the game list, clear of the mini chat */
 .md__stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.md__body--list { padding: 0; }
+.md__body--list { padding: 0 0 80px; }
+.md__sync { display: flex; gap: var(--sp-2); flex: 0 0 auto; }      /* room under the last row: the mini chat floats bottom-left */
 .md__group { width: 170px; }
 .md__section { display: flex; align-items: baseline; gap: 8px; margin: 0; padding: var(--sp-4) var(--sp-5) 0; font-size: 13px; font-weight: 600; color: var(--text); }
 .md__section span { font-family: var(--font-mono); font-size: 11px; font-weight: 400; color: var(--text-faint); }

@@ -25,6 +25,11 @@
     "label": "WiFi"
   },
   {
+    "from": "ps2",
+    "to": "lab",
+    "label": "USB HDD"
+  },
+  {
     "from": "dc",
     "to": "vmu",
     "label": "Maple"
@@ -46,7 +51,7 @@
   },
   {
     "from": "ws",
-    "to": "pluto",
+    "to": "pi",
     "label": "USB"
   },
   {
@@ -71,17 +76,17 @@
   },
   {
     "from": "saturn",
-    "to": "pluto",
+    "to": "pi",
     "label": "Serial / Pico"
   },
   {
     "from": "sms",
-    "to": "gateway",
+    "to": "pi",
     "label": "Pending link"
   },
   {
     "from": "megadrive",
-    "to": "pluto",
+    "to": "pi",
     "label": "Serial / Pico"
   },
   {

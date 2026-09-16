@@ -158,6 +158,24 @@ paths:
       summary: Launch a ROM (body {path, node}) -- node lab = desktop emulator on the API host (macOS); node batocera = remote boot via EmulationStation
       parameters: [{ name: system, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: Launched }, '400': { description: No emulator associated, or not a lab ROM }, '502': { description: The emulator failed to open } }
+  /catalogue/{system}/send:
+    post:
+      tags: [catalogue]
+      summary: Send a lab ROM to a node's drive (body {path, node}, or {all true, node} = every lab game the node doesn't have). Only nodes with PS2_HDD_BYTES; the API can't write the drive (root only), so it returns the Terminal command that does
+      parameters: [{ name: system, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: "{command}" }, '400': { description: Node can't take games, or not a lab ROM } }
+  /catalogue/{system}/scan/{node}:
+    post:
+      tags: [catalogue]
+      summary: A node's complete game list read outside the API (body {files [{path, size}]}), merged like a sync scan (the PS2 HDD command posts here)
+      parameters: [{ name: system, in: path, required: true, schema: { type: string } }, { name: node, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: "{ok, lines}" }, '400': { description: Bad body, or the node doesn't host the system }, '409': { description: A sync is running } }
+  /catalogue/{system}/forget:
+    post:
+      tags: [catalogue]
+      summary: Remove a copy marked deleted from the catalogue (body {game, node, path}); a game left without copies goes too
+      parameters: [{ name: system, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK }, '400': { description: No such copy, or it isn't deleted }, '409': { description: A sync is running } }
   /catalogue/{system}/open:
     post:
       tags: [catalogue]
