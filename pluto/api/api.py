@@ -3696,8 +3696,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(400, {"error": "sending games to %s is not available" % (node or "that node")}); return
         if not send_all:
             path = self._lab_rom(system, rel)
-            if not path:
-                self._send(400, {"error": "not a lab ROM"}); return
+            if not path or not os.path.isfile(path):
+                self._send(400, {"error": "not a lab ROM file"}); return
             self._send(200, {"command": self._admin_command(node, ["install", path])}); return
         if not re.match(r"^[A-Za-z0-9_.-]+$", system):
             self._send(400, {"error": "bad system"}); return
@@ -3706,7 +3706,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             present = [f for f in g["files"] if f["status"] == "present"]
             if any(f["node"] == node for f in present):
                 continue
-            paths += [p for p in (self._lab_rom(system, f["path"]) for f in present if f["node"] == "lab") if p]
+            paths += [p for p in (self._lab_rom(system, f["path"]) for f in present if f["node"] == "lab") if p and os.path.isfile(p)]
         if not paths:
             self._send(400, {"error": "nothing to send: no lab game missing from %s" % node}); return
         self._send(200, {"command": self._admin_command(node, ["install"] + sorted(paths)), "count": len(paths)})
