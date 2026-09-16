@@ -756,6 +756,32 @@ def test_kind_marks_tools_across_digital_and_physical():
     assert kinds == {"dreamkey-3-1": ("tool", True, 1), "maken-x": ("game", False, 1)}
 
 
+def test_admin_node_prints_its_command_and_a_posted_list_merges_like_a_scan():
+    root, lines = tempfile.mkdtemp(), []
+    cfg = dict(CONFIG, nodeConsoles={"ps2": ["ps2"]})
+    service.sync(root, "ps2", cfg, fake_ssh, None, lines.append, NOW, admin_nodes={"ps2": "sudo ps2hdd.py sync"})
+    assert "ps2: needs admin, run in Terminal: sudo ps2hdd.py sync" in lines, lines
+
+    service.merge_posted(root, "ps2", "ps2", [{"path": "Futurama (USA).iso", "size": 1}, {"path": "Okami (Europe).iso", "size": 2}],
+                         cfg, None, lines.append, NOW)
+    service.merge_posted(root, "ps2", "ps2", [{"path": "Futurama (USA).iso", "size": 1}], cfg, None, lines.append, LATER)
+    status = {f["path"]: f["status"] for g in store.load(root, "ps2")["games"].values() for f in g["files"]}
+    assert status == {"Futurama (USA).iso": "present", "Okami (Europe).iso": "deleted"}, status
+    game = next(k for k, g in store.load(root, "ps2")["games"].items() if g["title"] == "Okami")
+    try:
+        service.forget_file(root, "ps2", "futurama", "ps2", "Futurama (USA).iso")
+        assert False, "a present copy can't be forgotten"
+    except ValueError:
+        pass
+    service.forget_file(root, "ps2", game, "ps2", "Okami (Europe).iso")
+    assert game not in store.load(root, "ps2")["games"]
+    try:
+        service.merge_posted(root, "megadrive", "ps2", [], cfg, None, lines.append, NOW)
+        assert False, "a node may only post systems it hosts"
+    except ValueError:
+        pass
+
+
 def test_systems_carry_favourite_and_owned_console():
     root = tempfile.mkdtemp()
     for s in ("saturn", "mame"):

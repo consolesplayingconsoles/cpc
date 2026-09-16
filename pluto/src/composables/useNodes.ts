@@ -34,6 +34,7 @@ export interface NodeData {
   cloud?: boolean         // a cloud-cluster service buddy, not a pinged LAN node
   web?:   string | null   // WEB_URL — the connector's own page, opened from the drawer
   sd?:    string | null   // SD_LABEL — this console's card, read via the Pi hub
+  send?:  boolean         // PS2_HDD_BYTES — takes games from the Media tab (via a Terminal command)
   picos?: PicoInfo[]      // declared Pico fleet (nodes with PICO_<chipid>=... lines)
   controlTarget?: string | null  // CONTROL_TARGET group — this node is a subtarget of that Control target
 }
