@@ -43,10 +43,13 @@ def load_physical(root, system):
 
 
 def systems(root):
-    """Systems that hold at least one digital file or physical item."""
+    """Systems that hold at least one digital file or physical item, with whether you
+    starred the system and whether you own the console (hardware.json)."""
     out = []
     if not os.path.isdir(root):
         return out
+    fav_systems = set(store.load_favourites(root).get("systems") or [])
+    consoles = store.load_hardware(root).get("consoles") or {}
     for system in sorted(os.listdir(root)):
         if not os.path.isdir(os.path.join(root, system)) or system.startswith("."):
             continue
@@ -54,7 +57,9 @@ def systems(root):
         if view["games"]:
             out.append({"system": system, "games": len(view["games"]),
                         "nodes": sorted({n for g in view["games"] for n in g["nodes"]}),
-                        "physical": sum(1 for g in view["games"] if g["physical"])})
+                        "physical": sum(1 for g in view["games"] if g["physical"]),
+                        "favourite": system in fav_systems,
+                        "owned": system in consoles, "hardware": consoles.get(system)})
     return out
 
 
@@ -63,6 +68,7 @@ def system_view(root, system):
     doc = store.load(root, system)
     favs = set(store.load_favourites(root)["games"].get(system, []))
     labels = store.load_labels(root).get(system) or {}
+    kinds = store.load_kinds(root).get(system) or {}
     credits = store.load_credits(root, system)
     saves = doc.get("saves", {})
 
@@ -79,19 +85,28 @@ def system_view(root, system):
         games[gk] = {"key": gk, "title": g["title"], "ids": g["ids"], "files": files, "physical": [],
                      "meta": g.get("meta") or {}}
 
+    # physical.json items: {title (Redump/No-Intro name, region tags included), id (serial),
+    # format, status, notes}; status and notes are free text. They join the digital game
+    # by serial, else by title, so a shelf copy and its ROM are ONE entry.
     for item in load_physical(root, system):
-        gk = store.find_game(doc, item.get("title", ""), item.get("id")) or names.key(item.get("title", ""))
+        p = names.parse(item.get("title", "") + ".x")      # extension: a dot in the title stays
+        gk = store.find_game(doc, p["title"], item.get("id")) or names.key(p["title"])
         if gk not in games:
-            games[gk] = {"key": gk, "title": item.get("title", gk), "ids": [], "files": [], "physical": [], "meta": {}}
+            games[gk] = {"key": gk, "title": p["title"], "ids": [], "files": [], "physical": [], "meta": {}}
+        if item.get("id") and item["id"] not in games[gk]["ids"]:
+            games[gk]["ids"].append(item["id"])
         games[gk]["physical"].append(item)
 
     out = []
     for g in games.values():
         present = [f for f in g["files"] if f["status"] == "present"]
         g["nodes"] = sorted({f["node"] for f in present})
-        g["regions"] = sorted({r for f in present for r in f["regions"]})
+        g["regions"] = sorted({r for f in present for r in f["regions"]}) or \
+            sorted({t for i in g["physical"] for t in names.parse(i.get("title", "") + ".x")["tags"]
+                     if names.has_region_tag([t])})
         g["saves"] = sorted({n for f in g["files"] for n in f["save"]})
         g["favourite"] = g["key"] in favs
+        g["kind"] = kinds.get(g["key"], "game")
         g["label"] = labels.get(g["key"])
         if g["label"]:
             g["fileTitle"], g["title"] = g["title"], g["label"]
@@ -144,6 +159,18 @@ def missing_covers(root):
     return {"games": out}
 
 
+def physical_only(root):
+    """Games you own on a shelf but have no digital copy of (no present file on any node),
+    across all systems: the ones worth dumping or finding a digital copy of."""
+    out = []
+    for s in systems(root):
+        system = s["system"]
+        for g in system_view(root, system)["games"]:
+            if g["physical"] and not g["nodes"]:
+                out.append({"system": system, "key": g["key"], "title": g["title"]})
+    return {"games": out}
+
+
 def set_label(root, system, game_key, label):
     """Set (or clear, label empty) a game's label. Its art is looked up again on next view:
     the cached match (or miss) is dropped, uploads stay."""
@@ -156,6 +183,14 @@ def set_label(root, system, game_key, label):
         mine.pop(game_key, None)
     store.save_labels(root, labels)
     covers.forget(root, system, game_key)
+
+
+def set_system_favourite(root, system, on):
+    favs = store.load_favourites(root)
+    keys = set(favs.get("systems") or [])
+    (keys.add if on else keys.discard)(system)
+    favs["systems"] = sorted(keys)
+    store.save_favourites(root, favs)
 
 
 def set_favourite(root, system, game_key, on):
@@ -408,6 +443,10 @@ def _merge_system(root, system, node, found, favs, saves_lookup, emit, now, thum
         if labels.get(system):
             store.rekey_labels(labels, system, renames)
             store.save_labels(root, labels)
+        kinds = store.load_kinds(root)
+        if kinds.get(system):
+            store.rekey_labels(kinds, system, renames)             # same {system: {key: v}} shape
+            _save_json(os.path.join(root, "kinds.json"), kinds)
         credits = store.load_credits(root, system)
         store.rekey_refs(favs, credits, system, renames)
         if credits:

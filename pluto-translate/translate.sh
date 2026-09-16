@@ -132,8 +132,9 @@ fi
 echo "[5/5] name the .gdi + gamelist"
 # rename disc.gdi -> "<full name>.gdi" so Batocera lists the game, not "disc"
 if [ -f "$DEST/disc.gdi" ]; then mv "$DEST/disc.gdi" "$DEST/$(basename "$DEST").gdi"; fi
-NICE=$(printf '%s' "$GAME" | sed 's/ *([^)]*)//g; s/ *\[[^]]*\]//g')
-python3 "$HERE/gamelist_name.py" "$OUT_SYSDIR/gamelist.xml" "$OUT_SYSDIR" "$DEST" "$NICE $LANGNAME" ".gdi" || \
+# Display name = the folder name, i.e. the catalogue convention "<Game> (Region) [T-<Code> <ver>]".
+# (It used to be "<Game> <LangName>", which renamed catalogue-curated entries on every rebuild.)
+python3 "$HERE/gamelist_name.py" "$OUT_SYSDIR/gamelist.xml" "$OUT_SYSDIR" "$DEST" "$(basename "$DEST")" ".gdi" || \
   echo "  (gamelist name skipped)"
 
 echo "DONE: $DEST"

@@ -33,6 +33,11 @@ if game is None:
     game = ET.SubElement(root, "game")
     ET.SubElement(game, "path").text = rel
 n = game.find("name")
+if n is not None and n.text == name:
+    # Already right: don't re-serialise the whole gamelist (ElementTree rewrites the XML declaration
+    # and formatting of every entry, which the catalogue Sync and EmulationStation both read).
+    print("gamelist: %s already named %s" % (rel, name))
+    sys.exit(0)
 if n is None:
     n = ET.SubElement(game, "name")
 n.text = name

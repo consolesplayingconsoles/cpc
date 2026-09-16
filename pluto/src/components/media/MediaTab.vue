@@ -72,18 +72,22 @@ async function load() {
 watch(system, () => { filter.value = ''; if (props.active) load() })
 watch(() => props.active, (a) => { if (a) load() }, { immediate: true })
 
-// ── Missing covers: games with no image linked in the catalogue (no upload, no downloaded
-// art), across all systems. Local only. Click one -> its drawer (upload, or the art fetch).
-const missingOpen = ref(false)
-const missing = ref<MissingCover[] | null>(null)
+// ── Cross-system game lists, grouped by system; click one -> its drawer.
+//   missing:  games with no image linked in the catalogue (local only)
+//   physical: games you own on a shelf with no digital copy on any node
+type ListMode = 'missing' | 'physical'
+const listMode = ref<ListMode | ''>('')
+const missingOpen = computed(() => listMode.value !== '')
+const lists = ref<Record<ListMode, MissingCover[] | null>>({ missing: null, physical: null })
+const missing = computed(() => listMode.value ? lists.value[listMode.value] : null)
 const missingLoading = ref(false)
-async function toggleMissing() {
-  missingOpen.value = !missingOpen.value
-  if (!missingOpen.value || missingLoading.value) return
+async function toggleList(mode: ListMode) {
+  listMode.value = listMode.value === mode ? '' : mode
+  if (!listMode.value || missingLoading.value) return
   missingLoading.value = true
   try {
-    const r = await catalogueApi.missingCovers()
-    missing.value = r.games
+    const r = mode === 'missing' ? await catalogueApi.missingCovers() : await catalogueApi.physicalOnly()
+    lists.value[mode] = r.games
   } catch {
     apiError.value = 'Catalogue API unreachable'
   } finally {
@@ -108,8 +112,21 @@ function matchesSystem(system: string) {
   return !q || [system, systemName(system), SYSTEMS[system]?.brand ?? ''].some(t => t.toLowerCase().includes(q))
 }
 
+// Grid toggles: ★ starred systems, Owned consoles. Both on = either one (the ones you own
+// plus the ones you starred); neither = all.
+const favSystemsOnly = ref(false)
+const ownedOnly = ref(false)
+function keepSystem(s: SystemSummary) {
+  if (!favSystemsOnly.value && !ownedOnly.value) return true
+  return (favSystemsOnly.value && s.favourite) || (ownedOnly.value && s.owned)
+}
+async function toggleSystemFav(s: SystemSummary) {
+  s.favourite = !s.favourite
+  try { await catalogueApi.setSystemFavourite(s.system, s.favourite) } catch { s.favourite = !s.favourite; apiError.value = 'Could not save the favourite' }
+}
+
 // Families: brand, then name. Systems without a brand (arcade) go last.
-const sortedSystems = computed(() => [...systems.value].filter(s => matchesSystem(s.system)).sort((a, b) => {
+const sortedSystems = computed(() => [...systems.value].filter(s => matchesSystem(s.system) && keepSystem(s)).sort((a, b) => {
   const ba = SYSTEMS[a.system]?.brand, bb = SYSTEMS[b.system]?.brand
   if (!!ba !== !!bb) return ba ? -1 : 1
   return (ba ?? '').localeCompare(bb ?? '') || systemName(a.system).localeCompare(systemName(b.system))
@@ -128,7 +145,11 @@ const brandGroups = computed(() => {
 })
 
 const favOnly = ref(false)
-watch(system, () => { favOnly.value = false; groupBy.value = '' })
+// Copy kind: '' = all, 'digital' = has a file on a node, 'physical' = has a shelf copy.
+// A game with both kinds shows under either.
+const copyKind = ref<'' | 'digital' | 'physical'>('')
+const toggleKind = (k: 'digital' | 'physical') => { copyKind.value = copyKind.value === k ? '' : k }
+watch(system, () => { favOnly.value = false; copyKind.value = ''; groupBy.value = ''; kindTab.value = 'game' })
 
 // Group by a metadata field. Which fields: systems.<x>.filters, else defaultFilters, and
 // only those with at least one value among this system's games (coverage is uneven).
@@ -171,9 +192,14 @@ function hostsFor(sys: string): string[] {
 
 const hostsWithGames = computed(() => new Set((view.value?.games ?? []).flatMap(g => g.nodes)))
 
+// A system page has two tabs: its games and its tools (Dreamkey, DreamShell...).
+const kindTab = ref<'game' | 'tool'>('game')
+const kindCount = (k: 'game' | 'tool') => (view.value?.games ?? []).filter(g => (g.kind ?? 'game') === k).length
 const games = computed<Game[]>(() => {
   const q = filter.value.trim().toLowerCase()
-  const all = (view.value?.games ?? []).filter(g => !favOnly.value || g.favourite)
+  const all = (view.value?.games ?? []).filter(g => (g.kind ?? 'game') === kindTab.value && (!favOnly.value || g.favourite) &&
+    (copyKind.value !== 'digital' || g.files.some(f => f.status === 'present')) &&
+    (copyKind.value !== 'physical' || g.physical.length > 0))
   return q ? all.filter(g => g.title.toLowerCase().includes(q) || g.files.some(f => f.path.toLowerCase().includes(q))
                           || Object.values(g.meta ?? {}).some(v => v.toLowerCase().includes(q))) : all
 })
@@ -254,21 +280,51 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
       <div class="md__body">
         <div class="md__actions">
           <input v-model="systemFilter" class="md__filter md__filter--grid" type="search" placeholder="Filter systems" />
-          <UiButton class="md__action" :class="{ 'is-on': missingOpen }" @click="toggleMissing">
-            {{ missingOpen ? 'All systems' : 'Missing covers' }}<template v-if="missing && !missingOpen"> ({{ missing.length }})</template>
+          <span v-if="!missingOpen" class="md__layout">
+            <UiIconButton variant="ghost" :active="favSystemsOnly" title="Favourite systems" @click="favSystemsOnly = !favSystemsOnly">
+              <svg width="15" height="15" viewBox="0 0 24 24" :fill="favSystemsOnly ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
+            </UiIconButton>
+            <UiIconButton variant="ghost" :active="ownedOnly" title="Consoles you own" @click="ownedOnly = !ownedOnly">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="7" width="18" height="10" rx="3"/><path d="M7 12h3M8.5 10.5v3"/><circle cx="15.5" cy="11" r="0.8" fill="currentColor"/><circle cx="17.5" cy="13" r="0.8" fill="currentColor"/></svg>
+            </UiIconButton>
+          </span>
+          <UiButton class="md__action" :class="{ 'is-on': listMode === 'physical' }" @click="toggleList('physical')">
+            {{ listMode === 'physical' ? 'All systems' : 'Physical only' }}
+          </UiButton>
+          <UiButton class="md__action" :class="{ 'is-on': listMode === 'missing' }" @click="toggleList('missing')">
+            {{ listMode === 'missing' ? 'All systems' : 'Missing covers' }}<template v-if="lists.missing && listMode !== 'missing'"> ({{ lists.missing.length }})</template>
           </UiButton>
           <UiButton class="md__action" variant="primary" :loading="syncing" loading-text="Syncing…" @click="sync('*')">Sync all</UiButton>
+          <!-- Physical only shows covers too: same Cards/List choice as a system page -->
+          <span v-if="listMode === 'physical'" class="md__layout">
+            <UiIconButton variant="ghost" :active="layout === 'cards'" title="Cards" @click="setLayout('cards')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
+            </UiIconButton>
+            <UiIconButton variant="ghost" :active="layout === 'list'" title="List" @click="setLayout('list')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 6h14M5 12h14M5 18h14"/></svg>
+            </UiIconButton>
+          </span>
         </div>
         <template v-if="missingOpen">
-          <p v-if="missingLoading" class="md__state"><UiSpinner /> Checking covers…</p>
-          <p v-else-if="missing && !missing.length" class="md__state">Every game has a cover.</p>
+          <p v-if="missingLoading" class="md__state"><UiSpinner /> {{ listMode === 'missing' ? 'Checking covers…' : 'Checking shelves…' }}</p>
+          <p v-else-if="missing && !missing.length" class="md__state">{{ listMode === 'missing' ? 'Every game has a cover.' : 'Every physical game has a digital copy.' }}</p>
           <section v-for="[sys, list] in missingBySystem" :key="sys" class="md__missing">
             <button class="md__section md__fold" :aria-expanded="!isFolded(sys, list.length)" @click="toggleFold(sys, list.length)">
               <svg class="md__fold-chev" :class="{ 'is-open': !isFolded(sys, list.length) }" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
               <img v-if="systemIcon(sys)" :src="systemIcon(sys)" class="md__missing-ic" alt="" />
               {{ systemName(sys) }} <span>{{ list.length }}</span>
             </button>
-            <ul v-if="!isFolded(sys, list.length)" class="md__list">
+            <div v-if="!isFolded(sys, list.length) && listMode === 'physical' && layout === 'cards'" class="md__cards md__cards--mini">
+              <div v-for="m in list" :key="m.key" class="md__card" role="button" tabindex="0" @click="go(m.system, m.key)" @keydown.enter="go(m.system, m.key)">
+                <span class="md__cover">
+                  <img :src="catalogueApi.coverUrl(m.system, m.key)" alt="" loading="lazy" />
+                </span>
+                <span class="md__card-body">
+                  <span class="md__card-title">{{ m.title }}</span>
+                </span>
+              </div>
+            </div>
+            <ul v-else-if="!isFolded(sys, list.length)" class="md__list">
               <li v-for="m in list" :key="m.key" class="md__row" @click="go(m.system, m.key)">
                 <span class="md__title">{{ m.title }}</span>
               </li>
@@ -284,6 +340,14 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
           <h3 class="md__section md__brand">{{ grp.brand }} <span>{{ grp.systems.length }}</span></h3>
           <div class="md__grid">
           <div v-for="s in grp.systems" :key="s.system" class="md__tile" role="button" tabindex="0" @click="go(s.system)" @keydown.enter="go(s.system)">
+            <span class="md__tile-marks" @click.stop>
+              <span v-if="s.owned" class="md__kind is-physical" :title="'You own this console' + (s.hardware?.status ? ': ' + s.hardware.status : '')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="7" width="18" height="10" rx="3"/><path d="M7 12h3M8.5 10.5v3"/></svg>
+              </span>
+              <UiIconButton variant="ghost" :active="s.favourite" :title="s.favourite ? 'Unfavourite system' : 'Favourite system'" @click="toggleSystemFav(s)">
+                <svg width="15" height="15" viewBox="0 0 24 24" :fill="s.favourite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
+              </UiIconButton>
+            </span>
             <img v-if="systemIcon(s.system)" :src="systemIcon(s.system)" class="md__tile-ic" alt="" />
             <span v-else class="md__tile-ic md__tile-letter">{{ systemName(s.system).slice(0, 1) }}</span>
             <span class="md__tile-name">{{ systemName(s.system) }} <UiCopyButton :text="systemName(s.system)" title="Copy system name" /></span>
@@ -321,6 +385,12 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
           </UiSelect>
         </span>
         <span class="md__layout">
+          <UiIconButton variant="ghost" :active="copyKind === 'digital'" title="Digital copies only" @click="toggleKind('digital')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>
+          </UiIconButton>
+          <UiIconButton variant="ghost" :active="copyKind === 'physical'" title="Physical copies only" @click="toggleKind('physical')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg>
+          </UiIconButton>
           <UiIconButton variant="ghost" :active="favOnly" title="Favourites only" @click="favOnly = !favOnly">
             <svg width="15" height="15" viewBox="0 0 24 24" :fill="favOnly ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
           </UiIconButton>
@@ -335,6 +405,10 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
         </div>
         <UiButton class="md__sync" :loading="syncing" loading-text="Syncing…" @click="sync(system)">Sync</UiButton>
       </header>
+      <nav class="md__kinds">
+        <button class="md__kind-tab" :class="{ 'is-on': kindTab === 'game' }" @click="kindTab = 'game'">Games <span>{{ kindCount('game') }}</span></button>
+        <button class="md__kind-tab" :class="{ 'is-on': kindTab === 'tool' }" @click="kindTab = 'tool'">Tools <span>{{ kindCount('tool') }}</span></button>
+      </nav>
       <div class="md__meta-bar">
         <!-- phone: Group by lives here instead of taking a header row of its own -->
         <span v-if="groupFields.length" class="md__group md__group--phone">
@@ -343,7 +417,7 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
             <option v-for="f in groupFields" :key="f" :value="f">Group by {{ FIELD_LABEL[f].toLowerCase() }}</option>
           </UiSelect>
         </span>
-        <span v-if="view">{{ view.games.length }} games</span>
+        <span v-if="view">{{ kindCount(kindTab) }} {{ kindTab === 'tool' ? 'tools' : 'games' }}</span>
         <span v-if="view?.hosts.length" class="md__hosts">
           <img v-for="n in view.hosts" :key="n" :src="ICONS[n]" alt=""
                :class="{ 'is-idle': !hostsWithGames.has(n) }"
@@ -380,8 +454,9 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
                 <span v-for="r in g.regions" :key="r" class="md__region">{{ r }}</span>
               </span>
               <span class="md__card-row md__card-foot">
+                <span v-if="g.nodes.length" class="md__kind" title="Digital copy"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg></span>
+                <span v-if="g.physical.length" class="md__kind is-physical" :title="'Physical copy' + (g.physical[0].status ? ': ' + g.physical[0].status : '')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg></span>
                 <img v-for="n in g.nodes" :key="n" :src="ICONS[n]" :title="nodeName(n)" class="md__card-node" alt="" />
-                <span v-if="g.physical.length" class="md__node is-physical">Physical</span>
                 <span v-if="g.saves.length" class="md__node is-save" :title="'Save on ' + g.saves.map(nodeName).join(', ')">Save</span>
                 <span v-if="onlyDeleted(g)" class="md__node is-deleted">Deleted</span>
               </span>
@@ -412,7 +487,7 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
               <span v-for="n in g.nodes" :key="n" class="md__node" :title="nodeName(n)">
                 <img v-if="ICONS[n]" :src="ICONS[n]" alt="" />{{ nodeName(n) }}
               </span>
-              <span v-if="g.physical.length" class="md__node is-physical">Physical</span>
+              <span v-if="g.physical.length" class="md__kind is-physical" :title="'Physical copy' + (g.physical[0].status ? ': ' + g.physical[0].status : '')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg></span>
               <span v-if="g.saves.length" class="md__node is-save" :title="'Save on ' + g.saves.map(nodeName).join(', ')">Save</span>
               <span v-if="onlyDeleted(g)" class="md__node is-deleted">Deleted</span>
             </span>
@@ -457,6 +532,11 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
 .md__hosts { display: inline-flex; align-items: center; gap: 8px; }
 .md__hosts img { width: 22px; height: 22px; object-fit: contain; }
 .md__hosts img.is-idle { opacity: 0.35; filter: grayscale(1); }
+.md__kinds { display: flex; gap: var(--sp-4); padding: 0 var(--sp-5); background: var(--surface); border-bottom: 1px solid var(--line); }
+.md__kind-tab { font: inherit; font-size: 13px; font-weight: 600; padding: 8px 2px; color: var(--text-muted); background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer; }
+.md__kind-tab span { font-family: var(--font-mono); font-size: 11px; font-weight: 400; color: var(--text-faint); margin-left: 4px; }
+.md__kind-tab:hover { color: var(--text); }
+.md__kind-tab.is-on { color: var(--text); border-bottom-color: var(--accent); }
 .md__meta-bar { display: flex; align-items: center; gap: var(--sp-4); padding: 6px var(--sp-5); font-size: 12px; color: var(--text-faint); border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
 
 .md__body { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-5); }
@@ -471,6 +551,7 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
 .md__group--phone { display: none; }
 .md__layout-sep { width: 1px; height: 18px; margin: 0 6px; background: var(--line); }
 
+.md__cards--mini { border-top: 1px solid var(--line); }
 .md__cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--sp-4); padding: var(--sp-5); }
 .md__card { display: flex; flex-direction: column; text-align: left; outline: none; font: inherit; color: inherit; padding: 0; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); cursor: pointer; transition: border-color 0.1s, box-shadow 0.1s; }
 .md__card:hover, .md__card:focus-visible { border-color: var(--line-strong); box-shadow: var(--shadow); }
@@ -495,7 +576,8 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
 .md__state.is-bad { color: var(--bad); }
 
 .md__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--sp-4); }
-.md__tile { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: var(--sp-5) var(--sp-4) var(--sp-4); text-align: center; font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); cursor: pointer; transition: border-color 0.1s, box-shadow 0.1s; }
+.md__tile-marks { position: absolute; top: 8px; right: 8px; display: flex; align-items: center; gap: 4px; }
+.md__tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: var(--sp-5) var(--sp-4) var(--sp-4); text-align: center; font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); cursor: pointer; transition: border-color 0.1s, box-shadow 0.1s; }
 .md__tile:hover { border-color: var(--line-strong); box-shadow: var(--shadow); }
 .md__tile-ic { width: 88px; height: 88px; object-fit: contain; margin-bottom: 8px; }
 .md__tile-letter { display: flex; align-items: center; justify-content: center; border-radius: var(--r-lg); background: var(--surface-3); color: var(--text-faint); font-size: 34px; font-weight: 600; }
@@ -522,6 +604,9 @@ const termStyle = { right: '16px', bottom: '16px', width: 'min(560px, calc(100% 
 .md__node { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: var(--surface-3); color: var(--text-muted); white-space: nowrap; }
 .md__node img { width: 13px; height: 13px; object-fit: contain; }
 .md__node.is-physical { background: var(--accent-soft); color: var(--accent-hover); }
+/* digital / physical copy marks: a file and a disc */
+.md__kind { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: var(--surface-3); color: var(--text-muted); }
+.md__kind.is-physical { background: var(--accent-soft); color: var(--accent-hover); }
 .md__node.is-save { color: var(--ok); }
 .md__node.is-deleted { color: var(--bad); background: transparent; border: 1px dashed var(--bad); }
 

@@ -259,6 +259,27 @@ def rekey_labels(labels, system, renames):
             mine[new] = mine.pop(old)
 
 
+def load_kinds(root):
+    """What each non-game entry is, {system: {game key: kind}} (kinds.json). Only "tool" for
+    now: boot discs, browsers, loaders (Dreamkey, DreamShell). Unlisted = a game. Keyed by
+    game, so a physical tool and its digital copy are one entry."""
+    p = os.path.join(root, "kinds.json")
+    if not os.path.exists(p):
+        return {}
+    with open(p) as f:
+        return json.load(f)
+
+
+def load_hardware(root):
+    """Consoles you physically own, {"consoles": {system: {"status", "notes"}}} (hardware.json).
+    status/notes are free text and only record what's missing or wrong. Accessories later."""
+    p = os.path.join(root, "hardware.json")
+    if not os.path.exists(p):
+        return {"consoles": {}}
+    with open(p) as f:
+        return json.load(f)
+
+
 def load_favourites(root):
     p = os.path.join(root, "favourites.json")
     if not os.path.exists(p):
@@ -270,6 +291,8 @@ def load_favourites(root):
 def save_favourites(root, favs):
     for keys in favs["games"].values():
         keys.sort()
+    if "systems" in favs:
+        favs["systems"] = sorted(set(favs["systems"]))
     tmp = os.path.join(root, "favourites.json.tmp")
     with open(tmp, "w") as f:
         json.dump(favs, f, indent=2, sort_keys=True)

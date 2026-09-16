@@ -26,7 +26,9 @@ export interface CatalogueFile {
   scraped?: { name: string | null; image: string | null; thumbnail: string | null }
 }
 
-export interface PhysicalItem { title: string; id?: string; format?: string; notes?: string }
+// A shelf copy (catalogue/<system>/physical.json). status + notes are free text: "Complete",
+// "Disc only", "Missing manual"... title = the Redump/No-Intro name, id = the serial.
+export interface PhysicalItem { title: string; id?: string; format?: string; status?: string; notes?: string }
 
 export interface Game {
   key: string
@@ -38,13 +40,18 @@ export interface Game {
   regions: string[]
   saves: string[]
   favourite: boolean
+  kind: 'game' | 'tool'           // tools = boot discs, browsers, loaders (catalogue/kinds.json)
   label?: string | null           // Pluto's name for the game (labels.json); title already shows it
   fileTitle?: string              // the title read from its files, when a label overrides it
   meta: { genre?: string; developer?: string; publisher?: string; year?: string }
   cover: 'custom' | 'cached' | 'miss' | null   // custom = uploaded; null = never tried (URL fetches on first ask)
 }
 
-export interface SystemSummary { system: string; games: number; nodes: string[]; physical: number }
+// favourite = starred on the grid; owned = you have the console (catalogue/hardware.json)
+export interface SystemSummary {
+  system: string; games: number; nodes: string[]; physical: number
+  favourite: boolean; owned: boolean; hardware?: { status?: string; notes?: string } | null
+}
 export interface SystemView { system: string; games: Game[]; hosts: string[]; syncedAt: string | null }
 
 async function getJson<T>(url: string): Promise<T> {
@@ -59,6 +66,14 @@ export const catalogueApi = {
   systems: () => getJson<{ systems: SystemSummary[] }>(BASE),
   system:  (system: string) => getJson<SystemView>(`${BASE}/${enc(system)}`),
   missingCovers: () => getJson<{ games: MissingCover[] }>(`${BASE}/missing-covers`),
+  // games on a shelf with no digital copy on any node
+  physicalOnly: () => getJson<{ games: MissingCover[] }>(`${BASE}/physical-only`),
+  setSystemFavourite: async (system: string, on: boolean) => {
+    const r = await fetch(`${BASE}/${enc(system)}/favourite-system`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }),
+    })
+    if (!r.ok) throw new Error(`favourite ${system} -> ${r.status}`)
+  },
   setFavourite: async (system: string, game: string, on: boolean) => {
     const r = await fetch(`${BASE}/${enc(system)}/favourite`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game, on }),

@@ -722,6 +722,56 @@ def test_one_card_feeds_several_systems_by_extension():
     assert [f["status"] for g in store.load(root, "mastersystem")["games"].values() for f in g["files"]] == ["present"]
 
 
+def test_physical_copy_joins_its_rom_and_lists_when_shelf_only():
+    root = tempfile.mkdtemp()
+    doc = store.empty("saturn")
+    store.merge(doc, "batocera", [{"path": "Winter Heat (Japan).chd", "header": {"id": "GS-9177", "title": "WINTER HEAT", "regions": ["Japan"]}}], NOW)
+    os.makedirs(os.path.join(root, "saturn"))
+    store.save(root, doc)
+    with open(os.path.join(root, "saturn", "physical.json"), "w") as f:
+        json.dump({"items": [
+            {"title": "Winter Heat (Japan)", "id": "GS-9177", "format": "CD", "status": "Complete", "notes": ""},
+            {"title": "SimCity 2000 (Japan) (Rev A)", "id": "GS-9027", "format": "CD", "status": "Disc only", "notes": "two-disc case"},
+        ]}, f)
+    games = {g["key"]: g for g in service.system_view(root, "saturn")["games"]}
+    assert set(games) == {"winter-heat", "simcity-2000"}
+    assert games["winter-heat"]["nodes"] == ["batocera"] and games["winter-heat"]["physical"][0]["status"] == "Complete"
+    sc = games["simcity-2000"]
+    assert sc["title"] == "SimCity 2000" and sc["regions"] == ["Japan"] and sc["ids"] == ["GS-9027"] and not sc["files"]
+    assert covers.candidates(sc)[0] == "SimCity 2000 (Japan) (Rev A)"
+    assert service.physical_only(root) == {"games": [{"system": "saturn", "key": "simcity-2000", "title": "SimCity 2000"}]}
+
+
+def test_kind_marks_tools_across_digital_and_physical():
+    root = tempfile.mkdtemp()
+    doc = store.empty("dreamcast")
+    store.merge(doc, "batocera", [{"path": "Dreamkey 3.1 (Spain)/Dreamkey 3.1 (Spain).gdi", "header": None}], NOW)
+    os.makedirs(os.path.join(root, "dreamcast"))
+    store.save(root, doc)
+    with open(os.path.join(root, "dreamcast", "physical.json"), "w") as f:
+        json.dump({"items": [{"title": "Dreamkey 3.1 (Spain)", "format": "GD-ROM"}, {"title": "Maken X (Europe)"}]}, f)
+    with open(os.path.join(root, "kinds.json"), "w") as f:
+        json.dump({"dreamcast": {"dreamkey-3-1": "tool"}}, f)
+    kinds = {g["key"]: (g["kind"], bool(g["nodes"]), len(g["physical"])) for g in service.system_view(root, "dreamcast")["games"]}
+    assert kinds == {"dreamkey-3-1": ("tool", True, 1), "maken-x": ("game", False, 1)}
+
+
+def test_systems_carry_favourite_and_owned_console():
+    root = tempfile.mkdtemp()
+    for s in ("saturn", "mame"):
+        doc = store.empty(s)
+        store.merge(doc, "batocera", [{"path": "x.zip", "header": None}], NOW)
+        os.makedirs(os.path.join(root, s)); store.save(root, doc)
+    store.save_favourites(root, {"games": {}, "imported": {}})
+    with open(os.path.join(root, "hardware.json"), "w") as f:
+        json.dump({"consoles": {"saturn": {"status": "", "notes": ""}}}, f)
+    service.set_system_favourite(root, "mame", True)
+    got = {s["system"]: (s["favourite"], s["owned"]) for s in service.systems(root)}
+    assert got == {"saturn": (False, True), "mame": (True, False)}
+    service.set_system_favourite(root, "mame", False)
+    assert store.load_favourites(root)["systems"] == []
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
