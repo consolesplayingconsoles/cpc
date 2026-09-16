@@ -2257,7 +2257,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/translate/projects"), ("GET", "/translate/systems"), ("GET", "/translate/games"),
         ("GET", "/translate/extract"), ("GET", "/translate/sources"), ("GET", "/translate/meta"),
         ("GET", "/translate/{game}/textures"), ("GET", "/translate/{game}"),
-        ("GET", "/catalogue"), ("GET", "/catalogue/sync/stream"), ("GET", "/catalogue/missing-covers"),
+        ("GET", "/catalogue"), ("GET", "/catalogue/sync/stream"), ("GET", "/catalogue/missing-covers"), ("GET", "/catalogue/physical-only"),
         ("GET", "/catalogue/{system}"),
         ("GET", "/catalogue/{system}/cover/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
@@ -2266,7 +2266,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("POST", "/control/capture/grab"), ("POST", "/control/google/lens"),
         ("POST", "/control/google/translate"), ("POST", "/control/google/translate-last"),
         ("POST", "/workspace/{node}"), ("POST", "/config/open"), ("POST", "/native/{node}/{action}"),
-        ("POST", "/sd/{node}"), ("POST", "/catalogue/{system}/favourite"), ("POST", "/catalogue/{system}/label"), ("POST", "/catalogue/{system}/open"),
+        ("POST", "/sd/{node}"), ("POST", "/catalogue/{system}/favourite"), ("POST", "/catalogue/{system}/favourite-system"), ("POST", "/catalogue/{system}/label"), ("POST", "/catalogue/{system}/open"),
         ("POST", "/catalogue/{system}/cover/{game}"), ("POST", "/catalogue/{system}/play"),
         ("POST", "/translate/run"), ("POST", "/translate/open"), ("POST", "/translate/delete"),
         ("POST", "/translate/upload"), ("POST", "/translate/{game}"),
@@ -2317,6 +2317,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif parsed.path == "/catalogue/missing-covers":
             self._send(200, catalogue.missing_covers(self._catalogue_root()))
+        elif parsed.path == "/catalogue/physical-only":
+            self._send(200, catalogue.physical_only(self._catalogue_root()))
 
         elif len(parts) == 2 and parts[0] == "catalogue":
             self._handle_catalogue_system(parts[1])
@@ -2461,6 +2463,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = self._read_json_body()
             if body is not None:
                 catalogue.set_label(self._catalogue_root(), parts[1], str(body.get("game", "")), str(body.get("label") or ""))
+                self._send(200, {"ok": True})
+        elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "favourite-system":
+            body = self._read_json_body()
+            if body is not None:
+                catalogue.set_system_favourite(self._catalogue_root(), parts[1], bool(body.get("on")))
                 self._send(200, {"ok": True})
         elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "favourite":
             body = self._read_json_body()

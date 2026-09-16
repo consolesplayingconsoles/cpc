@@ -251,7 +251,9 @@ const { canPlay, playTitle, canOpen, canQuit, play, quit, openFolder, actionErro
         <div class="gd__file-main">
           <span class="gd__node">{{ p.format || 'Physical copy' }}</span>
           <span v-if="p.id" class="gd__ver">{{ p.id }}</span>
+          <UiPill v-if="p.status">{{ p.status }}</UiPill>
         </div>
+        <p class="gd__path">{{ p.title }}</p>
         <p v-if="p.notes" class="gd__notes">{{ p.notes }}</p>
       </div>
     </section>

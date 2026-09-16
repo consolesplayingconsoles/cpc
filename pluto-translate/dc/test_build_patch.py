@@ -36,11 +36,20 @@ def test_ca_encoder_is_byte_identical_to_default_fw():
 
 def test_encoder_follows_the_language():
     """A non-Catalan encoder must actually use that language -- not silently behave like Catalan.
-    English has no profile yet, so its encoder raises; that difference is the proof of binding."""
-    enc = bp._encoder("en")
+    English has its own glyph profile, so text that only English has a combo for must encode
+    differently: `g'` (possessive after g) is an en right-apostrophe combo; Catalan has no `g'`."""
+    en, ca = bp._encoder("en"), bp._encoder("ca")
+    assert en("dog's") == fon_codec.fw("dog's", "en")
+    assert en("dog's") != ca("dog's"), "en encoder produced the Catalan bytes -- it is not bound to en"
+    assert len(en("dog's")) < len(ca("dog's")), "en should pack g' into one cell"
+
+
+def test_unknown_lang_encoder_raises():
+    """A language with no glyph profile must fail loudly at build time, never fall back to Catalan."""
+    enc = bp._encoder("xx")
     try:
         enc("hi")
-        assert False, "en encoder should raise until the en profile exists (proves it's not ca)"
+        assert False, "an unprofiled language must raise, not encode as Catalan"
     except ValueError:
         pass
 

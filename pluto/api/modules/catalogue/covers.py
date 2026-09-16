@@ -50,6 +50,10 @@ def match_title(game):
 def candidates(game):
     """Thumbnail names to try, most specific first (a label, verbatim, before all)."""
     out = [game["label"]] if game.get("label") else []
+    # a shelf copy's title is already the full Redump/No-Intro name: the most exact candidate
+    for item in game.get("physical") or []:
+        if item.get("title") and item["title"] not in out:
+            out.append(item["title"])
     files = [f for f in game.get("files", []) if f.get("status") == "present"]
     files.sort(key=lambda f: (bool(f.get("variants")), f["path"]))
     for f in files:
@@ -76,6 +80,8 @@ def best_match(game, art_names):
     if not pool:
         return None
     want = _tags(game.get("label") or "")
+    for item in game.get("physical") or []:
+        want |= _tags(item.get("title") or "")
     for f in game.get("files", []):
         if f.get("status") == "present":
             want |= _tags(os.path.basename(f["path"])) | _tags(f.get("inner") or "")
