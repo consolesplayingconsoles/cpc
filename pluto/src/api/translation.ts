@@ -41,8 +41,9 @@ export const translationApi = {
   sources:      (path: string) => getJson<{ sources?: unknown[] }>(`${BASE}/sources?path=${enc(path)}`),
   extract:      (path: string, file: string) =>
                   getJson<ExtractResp>(`${BASE}/extract?path=${enc(path)}&file=${enc(file)}`),
-  measure:      (path: string, file: string, blocks: MeasureBlock[]) =>
-                  sendJson<MeasureResp>('POST', `${BASE}/measure?path=${enc(path)}&file=${enc(file)}`, { blocks }),
+  measure:      (path: string, file: string, blocks: MeasureBlock[], lang?: string) =>
+                  sendJson<MeasureResp>('POST', `${BASE}/measure?path=${enc(path)}&file=${enc(file)}`,
+                                        { blocks, lang }),
 
   // per-project state (the save path — getState/putState carry sources, speakers, tone, budgets)
   getState:    (ns: string) => getJson<Record<string, unknown>>(`${BASE}/${enc(ns)}`),

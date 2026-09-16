@@ -2684,8 +2684,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_native(self, node_id, action):
         """A node's NATIVE-system action (e.g. the Wii's homebrew flash / game library),
-        as opposed to its Linux side (SSH deploy / SMB). Not built yet -- we surface the
-        capability in the drawer and let the API say so honestly, rather than hide it."""
+        as opposed to its Linux side (SSH deploy / SMB). Batocera: quit-game (stop the
+        running emulator) and restart-es (restart EmulationStation, which also drops any
+        launches ES queued while a game ran). Anything else isn't built yet -- we surface
+        the capability in the drawer and let the API say so honestly, rather than hide it."""
+        if node_id == "batocera" and action in ("quit-game", "restart-es"):
+            script = (self._BATOCERA_QUIT + 'echo quit') if action == "quit-game" else \
+                     'curl -s -m 10 http://127.0.0.1:1234/restart >/dev/null; echo restarting'
+            if not self._boot_lock.acquire(blocking=False):
+                self._send(409, {"ok": False, "error": "a boot is in progress"}); return
+            try:
+                rc, out = self._node_ssh("batocera", ["sh", "-c", script], timeout=45, connect_timeout=5)
+            finally:
+                self._boot_lock.release()
+            if rc != 0:
+                self._send(502, {"ok": False, "error": (out.strip()[-200:] or "rc %d" % rc)}); return
+            print("  [NATIVE:batocera] %s" % action)
+            self._send(200, {"ok": True}); return
         self._send(200, {"ok": False,
                          "error": "native '%s' for %s is not implemented yet" % (action, node_id)})
 
@@ -3487,6 +3502,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     _catalogue_lock = threading.Lock()
     _boot_lock = threading.Lock()                # one remote boot at a time (ES queues launches)
+    # Quit whatever game is running on Batocera and wait until it's really gone. "Running" =
+    # an emulatorlauncher process: ES's /runningGame can say NO GAME while RetroArch still
+    # runs. "[e]" keeps pgrep from matching this very shell's command line.
+    _BATOCERA_QUIT = ('api=http://127.0.0.1:1234; idle() { ! pgrep -f "[e]mulatorlauncher -system" >/dev/null; }; '
+                      'if ! idle; then curl -s -m 10 $api/emukill >/dev/null; '
+                      'for i in $(seq 1 30); do idle && break; sleep 0.5; done; '
+                      'idle || { echo "the running game did not quit"; exit 1; }; sleep 1; fi; ')
 
     def _catalogue_root(self):
         return os.path.join(os.path.dirname(self.__class__.base_dir), "catalogue")
@@ -3575,11 +3597,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # ES runs /launch on its UI thread, which is blocked while a game runs: a launch sent
             # then is queued inside ES (no endpoint clears it) and fires when the game ends. So
             # never send one while a game is up -- and one boot at a time from Pluto.
-            script = ('api=http://127.0.0.1:1234; idle() { case "$(curl -s -m 5 $api/runningGame)" in *"NO GAME"*) return 0;; esac; return 1; }; '
-                      'if ! idle; then curl -s -m 10 $api/emukill >/dev/null; '
-                      'for i in $(seq 1 20); do idle && break; sleep 0.5; done; '
-                      'idle || { echo "the running game did not quit, not launching"; exit 1; }; sleep 1; fi; '
-                      'curl -s -m 10 -X POST $api/launch -d "$1"')
+            script = self._BATOCERA_QUIT + 'curl -s -m 10 -X POST $api/launch -d "$1"'
+
             if not self._boot_lock.acquire(blocking=False):
                 self._send(409, {"error": "a boot is already in progress"}); return
             try:

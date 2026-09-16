@@ -248,6 +248,26 @@ _ACCENTS["-"] = 0x83C9   # authored hyphen (enclitics: Ves-te'n, ajudar-lo)
 _ACCENTS["·"] = 0x83D1  # authored middot (geminates: l·l → col·lecció). 0x83CA is taken by 'il' digraph.
 
 
+def _author_it_apos(data):
+    """`it'` in ONE cell (it's / it'll / it'd -- 321 of them in the English script).
+
+    UNPROVEN ON HARDWARE (2026-09-16): the operator's rule is that a new narrow pair must be tested
+    in-game before it is trusted, because the `_compose` fit maths passes pairs that later CROP.
+    What makes this one a better bet than most: `i` is 4px and `t` is 9px, so the proven `it` pair
+    only inks columns 2-17 and NOTHING is squeezed -- the apostrophe lands in the free right edge at
+    the same coordinates the proven `<letter>'` combos use. Clearance is one blank row (the apostrophe
+    ends row 4, the t crossbar starts row 6), so a blit that bleeds vertically is the thing to watch.
+    """
+    g = _compose(_glyph(data, 0x82, 0x89), _glyph(data, 0x82, 0x94))   # the proven `it` pair
+    for r, c in ((0,16),(0,17),(0,18),(1,16),(1,17),(1,18),
+                 (2,16),(2,17),(2,18),(3,17),(4,16)):                  # same mark as _apos_r
+        g[r][c] = 3
+    rec = bytearray(data[jis_index(0x23, 0x61)*STRIDE:][:STRIDE])      # borrow 'a' header
+    rec[BMP:BMP+ROWS*BPR] = encode(g)
+    code = _EN_TRI["it'"]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
+    rec[0], rec[1] = jlo, jhi
+    off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
+
 # ── language profiles: a language is DATA (glyph sets + slots + extras), the ──────
 # engines below are generic over it. Adding a language NEVER edits the engines or another
 # language's data. `_CA` wraps the module-level Catalan globals so the existing globals + tests
@@ -286,9 +306,20 @@ _EN_OSLOT = {name: _EN_FREE[len(_EN_CSPEC) + i] for i, (name, *_) in enumerate(_
 for _n in _EN_OSLOT:
     _EN_CSLOT[_n] = _EN_OSLOT[_n]             # encoder emits the one-cell glyph for the pair
 _EN_ACCENTS = {"-": 0x83C9}                   # authored hyphen; English has no accents/middot
+# Catalan's narrow pairs, REUSED VERBATIM (`_CLEAN`): each packs two glyphs into one cell (2B not 4B).
+# English earns MORE from them than Catalan does -- `t.` `i.` `l!` end a huge share of lines.
+# ⚠️ EXACTLY this set, never an extra pair: these eleven are the survivors of the operator's on-hardware
+# testing. Others pass the `_compose` sum<=17 "fit" maths and look right in a render, then get CROPPED
+# in-game. Adding one is a hardware test, not a code change.
+_EN_CLSLOT = {seq: _EN_FREE[len(_EN_CSPEC) + len(_EN_COMPOSE) + i]
+              for i, (seq, _, _) in enumerate(_CLEAN)}
+# `it'` is THREE characters in one cell, so it cannot be a _CLEAN pair or a _CSPEC letter+apostrophe.
+# It rides in cslot (which `_encode` probes for 3-char sequences first) and is drawn by an extra.
+_EN_TRI = {"it'": _EN_FREE[len(_EN_CSPEC) + len(_EN_COMPOSE) + len(_CLEAN)]}
+_EN_CSLOT.update(_EN_TRI)
 
-_EN = _Profile({}, _EN_CSPEC, _EN_CSLOT, _EN_COMPOSE, _EN_OSLOT, [], {},
-               _EN_ACCENTS, [_author_hyphen, _author_ellipsis], 0x8394)
+_EN = _Profile({}, _EN_CSPEC, _EN_CSLOT, _EN_COMPOSE, _EN_OSLOT, _CLEAN, _EN_CLSLOT,
+               _EN_ACCENTS, [_author_hyphen, _author_ellipsis, _author_it_apos], 0x8394)
 
 _PROFILES = {"ca": _CA, "en": _EN}
 LANGS = tuple(sorted(_PROFILES))
@@ -347,11 +378,18 @@ def _encode(s, prof):
     while i < n:
         if s[i:i+3] == "...":   # ellipsis -> baseline-dots glyph (2B, 1 cell)
             o += prof.ellipsis_code.to_bytes(2,"big"); i += 3; continue
+        three = s[i:i+3]
+        if three in prof.cslot:     # 3-char one-cell glyph (en `it'`); ca has none, so ca is untouched
+            o += prof.cslot[three].to_bytes(2,"big"); i += 3; continue
         two = s[i:i+2]
         if two in prof.cslot:       # contraction or ?! combo -> one glyph, 2B not 4B
             o += prof.cslot[two].to_bytes(2,"big"); i += 2; continue
-        if two in prof.clslot and not (two[1] == "." and s[i+2:i+3] == "."):
-            o += prof.clslot[two].to_bytes(2,"big"); i += 2; continue   # digraph/combo (but let "t..." be t+…)
+        if two in prof.clslot and not (two[1] == "." and s[i+2:i+3] == ".") \
+                and not (s[i+2:i+3] in ("'", "\u2019") and (two[1] + "'") in prof.cslot):
+            # digraph/combo -- but NOT when it would swallow the letter an apostrophe must hang off
+            # ("it's": the `it` pair would leave a STANDALONE apostrophe, the bug the right-edge
+            # combos exist to prevent). Let the letter stand alone so `t'` fires on the next pass.
+            o += prof.clslot[two].to_bytes(2,"big"); i += 2; continue   # (and let "t..." be t+…)
         ch = s[i]; c = ord(ch)
         if ch in prof.accents:  o += prof.accents[ch].to_bytes(2,"big")
         elif 0x41 <= c <= 0x5a: o += (0x8260+c-0x41).to_bytes(2,"big")

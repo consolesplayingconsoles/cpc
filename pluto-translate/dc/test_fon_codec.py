@@ -213,7 +213,9 @@ def test_en_combos_dont_collide_with_hyphen_or_ellipsis():
 def test_en_encoder_uses_combos_for_contractions_and_possessives():
     """fw(..,'en') must render the apostrophe as the PRECEDING letter's right-apostrophe combo,
     for contractions AND possessive 's after any letter (never a standalone/left apostrophe)."""
-    cases = {"I'm": "I'", "don't": "n'", "it's": "t'", "he's": "e'",
+    # "it's" resolves to the THREE-char `it'` cell (cheaper still); every other word uses the
+    # preceding letter's right-apostrophe combo. Either way the mark rides a letter.
+    cases = {"I'm": "I'", "don't": "n'", "it's": "it'", "he's": "e'",
              "you're": "u'", "dog's": "g'", "o'clock": "o'", "James's": "s'"}
     bad = []
     for word, combo in cases.items():
@@ -221,6 +223,8 @@ def test_en_encoder_uses_combos_for_contractions_and_possessives():
         codes = [(out[i] << 8) | out[i + 1] for i in range(0, len(out), 2)]
         if f._EN_CSLOT[combo] not in codes:
             bad.append("%s should use the %s combo (0x%04X)" % (word, combo, f._EN_CSLOT[combo]))
+        if 0x8166 in codes:                     # the rejected standalone/left apostrophe
+            bad.append("%s emitted a STANDALONE apostrophe (0x8166)" % word)
     assert not bad, "en apostrophe combos not applied:\n  " + "\n  ".join(bad)
 
 

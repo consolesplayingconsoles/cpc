@@ -88,7 +88,8 @@ async function measureScenes() {
   if (!path || !tab || !blocks.value.length) return
   try {
     const data = await translationApi.measure(path, tab,
-      blocks.value.map(b => ({ offset: b.offset, ca: b.ca, jpBytes: b.jpBytes })))
+      blocks.value.map(b => ({ offset: b.offset, ca: b.ca, jpBytes: b.jpBytes })),
+      selLang.value)   // measure with the SAME font profile the build uses, not always Catalan
     if (data && data.used) {
       const f: Record<number, number> = {}
       for (const k in data.used as Record<string, number>) f[+k] = (data.used as Record<string, number>)[k]

@@ -156,7 +156,7 @@ async function saveLabel() {
 }
 const focusEl = (el: unknown) => { if (el instanceof HTMLInputElement) el.focus() }
 
-const { canPlay, playTitle, canOpen, play, openFolder, actionError } =
+const { canPlay, playTitle, canOpen, canQuit, play, quit, openFolder, actionError } =
   useRomActions(toRef(props, 'system'), toRef(props, 'nodes'))
 </script>
 
@@ -228,6 +228,9 @@ const { canPlay, playTitle, canOpen, play, openFolder, actionError } =
           <span v-if="f.save.length" class="gd__save" :title="'Save on ' + f.save.map(nodeName).join(', ')">Save</span>
           <UiIconButton v-if="canPlay(f)" class="gd__open" :title="playTitle(f)" @click="play(f)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a.8.8 0 0 0 1.2.7l10.4-6.5a.8.8 0 0 0 0-1.4L9.2 4.8A.8.8 0 0 0 8 5.5z"/></svg>
+          </UiIconButton>
+          <UiIconButton v-if="canQuit(f)" title="Quit the running game" @click="quit(f)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
           </UiIconButton>
           <UiIconButton v-if="canOpen(f)" :class="{ 'gd__open': !canPlay(f) }" :title="f.node === 'lab' ? 'Open folder' : 'Open folder (SMB)'" @click="openFolder(f)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
