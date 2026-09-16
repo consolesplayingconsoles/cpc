@@ -53,10 +53,8 @@ function doSdBackup() {
     .finally(() => setTimeout(() => { sdBacking.value = false }, 2000)) 
 }
 
-// Files (SMB) need the node reachable. DEPLOY does not: it's a dev action (SSH push or
-// USB flash) that may target an offline box on purpose — let it run and surface any
-// error in the console rather than pre-disabling it.
-const offline = computed(() => props.node.status === 'down' || props.node.status === 'unconfigured')
+// Nothing here is gated on the ping: every action stays clickable and reports its own
+// failure (the OS says so for a share that can't be reached, the API for the rest).
 const unconfigured = computed(() => props.node.status === 'unconfigured')
 // A node's payloads come from config/payloads.json (client, hub, ...), so the button
 // stays generic -- "Deploy Pluto Node" -- rather than naming a payload. (The host
@@ -98,7 +96,6 @@ const showLabConfig = computed(() => props.id === 'lab' && isSelfInstance.value)
 const instanceHasOps = computed(() => showDeploy.value || showLabConfig.value)
 
 // Non-instance nodes keep the flat layout: their infra actions + chat commands.
-const hasInfra = computed(() => props.node.deploy || props.node.folder)
 
 // Cloud connectors have no SSH or SMB to offer -- their one useful action is "open
 // the thing on the web", declared per node as WEB_URL. Trimmed to a string so the
@@ -111,13 +108,17 @@ const webUrl = computed(() => (props.node.web ?? '').trim())
 // pretending they're one. The native side isn't built yet -- the buttons are real, and
 // the API answers 'not implemented' (honest capability, not a hidden one).
 const isWii = computed(() => props.id === 'wii')
+const isBatocera = computed(() => props.id === 'batocera')
+const nativeBusy = ref('')
 const nativeNote = ref('')
 function nativeAction(action: string) {
   nativeNote.value = ''
+  nativeBusy.value = action
   fetch(`${API_BASE}/native/${props.id}/${action}`, { method: 'POST' })
     .then(r => r.json())
     .then(j => { nativeNote.value = j?.error || (j?.ok ? '' : 'failed') })
     .catch(() => { nativeNote.value = 'API unreachable' })
+    .finally(() => { nativeBusy.value = '' })
 }
 
 // Last-deploy line — general to any deployable node (pi, pluto, the python clients).
@@ -185,7 +186,7 @@ function postCommand(text: string) {
     <template v-if="isInstanceNode">
       <section class="nd__sec">
         <p class="nd__lbl">Pluto</p>
-        <UiActionRow v-if="!isSelfInstance" :disabled="offline" @click="openExternal(dashUrl)">
+        <UiActionRow v-if="!isSelfInstance" @click="openExternal(dashUrl)">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
           <span>{{ dashLabel }}</span>
           <span class="nd__ext">&#8599;</span>
@@ -227,61 +228,61 @@ function postCommand(text: string) {
 
     <!-- ── Every other node: flat infra actions + chat commands ── -->
     <template v-else>
-      <!-- The Wii is dual-natured: a Linux node (SSH deploy + SMB files) AND a native
-           console (homebrew flash + game library). Two sections so Deploy/Files read
-           honestly per mode; the native side isn't built, so the API says so. -->
-      <template v-if="isWii">
-        <section class="nd__sec">
-          <p class="nd__lbl">Linux</p>
-          <UiActionRow v-if="node.deploy" :disabled="deploying" @click="emit('deploy')">
-            <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l4 4M12 3l-4 4M12 3v12"/><path d="M5 21h14"/></svg>
-            <span>{{ deployLabel }}</span>
-            <span v-if="deploying" class="nd__act-note">Running…</span>
-          </UiActionRow>
-          <UiActionRow v-if="node.folder" :disabled="offline" @click="emit('open-smb')">
-            <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-            <span>Files</span>
-          </UiActionRow>
-          <p v-if="!node.deploy && !node.folder" class="nd__hint">No SSH or SMB configured.</p>
-        </section>
-
-        <section class="nd__sec">
-          <p class="nd__lbl">System</p>
-          <UiActionRow :disabled="offline" @click="nativeAction('flash')">
-            <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>
-            <span>Flash Homebrew</span>
-          </UiActionRow>
-          <UiActionRow :disabled="offline" @click="nativeAction('games')">
-            <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.4"/></svg>
-            <span>Game Library</span>
-          </UiActionRow>
-          <p v-if="nativeNote" class="nd__hint">{{ nativeNote }}</p>
-        </section>
-      </template>
-
-      <section v-else-if="isVacuum || hasInfra || webUrl" class="nd__sec">
-        <p class="nd__lbl">Actions</p>
-
-        <UiActionRow v-if="webUrl" @click="openExternal(webUrl)">
-          <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>
-          <span>Open {{ node.name }}</span>
-          <span class="nd__ext">&#8599;</span>
-        </UiActionRow>
-
-        <UiActionRow v-if="isVacuum" @click="emit('open-tab')">
-          <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 8h9M19 8h1M4 16h5M15 16h5"/><circle cx="15" cy="8" r="2"/><circle cx="11" cy="16" r="2"/></svg>
-          <span>Open Dreame Controls</span>
-          <span class="nd__arrow">&rarr;</span>
-        </UiActionRow>
-
+      <!-- The node itself: what Pluto does TO the box, not to its games or data. -->
+      <section v-if="node.deploy || webUrl || isVacuum" class="nd__sec">
+        <p class="nd__lbl">Node</p>
         <UiActionRow v-if="node.deploy" :disabled="deploying" @click="emit('deploy')">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l4 4M12 3l-4 4M12 3v12"/><path d="M5 21h14"/></svg>
           <span>{{ deployLabel }}</span>
           <span v-if="deploying" class="nd__act-note">Running…</span>
         </UiActionRow>
-        <UiActionRow v-if="node.folder" :disabled="offline" @click="emit('open-smb')">
+        <UiActionRow v-if="webUrl" @click="openExternal(webUrl)">
+          <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>
+          <span>Open {{ node.name }}</span>
+          <span class="nd__ext">&#8599;</span>
+        </UiActionRow>
+        <UiActionRow v-if="isVacuum" @click="emit('open-tab')">
+          <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 8h9M19 8h1M4 16h5M15 16h5"/><circle cx="15" cy="8" r="2"/><circle cx="11" cy="16" r="2"/></svg>
+          <span>Open Dreame Controls</span>
+          <span class="nd__arrow">&rarr;</span>
+        </UiActionRow>
+      </section>
+
+      <!-- Sections are named after WHAT they act on (games, files, saves, the node),
+           not "actions" -- every row here is an action. The Wii is dual-natured: its
+           native side (homebrew flash, game library) isn't built, so the API says so. -->
+      <section v-if="isBatocera || isWii" class="nd__sec">
+        <p class="nd__lbl">Games</p>
+        <template v-if="isBatocera">
+          <UiActionRow :disabled="!!nativeBusy" @click="nativeAction('quit-game')">
+            <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+            <span>Quit game</span>
+            <span v-if="nativeBusy === 'quit-game'" class="nd__act-note">Quitting…</span>
+          </UiActionRow>
+          <UiActionRow :disabled="!!nativeBusy" @click="nativeAction('restart-es')">
+            <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v6h-6"/></svg>
+            <span>Restart EmulationStation</span>
+            <span v-if="nativeBusy === 'restart-es'" class="nd__act-note">Restarting…</span>
+          </UiActionRow>
+        </template>
+        <template v-if="isWii">
+          <UiActionRow :disabled="!!nativeBusy" @click="nativeAction('flash')">
+            <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>
+            <span>Flash Homebrew</span>
+          </UiActionRow>
+          <UiActionRow :disabled="!!nativeBusy" @click="nativeAction('games')">
+            <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.4"/></svg>
+            <span>Game Library</span>
+          </UiActionRow>
+        </template>
+        <p v-if="nativeNote" class="nd__hint">{{ nativeNote }}</p>
+      </section>
+
+      <section v-if="node.folder" class="nd__sec">
+        <p class="nd__lbl">Files</p>
+        <UiActionRow @click="emit('open-smb')">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-          <span>Files</span>
+          <span>Filesystem</span>
         </UiActionRow>
       </section>
 

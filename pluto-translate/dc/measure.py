@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Per-scene Catalan EXPANSION ("used" bytes) for the box-budget meter -- the authoritative number
-the build will actually pay, computed by the packer (NOT a UI estimate that ignores control bytes).
+"""Per-scene EXPANSION ("used" bytes) for the box-budget meter -- the authoritative number the build
+will actually pay, computed by the packer (NOT a UI estimate that ignores control bytes).
 
 Reads the translated blocks (carrying `ca`) as JSON on STDIN, loads the cached source, runs the
 packer's `measure`, and prints {"used": {scene: bytes}}.
+
+The STDIN body also carries `lang`, so the meter encodes with the SAME font profile the build will
+use (`build_patch._lang`). Without it every project measured as Catalan, and `ca` is CHEAPER than `en`
+(its it/ti/ix/li/il digraphs pack two letters per cell), so English scenes read as fitting when the
+build would still spill. Absent/empty `lang` stays "ca" -- Catalan behaviour is unchanged.
 
     measure.py <cache-dir> <safe>     # blocks JSON on stdin
 """
@@ -20,12 +25,16 @@ from packers import nullsplit
 
 def main(cache_dir, safe):
     try:
-        blocks = json.load(sys.stdin).get("blocks", [])
+        body   = json.load(sys.stdin)
+        blocks = body.get("blocks", [])
+        lang   = (body.get("lang") or "ca").strip() or "ca"
     except ValueError:
-        blocks = []
+        blocks, lang = [], "ca"
+    if lang not in fon_codec.LANGS:          # no glyph profile yet -> draft against Catalan
+        lang = "ca"
     with open(os.path.join(cache_dir, "files", safe), "rb") as fh:
         data = fh.read()
-    m = nullsplit.measure(data, blocks, fon_codec.fw, box=15)
+    m = nullsplit.measure(data, blocks, lambda t: fon_codec.fw(t, lang), box=15)
     print(json.dumps({"used": {str(k): v for k, v in m["scene"].items()}, "line": m["line"]}))
 
 

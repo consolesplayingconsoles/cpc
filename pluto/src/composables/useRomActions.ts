@@ -3,7 +3,7 @@
 import { computed, ref, type Ref } from 'vue'
 import type { CatalogueFile } from '../api/catalogue'
 import { catalogueApi } from '../api/catalogue'
-import type { NodeMap } from './useNodes'
+import { API_BASE, type NodeMap } from './useNodes'
 import consolesConfig from '../../config/consoles.json'
 
 // Open the ROM's FOLDER (not the file, so Finder doesn't try to launch a .chd). Any node
@@ -38,6 +38,15 @@ export function useRomActions(system: Ref<string>, nodes: Ref<NodeMap>) {
   const playTitle = (f: CatalogueFile) => f.node === 'lab' ? 'Play in ' + (emulator.value?.name ?? 'emulator') : 'Play on ' + (nodes.value[f.node]?.name ?? f.node)
   const canOpen = (f: CatalogueFile) => f.status === 'present' && (f.node === 'lab' || !!smbUrl(f))
 
+  // Quit: stop whatever game is running on the node (Batocera), e.g. before testing a rebuild.
+  const canQuit = (f: CatalogueFile) => f.status === 'present' && REMOTE_BOOT.includes(f.node)
+  function quit(f: CatalogueFile) {
+    actionError.value = ''
+    fetch(`${API_BASE}/native/${f.node}/quit-game`, { method: 'POST' })
+      .then(r => r.json()).then(j => { if (!j?.ok) actionError.value = j?.error || 'quit failed' })
+      .catch(() => { actionError.value = 'API unreachable' })
+  }
+
   const actionError = ref('')
   function play(f: CatalogueFile) {
     actionError.value = ''
@@ -59,5 +68,5 @@ export function useRomActions(system: Ref<string>, nodes: Ref<NodeMap>) {
     a.remove()
   }
 
-  return { emulator, canPlay, playTitle, canOpen, play, openFolder, actionError }
+  return { emulator, canPlay, playTitle, canOpen, canQuit, play, quit, openFolder, actionError }
 }
