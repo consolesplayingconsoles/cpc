@@ -60,7 +60,7 @@ export function useRomActions(system: Ref<string>, nodes: Ref<NodeMap>) {
       return
     }
     const url = smbUrl(f)
-    if (!url) return
+    if (!url) { actionError.value = `No folder access on ${nodes.value[f.node]?.name ?? f.node} (no SMB share)`; return }
     const a = document.createElement('a')
     a.href = url
     a.rel = 'noopener'
@@ -87,7 +87,7 @@ export function useRomActions(system: Ref<string>, nodes: Ref<NodeMap>) {
     sendCommand.value = ''
     sending.value = node
     const startedAt = Date.now()
-    catalogueApi.send(system.value, f?.path ?? '', node, !f)
+    catalogueApi.send(system.value, f?.path ?? '', node, !f, f?.node ?? 'lab')
       .then(r => {
         if (r.status === 'command') sendCommand.value = r.command ?? ''
         else {

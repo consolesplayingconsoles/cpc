@@ -18,7 +18,8 @@ Strategies, chosen from the target node (strategy_for):
            SD_ROMS_DIR
   hdd      PS2_HDD_BYTES  the PS2's APA drive on this Mac: root only, so the answer is the
                           Terminal command (nodes/local/<node>/scripts/ps2hdd.py install)
-local, batocera and sd share _files: one file per game (multi-file discs not yet), written
+local, batocera and sd share _files: one file per game, or a disc folder for .gdi/.cue (the
+descriptor as <name>.gdi plus the track files it lists, in <name>/), written
 beside the target as .part, size-checked, renamed; then the target is rescanned. Arcade systems
 keep the source file name (romsets are looked up by it).
   ftp   FTP_PATH        a PS3's webMAN FTP                     -- not built yet
@@ -26,6 +27,8 @@ The caller (the API) never branches on the kind: it hands the plan to STRATEGIES
 
 Pure stdlib, 3.6-safe, ASCII only.
 """
+import re
+
 try:
     from . import names, service
 except ImportError:
@@ -110,6 +113,29 @@ def _nothing(ctx):
 
 
 MULTI_FILE = (".cue", ".gdi", ".m3u", ".ccd", ".mds")
+DISC_FOLDER = (".gdi", ".cue")      # the multi-file formats a send can carry: descriptor + listed tracks
+
+
+def disc_tracks(descriptor_text, ext):
+    """File names a .gdi / .cue descriptor points at, in order, without duplicates.
+    .gdi: first line = track count, then "<n> <lba> <type> <sector> <file> <offset>" where the
+    file name may be quoted (spaces). .cue: FILE "<name>" <type> lines."""
+    names = []
+    if ext.lower() == ".gdi":
+        for line in descriptor_text.splitlines()[1:]:
+            line = line.strip()
+            if not line:
+                continue
+            quoted = re.search(r'"([^"]+)"', line)
+            parts = line.split()
+            name = quoted.group(1) if quoted else (parts[4] if len(parts) >= 5 else None)
+            if name and name not in names:
+                names.append(name)
+    elif ext.lower() == ".cue":
+        for m in re.finditer(r'^\s*FILE\s+"?([^"\n]+?)"?\s+\S+\s*$', descriptor_text, re.M | re.I):
+            if m.group(1) not in names:
+                names.append(m.group(1))
+    return names
 
 
 def _files(p, ctx):
@@ -125,8 +151,8 @@ def _files(p, ctx):
             c = dict(c, name=c["source"]["path"].rsplit("/", 1)[-1].rsplit(".", 1)[0])
         if src is None:
             p["skipped"].append({"game": c["name"], "why": "%s's copy can't be read from here yet" % c["source"]["node"]})
-        elif ext.lower() in MULTI_FILE:
-            p["skipped"].append({"game": c["name"], "why": "multi-file disc images can't be sent yet"})
+        elif ext.lower() in MULTI_FILE and not (ext.lower() in DISC_FOLDER and ctx.get("members")):
+            p["skipped"].append({"game": c["name"], "why": "%s disc images can't be sent yet" % ext})
         else:
             todo.append((c, src, ext))
     if not todo:
@@ -134,6 +160,19 @@ def _files(p, ctx):
     card["mount"]()
     try:
         for c, src, ext in todo:
+            if ext.lower() in DISC_FOLDER:
+                # a disc: its own folder, descriptor renamed to the game, tracks keep their names
+                name = c["name"]
+                if card["exists"](name):
+                    p["skipped"].append({"game": c["name"], "why": "already there as " + name + "/"})
+                    continue
+                members = ctx["members"](src, ext)
+                (ctx.get("emit") or lines.append)("copying %s/ (%d files)" % (name, len(members)))
+                for member, filename, is_descriptor in members:
+                    card["put"](member, name + "/" + (name + ext if is_descriptor else filename))
+                lines.append("copied %s/" % name)
+                copied += 1
+                continue
             name = c["name"] + ext
             if card["exists"](name):
                 p["skipped"].append({"game": c["name"], "why": "already there as " + name})

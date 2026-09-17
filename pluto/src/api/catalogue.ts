@@ -109,18 +109,20 @@ export const catalogueApi = {
   // Send a lab ROM to a node's drive. The API can't write it (root only): it answers with the
   // Terminal command that does, which reports the drive back to the catalogue when done.
   // all = every lab game the node doesn't have yet, in one command (path ignored).
-  send: async (system: string, path: string, node: string, all = false) => {
+  // from = the node holding the copy (default lab); the API picks it up from there.
+  send: async (system: string, path: string, node: string, all = false, from = 'lab') => {
+    const body = all ? { node, all } : { node, files: [{ node: from, path }] }
     const r = await fetch(`${BASE}/${enc(system)}/send`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, node, all }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     })
     const j = await r.json().catch(() => ({}))
     if (!r.ok) throw new Error(j?.error || `send -> ${r.status}`)
     return j as { status: 'command' | 'done'; command?: string; count?: number; lines?: string[]; skipped?: { game: string; why: string }[] }
   },
-  // Delete a lab copy: the API moves it (or its game folder) to the Mac's Trash and drops it.
-  deleteLab: async (system: string, game: string, path: string) => {
+  // Delete a copy: Lab to the Trash, another node for good. The API says when a node can't.
+  deleteCopy: async (system: string, game: string, node: string, path: string) => {
     const r = await fetch(`${BASE}/${enc(system)}/delete`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game, node: 'lab', path }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game, node, path }),
     })
     if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `delete -> ${r.status}`)
   },

@@ -853,6 +853,31 @@ def test_sd_strategy_copies_single_file_roms_and_skips_what_the_card_has():
     assert nothing["status"] == "done" and nothing["count"] == 0 and events == ["mount", "finish"]      # no mount for nothing
 
 
+def test_send_copies_a_gdi_or_cue_disc_as_its_folder():
+    gdi = '3\n1 0 4 2352 track01.bin 0\n2 600 0 2352 track02.raw 0\n3 45000 4 2352 "track 03.bin" 0\n'
+    assert send.disc_tracks(gdi, ".gdi") == ["track01.bin", "track02.raw", "track 03.bin"]
+    assert send.disc_tracks('FILE "A (Track 1).bin" BINARY\n  TRACK 01 MODE1/2352\nFILE "A (Track 2).bin" BINARY\n', ".cue") == ["A (Track 1).bin", "A (Track 2).bin"]
+    p = {"copies": [{"game": "a", "name": "Tokyo Bus Guide (Japan) [Vanilla Build]",
+                     "source": {"node": "lab", "path": "Tokyo Bus Guide (Japan) [Vanilla Build]/Tokyo Bus Guide (Japan) [Vanilla Build].gdi"}},
+                    {"game": "b", "name": "Shenmue (Japan)", "source": {"node": "lab", "path": "Shenmue (Japan)/Shenmue (Japan).gdi"}},
+                    {"game": "c", "name": "Game (USA)", "source": {"node": "lab", "path": "Game (USA).m3u"}}],
+         "skipped": []}
+    put = []
+    card = {"mount": lambda: None, "exists": lambda n: n == "Shenmue (Japan)",
+            "put": lambda src, name: put.append((src, name)), "finish": lambda: ["rescanned"]}
+    def members(src, ext):
+        d = src.rsplit("/", 1)[0]
+        return [(src, src.rsplit("/", 1)[1], True)] + [(d + "/" + t, t, False) for t in ["track01.bin", "track02.raw", "track03.bin"]]
+    ctx = {"target": "batocera", "card": card, "locate": lambda s: "/roms/" + s["path"], "system": "dreamcast",
+           "rom_ext": lambda s: os.path.splitext(s["path"])[1], "members": members}
+    got = send.STRATEGIES["batocera"](p, ctx)
+    folder = "Tokyo Bus Guide (Japan) [Vanilla Build]"
+    assert [n for _, n in put] == [folder + "/" + folder + ".gdi", folder + "/track01.bin", folder + "/track02.raw", folder + "/track03.bin"], put
+    assert got["count"] == 1
+    assert sorted((s["game"], s["why"]) for s in p["skipped"]) == [("Game (USA)", ".m3u disc images can't be sent yet"),
+                                                                   ("Shenmue (Japan)", "already there as Shenmue (Japan)/")]
+
+
 def test_tools_are_not_missing_covers():
     root = tempfile.mkdtemp()
     doc = store.empty("gamecube")

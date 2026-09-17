@@ -2263,7 +2263,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/catalogue/{system}"),
         ("GET", "/catalogue/{system}/cover/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
-        ("GET", "/homebrew"), ("GET", "/homebrew/stream"), ("PUT", "/homebrew/params"), ("POST", "/homebrew/stop"), ("POST", "/homebrew/open"), ("GET", "/homebrew/deploy/stream"),
+        ("GET", "/homebrew"), ("GET", "/homebrew/stream"), ("PUT", "/homebrew/params"), ("POST", "/homebrew/stop"), ("POST", "/homebrew/open"), ("POST", "/homebrew/start"),
         ("POST", "/messages"), ("POST", "/dreame/login"), ("POST", "/dreame/logout"),
         ("POST", "/control/signal"), ("POST", "/control/capture"),
         ("POST", "/control/capture/grab"), ("POST", "/control/google/lens"),
@@ -2303,8 +2303,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/homebrew/stream":
             self._handle_homebrew_stream(urllib.parse.parse_qs(parsed.query))
 
-        elif parsed.path == "/homebrew/deploy/stream":
-            self._handle_homebrew_deploy_stream(urllib.parse.parse_qs(parsed.query))
 
         elif parsed.path == "/control/config":
             self._send(200, self._build_control_config())
@@ -2453,10 +2451,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/homebrew/stop":
             item_id = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
             self._send(200, {"stopped": homebrew.stop(item_id)})
+        elif parsed.path == "/homebrew/start":
+            self._handle_homebrew_start((urllib.parse.parse_qs(parsed.query).get("id") or [""])[0])
         elif parsed.path == "/homebrew/open":
-            item = homebrew.find(self._repo_root(), (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0])
+            qs = urllib.parse.parse_qs(parsed.query)
+            item = homebrew.find(self._repo_root(), (qs.get("id") or [""])[0])
             if not item:
                 self._send(404, {"error": "no such homebrew item"})
+            elif (qs.get("output") or [""])[0] == "1":                       # the last build's folder
+                out = homebrew.last_output(item["id"])
+                if not out:
+                    self._send(400, {"error": "nothing built yet: run Build first"})
+                else:
+                    open_path(os.path.dirname(out["path"]))
+                    self._send(200, {"opened": os.path.dirname(out["path"])})
             else:
                 open_path(os.path.join(self._repo_root(), item["path"]))
                 self._send(200, {"opened": item["path"]})
@@ -3557,25 +3565,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # ── Homebrew (Mods / Games / Tools tabs) ────────────────────────────────────
     # Items are discovered by path convention (modules/homebrew). The client only ever
     # sends an item id; paths and scripts are resolved server-side from discovery.
+    # One pipeline serves both buttons: Build = build, publish to Lab, sync; Send to <node>
+    # = the same, then the catalogue send. Once promoted to a node a mod is a regular ROM.
 
     def _repo_root(self):
         homebrew.set_outputs_file(os.path.join(self.__class__.base_dir, "logs", "homebrew-outputs.json"))
         return os.path.dirname(self.__class__.base_dir)
 
     def _homebrew_items(self):
-        """Discovered items plus where each can be deployed: the catalogue send targets for
-        its game's system (Lab first), only once there is a build output to send."""
+        """Discovered items plus sendTargets: where Send can take each one, Lab (this Mac's ROM
+        library) first."""
         items = homebrew.discover(self._repo_root())
         by_system = {}
         for it in items:
             game = it.get("game")
-            if not (game and game.get("listed") and it.get("output")):
-                it["deployTargets"] = []
-                continue
-            system = game["system"]
-            if system not in by_system:
-                by_system[system] = self._homebrew_targets(system)
-            it["deployTargets"] = by_system[system]
+            if game and game.get("listed"):
+                system = game["system"]
+                if system not in by_system:
+                    by_system[system] = self._homebrew_targets(system)
+                it["sendTargets"] = by_system[system]
+            else:
+                it["sendTargets"] = []
         return items
 
     def _homebrew_targets(self, system):
@@ -3596,12 +3606,113 @@ class Handler(http.server.BaseHTTPRequestHandler):
             targets.append({"id": node, "name": "Lab" if node == "lab" else (cfg.get("NODE_NAME") or node), "kind": kind})
         return targets
 
-    def _handle_homebrew_deploy_stream(self, qs):
-        """GET /homebrew/deploy/stream?id=<item>&node=<node> -> SSE. Publishes the item's last
-        build output into the Lab library under its catalogue name (a variant of the game),
-        rescans Lab, then (for any other node) runs the catalogue send, which copies it and
-        rescans that node. Same line/step/done events as the build stream."""
+    def _handle_homebrew_params(self, qs):
+        """PUT /homebrew/params?id=<item> {values: {KEY: value}} -> the updated item."""
+        item = homebrew.find(self._repo_root(), (qs.get("id") or [""])[0])
+        if not item:
+            self._send(404, {"error": "no such homebrew item"}); return
+        body = self._read_json_body()
+        if body is None:
+            return
+        values = body.get("values") or {}
+        if not isinstance(values, dict):
+            self._send(400, {"error": "values must be an object"}); return
+        try:
+            homebrew.save_params(self._repo_root(), item, {str(k): str(v) for k, v in values.items()})
+        except ValueError as e:
+            self._send(400, {"error": str(e)}); return
+        self._send(200, homebrew.find(self._repo_root(), item["id"]))
+
+    def _handle_homebrew_start(self, item_id):
+        """POST /homebrew/start?id=<item>: open the item's last build output where it was built
+        (its dev tree, no rebuild, nothing copied) in the desktop emulator for its system."""
+        item = homebrew.find(self._repo_root(), item_id)
+        if not item:
+            self._send(404, {"error": "no such homebrew item"}); return
+        out = homebrew.last_output(item["id"])
+        if not out:
+            self._send(400, {"error": "nothing built yet: run Build first"}); return
+        game = item.get("game")
+        if not game:
+            self._send(400, {"error": "no CATALOGUE file, so the system (and its emulator) is unknown"}); return
+        self._send(*self._launch_desktop(game["system"], out["path"]))
+
+    def _homebrew_script(self, item, action, emit):
+        """Run build.sh / deploy.sh, streaming output. ##STEP: -> step, ##OUTPUT: -> recorded.
+        True when it exits 0."""
+        try:
+            proc = homebrew.start(self._repo_root(), item, action)
+        except RuntimeError as e:
+            emit("line", "ERROR %s" % e)
+            return False
+        try:
+            for line in proc.stdout:
+                line = line.rstrip()
+                if line.startswith("##STEP:"):
+                    emit("step", line[7:])
+                elif line.startswith("##OUTPUT:"):
+                    homebrew.record_output(item["id"], line[9:].strip())
+                    emit("line", "output: %s" % line[9:].strip())
+                else:
+                    emit("line", line)
+            proc.wait()
+            if proc.returncode != 0:
+                emit("line", "[%s.sh exited %d]" % (action, proc.returncode))
+            return proc.returncode == 0
+        finally:
+            homebrew.finish(item["id"])
+
+    def _homebrew_publish(self, item, emit):
+        """Copy the item's last build output into the Lab library under its catalogue name (a
+        variant of the game) and rescan Lab. Returns the Lab file name."""
         import shutil
+        system = item["game"]["system"]
+        out = homebrew.last_output(item["id"])
+        roms = os.path.expanduser((self.__class__.config.get("ROMS_PATH") or "").strip())
+        if not roms:
+            raise catalogue_send.NotAvailable("ROMS_PATH is not set in pluto/.env: no Lab library to publish to")
+        name = homebrew.lab_filename(item, out["path"])
+        stem, ext = os.path.splitext(name)
+        emit("step", "publish")
+        if ext in catalogue_send.DISC_FOLDER:
+            # a disc: its own folder, the same layout a catalogue send writes (<stem>/<stem>.gdi + tracks)
+            folder = os.path.join(roms, system, "roms", stem)
+            if os.path.isdir(folder):
+                shutil.rmtree(folder)                            # a rebuild replaces its previous publish
+            files = [(src, stem + ext if is_desc else fname) for src, fname, is_desc in self._send_members(out["path"], ext)]
+            emit("line", "publish to Lab: %s/ (%d files)" % (stem, len(files)))
+            rel = stem + "/" + stem + ext
+        else:
+            folder = os.path.join(roms, system, "roms")
+            files = [(out["path"], name)]
+            emit("line", "publish to Lab: %s" % name)
+            rel = name
+        os.makedirs(folder, exist_ok=True)
+        for src, fname in files:
+            dest = os.path.join(folder, fname)
+            shutil.copyfile(src, dest + ".part")
+            if os.path.getsize(dest + ".part") != os.path.getsize(src):
+                os.remove(dest + ".part")
+                raise catalogue_send.NotAvailable("copy size mismatch publishing %s to Lab" % fname)
+            os.replace(dest + ".part", dest)
+        emit("step", "sync")
+        if not self._catalogue_lock.acquire(timeout=120):
+            raise catalogue_send.NotAvailable("the catalogue is busy (a sync or send is running)")
+        try:
+            catalogue.sync(
+                self._catalogue_root(), system, self.__class__.consoles_config,
+                lambda n, argv, stdin=None: self._node_ssh(n, argv, timeout=600, connect_timeout=10, stdin=stdin),
+                self._catalogue_saves, lambda line: emit("line", line),
+                datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                lab_roms=roms, sd_nodes=self._catalogue_sd_nodes(), only=["lab"])
+        finally:
+            self._catalogue_lock.release()
+        return rel
+
+    def _handle_homebrew_stream(self, qs):
+        """GET /homebrew/stream?id=<item>[&node=<node>] -> SSE. Build, then (for a game in the
+        catalogue) publish to Lab and sync; with node, send it there too. Events: 'line',
+        'step', 'media' (the game's Media path, after a send), 'done' ok | failed."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -3621,118 +3732,43 @@ class Handler(http.server.BaseHTTPRequestHandler):
             emit("line", "ERROR " + why)
             emit("done", "failed")
 
-        item = homebrew.find(self._repo_root(), (qs.get("id") or [""])[0])
+        items = {i["id"]: i for i in self._homebrew_items()}
+        item = items.get((qs.get("id") or [""])[0])
         node = (qs.get("node") or [""])[0]
         if not item:
             return fail("no such homebrew item")
-        game = item.get("game")
-        if not (game and game.get("listed")):
-            return fail("%s has no CATALOGUE game, so it can't go through the catalogue" % item["id"])
-        out = item.get("output")
-        if not out:
-            return fail("nothing built yet: run Build first")
-        system = game["system"]
-        if node not in {t["id"] for t in self._homebrew_targets(system)}:
-            return fail("%s can't take %s games" % (node or "that node", system))
-        roms = os.path.expanduser((self.__class__.config.get("ROMS_PATH") or "").strip())
-        if not roms:
-            return fail("ROMS_PATH is not set in pluto/.env: no Lab library to publish to")
-        print("  [HOMEBREW:deploy] %s -> %s" % (item["id"], node))
+        if node and node not in {t["id"] for t in item["sendTargets"]}:
+            return fail("%s can't be sent to %s" % (item["id"], node))
+        print("  [HOMEBREW] %s%s" % (item["id"], " -> " + node if node else ""))
         try:
-            name = homebrew.lab_filename(item, out["path"])
-            dest = os.path.join(roms, system, "roms", name)
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            emit("step", "publish")
-            emit("line", "publish to Lab: %s" % name)
-            shutil.copyfile(out["path"], dest + ".part")
-            if os.path.getsize(dest + ".part") != os.path.getsize(out["path"]):
-                os.remove(dest + ".part")
-                return fail("copy size mismatch")
-            os.replace(dest + ".part", dest)
-
-            emit("step", "sync")
-            if not self._catalogue_lock.acquire(timeout=120):
-                return fail("the catalogue is busy (a sync or send is running)")
-            try:
-                catalogue.sync(
-                    self._catalogue_root(), system, self.__class__.consoles_config,
-                    lambda n, argv, stdin=None: self._node_ssh(n, argv, timeout=600, connect_timeout=10, stdin=stdin),
-                    self._catalogue_saves, lambda line: emit("line", line),
-                    datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    lab_roms=roms, sd_nodes=self._catalogue_sd_nodes(), only=["lab"])
-            finally:
-                self._catalogue_lock.release()
-
-            if node != "lab":
+            emit("step", "build")
+            if not self._homebrew_script(item, "build", emit):
+                emit("done", "failed:build"); return
+            game = item.get("game")
+            listed = bool(game and game.get("listed"))
+            name = None
+            if listed and homebrew.last_output(item["id"]):
+                name = self._homebrew_publish(item, emit)
+            elif not listed:
+                emit("line", "not in the catalogue (no CATALOGUE file): built only")
+            if node:
                 emit("step", "send")
-                result = self._catalogue_send_run(system, {"node": node, "path": name}, lambda line: emit("line", line))
-                if result.get("status") == "command":
-                    emit("line", "run this in Terminal to finish: " + result["command"])
+                if not name:
+                    return fail("nothing to send: the build announced no output (##OUTPUT:)")
+                if node == "lab":
+                    emit("line", "in the Lab library: %s" % name)
+                else:
+                    result = self._catalogue_send_run(game["system"], {"node": node, "path": name},
+                                                      lambda line: emit("line", line))
+                    if result.get("status") == "command":
+                        emit("line", "run this in Terminal to finish: " + result["command"])
+                if listed:
+                    emit("media", "/media/%s/%s" % (game["system"], game["key"]))
             emit("done", "ok")
         except catalogue_send.NotAvailable as exc:
             fail(str(exc))
         except Exception as exc:
-            fail("deploy crashed: %s" % exc)
-
-    def _handle_homebrew_params(self, qs):
-        """PUT /homebrew/params?id=<item> {values: {KEY: value}} -> the updated item."""
-        item = homebrew.find(self._repo_root(), (qs.get("id") or [""])[0])
-        if not item:
-            self._send(404, {"error": "no such homebrew item"}); return
-        body = self._read_json_body()
-        if body is None:
-            return
-        values = body.get("values") or {}
-        if not isinstance(values, dict):
-            self._send(400, {"error": "values must be an object"}); return
-        try:
-            homebrew.save_params(self._repo_root(), item, {str(k): str(v) for k, v in values.items()})
-        except ValueError as e:
-            self._send(400, {"error": str(e)}); return
-        self._send(200, homebrew.find(self._repo_root(), item["id"]))
-
-    def _handle_homebrew_stream(self, qs):
-        """GET /homebrew/stream?id=<item>&action=build|run|deploy -> SSE: 'line' per output
-        line, 'step' for ##STEP:<name> lines, then 'done' with ok | failed:<why>."""
-        item   = homebrew.find(self._repo_root(), (qs.get("id") or [""])[0])
-        action = (qs.get("action") or ["build"])[0]
-        if not item:
-            self._send(404, {"error": "no such homebrew item"}); return
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("X-Accel-Buffering", "no")
-        self._cors_headers()
-        self.end_headers()
-
-        def emit(event, data):
-            try:
-                self.wfile.write(("event: %s\ndata: %s\n\n" % (event, data)).encode("utf-8"))
-                self.wfile.flush()
-            except Exception:
-                pass
-
-        print("  [HOMEBREW:%s] %s" % (action, item["id"]))
-        try:
-            proc = homebrew.start(self._repo_root(), item, action)
-        except RuntimeError as e:
-            emit("done", "failed:%s" % e); return
-        try:
-            for line in proc.stdout:
-                line = line.rstrip()
-                if line.startswith("##STEP:"):
-                    emit("step", line[7:])
-                elif line.startswith("##OUTPUT:"):
-                    homebrew.record_output(item["id"], line[9:].strip())
-                    emit("output", line[9:].strip())
-                else:
-                    emit("line", line)
-            proc.wait()
-            emit("done", "ok" if proc.returncode == 0 else "failed:%d" % proc.returncode)
-        except Exception as e:
-            emit("done", "failed:%s" % e)
-        finally:
-            homebrew.finish(item["id"])
+            fail("crashed: %s" % exc)
 
     # ── Media catalogue ─────────────────────────────────────────────────────────
     # Data lives in <repo>/catalogue (its own private repo, gitignored); the logic in
@@ -3849,23 +3885,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"ok": True}); return
         if node != "lab":
             self._send(400, {"error": "remote boot is not available on %s yet" % node}); return
+        path = self._lab_rom(system, rel)
+        if not path:
+            self._send(400, {"error": "not a lab ROM"}); return
+        self._send(*self._launch_desktop(system, path))
+
+    def _launch_desktop(self, system, path):
+        """Open a ROM in the system's associated desktop emulator on this Mac (config/consoles.json
+        systems.<x>.emulator, else defaultEmulator). -> (status, body) for _send."""
         cfg = self.__class__.consoles_config
         key = ((cfg.get("systems") or {}).get(system) or {}).get("emulator") or cfg.get("defaultEmulator")
         emu = (cfg.get("emulators") or {}).get(key or "")
         if not emu:
-            self._send(400, {"error": "no emulator associated with %s" % system}); return
-        path = self._lab_rom(system, rel)
-        if not path:
-            self._send(400, {"error": "not a lab ROM"}); return
+            return 400, {"error": "no emulator associated with %s" % system}
         if platform.system() != "Darwin":
-            self._send(501, {"error": "desktop emulator launch is macOS only"}); return
+            return 501, {"error": "desktop emulator launch is macOS only"}
         cmd = ["open", "-a", emu["app"]]
         cmd += (["--args"] + [a.replace("{rom}", path) for a in emu["args"]]) if emu.get("args") else [path]
         r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         if r.returncode != 0:
-            self._send(502, {"error": (r.stdout or "open failed").strip()}); return
+            return 502, {"error": (r.stdout or "open failed").strip()}
         print("  [PLAY:%s] %s" % (key, path))
-        self._send(200, {"ok": True})
+        return 200, {"ok": True}
 
     def _handle_catalogue_open(self, system, rel):
         """Open a lab ROM's folder on this host (the lab node has no SMB share: it IS this
@@ -3982,7 +4023,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ctx = {"target": target, "system": system, "locate": locate, "emit": emit,
                "command": lambda args: self._admin_command(target, args),
                "rom_ext": lambda src: os.path.splitext(src.get("inner") or src["path"])[1], "unpack": kind == "sd",
-               "card": self._send_dest(kind, target, target_cfg, system) if kind in ("local", "batocera", "sd") else None}
+               "card": self._send_dest(kind, target, target_cfg, system) if kind in ("local", "batocera", "sd") else None,
+               "members": self._send_members}
         try:
             result = catalogue_send.STRATEGIES[kind](plan, ctx)
         finally:
@@ -4035,7 +4077,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return r.returncode, r.stdout.decode("utf-8", "replace")
 
         # One remote write, the same for Batocera and the Pi: .part, size check, rename.
-        REMOTE_PUT = ('%s sh -c \'cat > "$1.part"\' _ "$1" && [ "$(stat -c %%s "$1.part")" = "$2" ] '
+        REMOTE_PUT = ('%s mkdir -p "$(dirname "$1")" && %s sh -c \'cat > "$1.part"\' _ "$1" && [ "$(stat -c %%s "$1.part")" = "$2" ] '
                       '&& %s mv "$1.part" "$1" || { %s rm -f "$1.part"; echo "size mismatch at the target"; exit 1; }')
 
         def rescan(only, **kw):
@@ -4061,6 +4103,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 with tempfile.TemporaryDirectory() as tmp:
                     local = fetch(src, tmp, False)
                     part = os.path.join(base, name + ".part")
+                    os.makedirs(os.path.dirname(part), exist_ok=True)     # a disc's own folder
                     try:
                         shutil.copyfile(local, part)
                         if os.path.getsize(part) != os.path.getsize(local):
@@ -4102,7 +4145,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 with tempfile.TemporaryDirectory() as tmp:
                     local = fetch(src, tmp, kind == "sd")
                     with open(local, "rb") as stream:
-                        rc, out = ssh_sh(host, REMOTE_PUT % (sudo, sudo, sudo), base + "/" + name,
+                        rc, out = ssh_sh(host, REMOTE_PUT % (sudo, sudo, sudo, sudo), base + "/" + name,
                                          str(os.path.getsize(local)), stdin=stream)
                 if rc != 0:
                     raise catalogue_send.NotAvailable("copy failed for %s: %s" % (name, out.strip()[-200:]))
@@ -4117,7 +4160,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
                          else "WARN could not unmount the card: %s" % out.strip()[-200:]]
                 return lines + rescan(node, sd_nodes=self._catalogue_sd_nodes())
 
-        return {"mount": mount, "exists": lambda name: name in state["have"], "put": put, "finish": finish}
+            def remove(rel):
+                """rm -rf one file or disc folder under the node's ROM root (no Trash there)."""
+                rc, out = ssh_sh(host, '%s rm -rf -- "$1"' % sudo, base + "/" + rel)
+                if rc != 0:
+                    raise catalogue_send.NotAvailable("could not delete %s on %s: %s" % (rel, node, out.strip()[-200:]))
+
+        card = {"mount": mount, "exists": lambda name: name in state["have"], "put": put, "finish": finish}
+        if kind != "local":
+            card["remove"] = remove
+        return card
+
+    def _send_members(self, src, ext):
+        """A .gdi/.cue disc as the files a send copies: [(source, file name, is_descriptor)].
+        src is what locate() returned: a local path or node:/path (read over SSH)."""
+        import shlex
+        m = re.match(r"^([A-Za-z0-9_.-]+):(/.*)$", src)
+        if m:
+            r = subprocess.run(["ssh", "-o", "ConnectTimeout=6", m.group(1), "cat " + shlex.quote(m.group(2))],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+            if r.returncode != 0:
+                raise catalogue_send.NotAvailable("could not read %s from %s" % (os.path.basename(m.group(2)), m.group(1)))
+            text = r.stdout.decode("utf-8", "replace")
+        else:
+            with open(src, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        tracks = catalogue_send.disc_tracks(text, ext)
+        if not tracks:
+            raise catalogue_send.NotAvailable("%s lists no track files" % os.path.basename(src))
+        folder = src.rsplit("/", 1)[0]
+        return [(src, src.rsplit("/", 1)[1], True)] + [(folder + "/" + t, t, False) for t in tracks]
 
     def _handle_catalogue_scan_post(self, system, node, body):
         """POST /catalogue/<system>/scan/<node> {files: [{path, size}]}: a node's complete game
@@ -4141,11 +4213,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, {"ok": True, "lines": lines})
 
     def _handle_catalogue_delete(self, system, game, node, rel):
-        """Delete a LAB copy: move it to this Mac's Trash (Finder, so Put Back works) and drop
-        it from the catalogue. A game in its own folder (.gdi/.cue + tracks) goes as the whole
-        folder, unless other catalogued games share that folder."""
+        """Delete a copy. Lab: move it to this Mac's Trash (Finder, so Put Back works). Another
+        node Media can send to (Batocera, an SD card): removed for good (no Trash there) through
+        the same writer a send uses, then rescanned. Either way it's dropped from the catalogue,
+        and a game in its own folder (.gdi/.cue + tracks) goes as the whole folder, unless other
+        catalogued games share that folder. Nodes that can't be written answer with why."""
         if node != "lab":
-            self._send(400, {"error": "deleting from %s is not available, only lab copies" % node}); return
+            self._delete_node_copy(system, game, node, rel); return
         path = self._lab_rom(system, rel)
         if not path:
             self._send(404, {"error": "no such file in the lab ROMs"}); return
@@ -4173,6 +4247,47 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._catalogue_lock.release()
         print("  [CATALOGUE:delete] %s -> Trash" % target)
         self._send(200, {"ok": True, "trashed": target})
+
+    def _delete_node_copy(self, system, game, node, rel):
+        import posixpath
+        if not re.match(r"^[A-Za-z0-9_.-]+$", system):
+            self._send(400, {"error": "bad system"}); return
+        clean = posixpath.normpath(rel.replace("\\", "/"))
+        if not rel or clean.startswith(("..", "/")) or clean == ".":
+            self._send(400, {"error": "bad path"}); return
+        doc = catalogue.store.load(self._catalogue_root(), system)
+        files = [f for g in doc["games"].values() for f in g["files"] if f["node"] == node]
+        copy = next((f for f in (doc["games"].get(game) or {}).get("files", []) if f["node"] == node and f["path"] == rel), None)
+        if copy is None:
+            self._send(404, {"error": "no such copy in the catalogue"}); return
+        cfg = (self.__class__.node_roster or {}).get(node) or {}
+        kind = catalogue_send.strategy_for(cfg, node)
+        if kind not in ("batocera", "sd"):
+            self._send(400, {"error": "%s can't delete games from here (no writable ROM folder)" % (cfg.get("NODE_NAME") or node)}); return
+        target = clean
+        if "/" in clean:
+            top = clean.split("/")[0]
+            if not [f for f in files if f["path"] != rel and f["path"].split("/")[0] == top]:
+                target = top                                          # the disc's own folder
+        try:
+            card = self._send_dest(kind, node, cfg, system)
+            card["mount"]()
+            try:
+                card["remove"](target)
+            finally:
+                card["finish"]()                                      # sd: flush + unmount; then rescan
+        except catalogue_send.NotAvailable as exc:
+            self._send(502, {"error": str(exc)}); return
+        if not self._catalogue_lock.acquire(timeout=60):
+            self._send(409, {"error": "deleted, but a catalogue sync is running: run Sync to refresh"}); return
+        try:
+            catalogue.forget_file(self._catalogue_root(), system, game, node, rel, removed_from_disk=True)
+        except ValueError:
+            pass                                                      # the rescan already dropped it
+        finally:
+            self._catalogue_lock.release()
+        print("  [CATALOGUE:delete] %s:%s" % (node, target))
+        self._send(200, {"ok": True, "deleted": "%s:%s" % (node, target)})
 
     def _handle_catalogue_forget(self, system, game, node, rel):
         """Remove one DELETED copy from the catalogue (it's gone from the node's disk)."""
