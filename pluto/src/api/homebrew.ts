@@ -6,7 +6,7 @@ const BASE = `${API_BASE}/homebrew`
 const enc = encodeURIComponent
 
 export type HomebrewKind = 'mods' | 'games' | 'tools'
-export type HomebrewAction = 'build' | 'run' | 'deploy'
+export type HomebrewAction = 'build'   // scripts present in the folder
 
 export interface HomebrewParam {
   key: string
@@ -38,7 +38,7 @@ export interface HomebrewOutput {
 export interface HomebrewTarget {
   id: string              // node id, "lab" first
   name: string
-  kind: string            // catalogue send strategy: local | batocera | sd
+  kind: string            // catalogue send strategy (batocera | sd), or "script" for deploy.sh
 }
 
 export interface HomebrewItem {
@@ -58,7 +58,7 @@ export interface HomebrewItem {
   release: HomebrewRelease | null   // from a RELEASE file: newest stable GitHub release
   game: HomebrewGame | null         // from the game's CATALOGUE file
   output: HomebrewOutput | null     // last build output, if the file still exists
-  deployTargets: HomebrewTarget[]   // catalogue send targets for the game's system (needs output)
+  sendTargets: HomebrewTarget[]     // nodes Send can take it to (catalogue send, or its deploy.sh)
 }
 
 async function json<T>(res: Response): Promise<T> {
@@ -84,14 +84,18 @@ export async function stopItem(id: string): Promise<boolean> {
   return (await json<{ stopped: boolean }>(await fetch(`${BASE}/stop?id=${enc(id)}`, { method: 'POST' }))).stopped
 }
 
-export async function openFolder(id: string): Promise<void> {
-  await json<{ opened: string }>(await fetch(`${BASE}/open?id=${enc(id)}`, { method: 'POST' }))
+// Start: the last build, straight from its dev tree (no rebuild, nothing copied), in the
+// system's desktop emulator. The API says why when it can't (nothing built, no emulator).
+export async function startItem(id: string): Promise<void> {
+  await json<{ ok: boolean }>(await fetch(`${BASE}/start?id=${enc(id)}`, { method: 'POST' }))
 }
 
-export function deployStreamUrl(id: string, node: string): string {
-  return `${BASE}/deploy/stream?id=${enc(id)}&node=${enc(node)}`
+// output: the last build's folder instead of the item's source folder
+export async function openFolder(id: string, output = false): Promise<void> {
+  await json<{ opened: string }>(await fetch(`${BASE}/open?id=${enc(id)}${output ? '&output=1' : ''}`, { method: 'POST' }))
 }
 
-export function streamUrl(id: string, action: HomebrewAction): string {
-  return `${BASE}/stream?id=${enc(id)}&action=${action}`
+// Build (no node): build, publish to Lab, sync. Send (node): the same, then send it there.
+export function streamUrl(id: string, node?: string): string {
+  return `${BASE}/stream?id=${enc(id)}${node ? `&node=${enc(node)}` : ''}`
 }

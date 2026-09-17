@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import RomCard from '../RomCard.vue'
 import type { Game, CatalogueFile } from '../../api/catalogue'
 import type { NodeMap } from '../../composables/useNodes'
 import { ICONS } from '../../composables/useIcons'
@@ -160,16 +161,27 @@ async function saveLabel() {
 }
 const focusEl = (el: unknown) => { if (el instanceof HTMLInputElement) el.focus() }
 
-const { canPlay, playTitle, canOpen, canQuit, play, quit, openFolder, actionError, sendTargets, canSend, send, sendCommand } =
+const { playTitle, play, quit, openFolder, actionError, sendTargets, send, sendCommand, sending } =
   useRomActions(toRef(props, 'system'), toRef(props, 'nodes'))
 watch(() => props.game.key, () => { sendCommand.value = '' })
 
-// A lab copy that's still on disk can be deleted: to the Mac's Trash, then out of the catalogue.
-async function deleteLab(f: CatalogueFile) {
-  if (!window.confirm(`Move "${fileName(f.path)}" to the Trash?`)) return
+// Which copy's card the last action came from: its error shows on that card.
+const active = ref<string | null>(null)
+const key = (f: CatalogueFile) => f.node + '|' + f.path
+function act(f: CatalogueFile, run: () => unknown) { active.value = key(f); actionError.value = ''; run() }
+watch(() => props.game.key, () => { active.value = null })
+
+// Delete: a Lab copy goes to the Trash, a copy on another node is removed for good (the confirm
+// says so). The API refuses what a node can't do, and its message shows on the card.
+async function deleteCopy(f: CatalogueFile) {
+  const where = nodeName(f.node)
+  const ask = f.node === 'lab'
+    ? `Move "${fileName(f.path)}" to the Trash?`
+    : `Delete "${fileName(f.path)}" from ${where}? There is no Trash there: it's gone for good.`
+  if (!window.confirm(ask)) return
   actionError.value = ''
   try {
-    await catalogueApi.deleteLab(props.system, props.game.key, f.path)
+    await catalogueApi.deleteCopy(props.system, props.game.key, f.node, f.path)
     emit('changed')
   } catch (e) {
     actionError.value = (e as Error).message
@@ -231,7 +243,7 @@ async function forget(f: CatalogueFile) {
       <UiSpinner v-if="uploading" :size="14" />
     </form>
     <p v-if="uploadError" class="gd__upload-err">{{ uploadError }}</p>
-    <p v-if="actionError" class="gd__upload-err">{{ actionError }}</p>
+    <p v-if="actionError && !active" class="gd__upload-err">{{ actionError }}</p>
     <AdminCommand v-if="sendCommand" title="Send to the PS2 drive from Terminal" :commands="[sendCommand]" @close="sendCommand = ''" />
 
     <section v-for="g in groups" :key="g.label" class="gd__sec">
@@ -244,46 +256,35 @@ async function forget(f: CatalogueFile) {
         </button>
       </div>
 
-      <div v-for="f in g.files" :key="f.node + f.path" class="gd__file" :class="{ 'is-deleted': f.status === 'deleted' }">
-        <div class="gd__file-main">
+      <RomCard
+        v-for="f in g.files" :key="f.node + f.path"
+        :deleted="f.status === 'deleted'" play quit open remove
+        :send-targets="sendTargets.filter(x => x.id !== f.node)" :send-busy="active === key(f) ? sending : null"
+        :play-title="playTitle(f)" :quit-title="'Quit the running game on ' + nodeName(f.node)"
+        :open-title="f.node === 'lab' ? 'Open folder' : 'Open folder (SMB)'"
+        :remove-title="f.node === 'lab' ? 'Delete: move to the Trash' : 'Delete from ' + nodeName(f.node)"
+        :error="active === key(f) ? actionError : null"
+        @play="act(f, () => play(f))" @quit="act(f, () => quit(f))" @open="act(f, () => openFolder(f))"
+        @send="id => act(f, () => send(f, id))" @remove="act(f, () => deleteCopy(f))" @forget="act(f, () => forget(f))"
+      >
+        <div class="gd__copy-head">
           <button class="gd__node-link" :title="'Open ' + nodeName(f.node) + ' in Network'" @click="openNode(f.node)">
             <img v-if="ICONS[f.node]" :src="ICONS[f.node]" class="gd__node-ic" alt="" />
             <span class="gd__node">{{ nodeName(f.node) }}</span>
           </button>
           <span v-if="f.card" class="gd__card" title="SD card this copy is on">{{ f.card }}</span>
-          <UiPill v-if="f.status === 'deleted'" tone="bad" :title="'Last seen ' + day(f.lastSeen)">Deleted</UiPill>
           <span v-if="f.version" class="gd__ver" title="Release version">v{{ f.version }}</span>
           <span v-if="version(f)" class="gd__ver" :title="g.kind === 'original' ? '' : KIND_LABEL[g.kind] + ' version'">{{ g.kind === 'original' ? '' : KIND_LABEL[g.kind].toLowerCase() + ' ' }}v{{ version(f) }}</span>
           <span v-if="f.save.length" class="gd__save" :title="'Save on ' + f.save.map(nodeName).join(', ')">Save</span>
-          <UiIconButton v-if="canPlay(f)" class="gd__open" :title="playTitle(f)" @click="play(f)">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a.8.8 0 0 0 1.2.7l10.4-6.5a.8.8 0 0 0 0-1.4L9.2 4.8A.8.8 0 0 0 8 5.5z"/></svg>
-          </UiIconButton>
-          <UiIconButton v-if="canQuit(f)" title="Quit the running game" @click="quit(f)">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-          </UiIconButton>
-          <UiIconButton v-if="canOpen(f)" :class="{ 'gd__open': !canPlay(f) }" :title="f.node === 'lab' ? 'Open folder' : 'Open folder (SMB)'" @click="openFolder(f)">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-          </UiIconButton>
-          <template v-if="canSend(f)">
-            <UiIconButton v-for="t in sendTargets.filter(x => x.id !== f.node)" :key="t.id" :class="{ 'gd__open': !canPlay(f) && !canOpen(f) }" :title="'Send to ' + t.name" @click="send(f, t.id)">
-              <img v-if="ICONS[t.id]" :src="ICONS[t.id]" class="gd__send-ic" alt="" />
-              <span v-else>{{ t.name }}</span>
-            </UiIconButton>
-          </template>
-          <UiIconButton v-if="f.status === 'present' && f.node === 'lab'" title="Delete: move to the Trash" @click="deleteLab(f)">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
-          </UiIconButton>
-          <UiIconButton v-if="f.status === 'deleted'" class="gd__open" title="Remove from the catalogue" @click="forget(f)">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
-          </UiIconButton>
+          <UiPill v-if="f.status === 'deleted'" tone="bad" class="gd__right" :title="'Last seen ' + day(f.lastSeen)">Deleted</UiPill>
         </div>
-        <p class="gd__path" :title="f.path">{{ fileName(f.path) }}</p>
+        <p class="gd__path" :class="{ 'is-gone': f.status === 'deleted' }" :title="f.path">{{ fileName(f.path) }}</p>
         <p class="gd__meta">
           <span v-for="r in f.regions" :key="r" class="gd__region">{{ r }}</span>
           <span v-if="f.id">{{ f.id }}</span>
           <span v-if="f.status === 'deleted'">last seen {{ day(f.lastSeen) }}</span>
         </p>
-      </div>
+      </RomCard>
     </section>
 
     <section v-if="game.physical.length" class="gd__sec">
@@ -364,13 +365,15 @@ async function forget(f: CatalogueFile) {
 .gd__node { font-size: 13px; font-weight: 600; color: var(--text); }
 .gd__ver { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 .gd__save { font-size: 11px; font-weight: 600; color: var(--ok); }
-.gd__open { margin-left: auto; }
+.gd__path.is-gone { text-decoration: line-through; color: var(--text-faint); }
+.gd__copy-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-height: 22px; }
+.gd__right { margin-left: auto; }
+
 .gd__label-edit { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
 .gd__label-hint { margin: 6px 0 0; font-size: 11.5px; color: var(--text-faint); }
 .gd__label-input { flex: 1; min-width: 0; font: inherit; font-size: 12.5px; padding: 5px 8px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-sm); }
 .gd__label-input:focus { outline: none; border-color: var(--accent); }
 .gd__path { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin: 4px 0 0; word-break: break-all; }
-.gd__send-ic { width: 18px; height: 18px; object-fit: contain; }
 .gd__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0 0; font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
 .gd__meta:empty { display: none; }
 .gd__notes { font-size: 12px; color: var(--text-muted); margin: 4px 0 0; }

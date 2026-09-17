@@ -5,8 +5,7 @@ Convention (one naming, scripts are free to differ):
     nodes/local/<node>/homebrew/games/<game>/build.sh         -> kind "games"
     nodes/local/<node>/homebrew/tools/<tool>/build.sh         -> kind "tools"
 
-A folder is an item when it has build.sh. Optional run.sh / deploy.sh beside it become
-actions. Parameters come from .env.sample files: a mod gets its game's (mods/<game>/, shared
+A folder is an item when it has build.sh. Parameters come from .env.sample files: a mod gets its game's (mods/<game>/, shared
 by every mod of that game, e.g. the base ROM path) plus its own; each value is saved to the
 .env beside the sample it came from, which every repo gitignores. A mod's own key wins over
 a game key of the same name.
@@ -34,7 +33,7 @@ import json
 from urllib.request import urlopen, Request
 
 KINDS = ("mods", "games", "tools")
-ACTIONS = ("build", "run", "deploy")
+ACTIONS = ("build",)                  # sending is the catalogue job, never a per-item script
 _KEY = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 
 _STAGE = re.compile(r"(alpha|beta|rc|pre)", re.I)
