@@ -88,8 +88,9 @@ def best_match(game, art_names):
     return sorted(pool, key=lambda n: (-len(_tags(n) & want), len(n), n))[0]
 
 
-def _index(root, system, repo, opener, timeout):
-    p = os.path.join(_dir(root, system), "_index.json")
+def _index(root, system, repo, opener, timeout, fallback=False):
+    # the system's own repo keeps _index.json; a fallback repo gets its own cache file
+    p = os.path.join(_dir(root, system), "_index-%s.json" % repo if fallback else "_index.json")
     if os.path.exists(p):
         with open(p) as f:
             return json.load(f)
@@ -198,7 +199,8 @@ def download(url, opener=urlopen, timeout=20, limit=10 * 1024 * 1024):
 
 
 def fetch(root, system, game, repo, opener=urlopen, timeout=10):
-    """Uploaded art, else try each candidate; cache the first hit (or a .miss). -> path or None."""
+    """Uploaded art, else try each candidate; cache the first hit (or a .miss). -> path or None.
+    repo may be a list: the system's own repo, then fallbacks tried in order (Naomi -> Dreamcast)."""
     mine = custom(root, system, game["key"])
     if mine:
         return mine
@@ -208,15 +210,31 @@ def fetch(root, system, game, repo, opener=urlopen, timeout=10):
     d = _dir(root, system)
     if not os.path.isdir(d):
         os.makedirs(d)
-    tries = candidates(game) if repo else []
-    art = _index(root, system, repo, opener, timeout) if repo else None
+    repos = [r for r in (repo if isinstance(repo, list) else [repo]) if r]
+    flaky = False                            # a non-404 failure: don't record a miss we can't be sure of
+    all_indexed = True
+    for i, repo in enumerate(repos):
+        path, repo_flaky, indexed = _fetch_from(root, system, game, repo, d, opener, timeout, fallback=i > 0)
+        if path:
+            return path
+        flaky = flaky or repo_flaky
+        all_indexed = all_indexed and indexed
+    if repos and not flaky and all_indexed:   # only a clean "not there" everywhere is a miss
+        open(os.path.join(d, game["key"] + ".miss"), "w").close()
+    return None
+
+
+def _fetch_from(root, system, game, repo, d, opener, timeout, fallback=False):
+    """One thumbnails repo. -> (path or None, transient error seen, index loaded)."""
+    tries = candidates(game)
+    art = _index(root, system, repo, opener, timeout, fallback)
     if art is not None:
         have = set(art)
         tries = [n for n in tries if n in have]
         best = best_match(game, art)
         if best and best not in tries:
             tries.append(best)
-    flaky = False                            # a non-404 failure: don't record a miss we can't be sure of
+    flaky = False
     for name in tries:
         data, err = _get(opener, BASE % (repo, quote(name)), timeout)
         flaky = flaky or err
@@ -231,10 +249,8 @@ def fetch(root, system, game, repo, opener=urlopen, timeout=10):
             with open(path + ".tmp", "wb") as f:
                 f.write(data)
             os.replace(path + ".tmp", path)
-            return path
-    if repo and not flaky and art is not None:   # only a clean "not there" is a miss
-        open(os.path.join(d, game["key"] + ".miss"), "w").close()
-    return None
+            return path, flaky, art is not None
+    return None, flaky, art is not None
 
 
 def _get(opener, url, timeout):

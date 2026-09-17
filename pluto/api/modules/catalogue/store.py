@@ -271,8 +271,11 @@ def load_kinds(root):
 
 
 def load_hardware(root):
-    """Consoles you physically own, {"consoles": {system: {"status", "notes"}}} (hardware.json).
-    status/notes are free text and only record what's missing or wrong. Accessories later."""
+    """Hardware you physically own (hardware.json):
+    {"consoles": {system: {"model", "region", "status", "notes"}},
+     "peripherals": [{"name", "model", "systems": [system...], "count", "storage", "status", "notes"}]}
+    Peripherals = flashcarts/ODEs, memory cards, controllers and other input (systems empty =
+    general purpose). status/notes are free text and only record what's missing or wrong."""
     p = os.path.join(root, "hardware.json")
     if not os.path.exists(p):
         return {"consoles": {}}

@@ -2258,7 +2258,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/translate/projects"), ("GET", "/translate/systems"), ("GET", "/translate/games"),
         ("GET", "/translate/extract"), ("GET", "/translate/sources"), ("GET", "/translate/meta"),
         ("GET", "/translate/{game}/textures"), ("GET", "/translate/{game}"),
-        ("GET", "/catalogue"), ("GET", "/catalogue/sync/stream"), ("GET", "/catalogue/search"), ("GET", "/catalogue/{system}/send/stream"), ("GET", "/catalogue/missing-covers"), ("GET", "/catalogue/physical-only"),
+        ("GET", "/catalogue"), ("GET", "/catalogue/sync/stream"), ("GET", "/catalogue/search"), ("GET", "/catalogue/{system}/send/stream"), ("GET", "/catalogue/missing-covers"), ("GET", "/catalogue/physical-only"), ("GET", "/catalogue/hardware"),
         ("GET", "/catalogue/{system}"),
         ("GET", "/catalogue/{system}/cover/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
@@ -2327,6 +2327,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, catalogue.search(self._catalogue_root(), (qs.get("q") or [""])[0]))
         elif parsed.path == "/catalogue/missing-covers":
             self._send(200, catalogue.missing_covers(self._catalogue_root()))
+        elif parsed.path == "/catalogue/hardware":
+            self._send(200, catalogue.hardware_list(self._catalogue_root()))
         elif parsed.path == "/catalogue/physical-only":
             self._send(200, catalogue.physical_only(self._catalogue_root()))
 

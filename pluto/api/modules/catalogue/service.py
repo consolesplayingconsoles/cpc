@@ -66,6 +66,11 @@ def systems(root):
                         "physical": sum(1 for g in view["games"] if g["physical"]),
                         "favourite": system in fav_systems,
                         "owned": system in consoles, "hardware": consoles.get(system)})
+    # consoles you own but have no games of in the catalogue still get a tile
+    listed = {o["system"] for o in out}
+    for system in sorted(set(consoles) - listed):
+        out.append({"system": system, "games": 0, "nodes": [], "physical": 0,
+                    "favourite": system in fav_systems, "owned": True, "hardware": consoles[system]})
     return out
 
 
@@ -120,7 +125,10 @@ def system_view(root, system):
         g["cover"] = c if c in ("custom", "miss") else ("cached" if c else None)
         out.append(g)
     out.sort(key=lambda g: names.key(g["title"]))
-    return {"system": system, "games": out, "syncedAt": doc.get("syncedAt")}
+    hw = store.load_hardware(root)
+    hardware = {"console": (hw.get("consoles") or {}).get(system),
+                "peripherals": [p for p in hw.get("peripherals") or [] if system in (p.get("systems") or [])]}
+    return {"system": system, "games": out, "syncedAt": doc.get("syncedAt"), "hardware": hardware}
 
 
 def cover(root, system, game_key, consoles_config, read_node_file=None):
@@ -149,7 +157,9 @@ def cover(root, system, game_key, consoles_config, read_node_file=None):
                 path = covers.save_cached(root, system, game_key, data) if data else None
                 if path:
                     return path
-    repo = ((consoles_config.get("systems") or {}).get(system) or {}).get("thumbnails")
+    cfg = (consoles_config.get("systems") or {}).get(system) or {}
+    # thumbnailsFallback: another system's art when this one's repo lacks the game (Naomi -> Dreamcast)
+    repo = [r for r in [cfg.get("thumbnails")] + list(cfg.get("thumbnailsFallback") or []) if r]
     return covers.fetch(root, system, game, repo)
 
 
@@ -178,6 +188,24 @@ def search(root, query):
         for g in system_view(root, system)["games"]:
             if any(q in names.key(t) for t in (g["title"], g.get("fileTitle") or "") if t):
                 out.append({"system": system, "key": g["key"], "title": g["title"], "kind": g["kind"]})
+    return {"games": out}
+
+
+def hardware_list(root):
+    """All your hardware for the grid's Hardware list, grouped by system on the client: each
+    console, then the peripherals made for it (one row per system it serves); peripherals
+    for no system in particular come under system "" (general purpose)."""
+    hw = store.load_hardware(root)
+    out = []
+    for system, c in sorted((hw.get("consoles") or {}).items()):
+        info = [c.get("region"), c.get("status"), c.get("notes")]
+        out.append({"system": system, "key": "console", "title": "Console" + (" " + c["model"] if c.get("model") else ""),
+                    "info": " · ".join(x for x in info if x)})
+    for i, p in enumerate(hw.get("peripherals") or []):
+        title = p.get("name", "") + (" ×%d" % p["count"] if (p.get("count") or 1) > 1 else "")
+        info = " · ".join(x for x in (p.get("model"), p.get("storage"), p.get("status"), p.get("notes")) if x)
+        for system in (p.get("systems") or [""]):
+            out.append({"system": system, "key": "peripheral-%d" % i, "title": title, "info": info})
     return {"games": out}
 
 
