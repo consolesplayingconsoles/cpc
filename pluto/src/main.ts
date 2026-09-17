@@ -26,6 +26,10 @@ const router = createRouter({
     { path: '/translation/:ns?', name: 'translation', component: Blank, meta: { hashtag: '#consolas-traduciendo-consolas' } },
     // Media: the game catalogue. :system/:game ride the URL so a reload keeps the open drawer.
     { path: '/media/:system?/:game?', name: 'media', component: Blank, meta: { hashtag: '#consoles-collecting-consoles' } },
+    // Homebrew: projects under nodes/local/<node>/homebrew. :kind is the sub-tab (mods |
+    // games | tools); :rest is the item (<node>/<game>/<mod> or <node>/<name>), so a reload
+    // keeps both open.
+    { path: '/homebrew/:kind?/:rest*', name: 'homebrew', component: Blank, meta: { hashtag: '#consoles-making-consoles' } },
     { path: '/dreame', redirect: '/control/dreame' },   // back-compat
     // Anything else falls back to the network view.
     { path: '/:pathMatch(.*)*', redirect: '/' },

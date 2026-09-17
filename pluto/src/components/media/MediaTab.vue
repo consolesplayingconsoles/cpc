@@ -13,6 +13,7 @@ import UiCopyButton from '../ui/UiCopyButton.vue'
 import Terminal, { type TerminalOutput } from '../Terminal.vue'
 import GameDrawer from './GameDrawer.vue'
 import AdminCommand from './AdminCommand.vue'
+import UiSubTabs from '../ui/UiSubTabs.vue'
 import { useAchievement } from '../../composables/useAchievement'
 import { useRomActions } from '../../composables/useRomActions'
 
@@ -588,10 +589,15 @@ const termStyle = computed(() => ({
         </span>
       </div>
       <!-- tabs share the toolbar's search and filters; active filters sit on the right as pills -->
-      <nav class="md__kinds">
-        <button class="md__kind-tab" :class="{ 'is-on': kindTab === 'game' }" @click="kindTab = 'game'">Games <span>{{ kindCount('game') }}</span></button>
-        <button class="md__kind-tab" :class="{ 'is-on': kindTab === 'tool' }" @click="kindTab = 'tool'">Tools <span>{{ kindCount('tool') }}</span></button>
-        <button class="md__kind-tab" :class="{ 'is-on': kindTab === 'hardware' }" @click="kindTab = 'hardware'">Hardware <span>{{ hardwareCount }}</span></button>
+      <UiSubTabs
+        :model-value="kindTab"
+        :tabs="[
+          { key: 'game', label: 'Games', count: kindCount('game') },
+          { key: 'tool', label: 'Tools', count: kindCount('tool') },
+          { key: 'hardware', label: 'Hardware', count: hardwareCount },
+        ]"
+        @update:model-value="kindTab = $event as typeof kindTab"
+      >
         <span v-if="activeFilters" class="md__pills">
           <button v-if="deletedOnly" class="md__pill" @click="deletedOnly = false">Deleted ✕</button>
           <button v-if="onlyDigital" class="md__pill" @click="onlyDigital = false">Digital copies ✕</button>
@@ -601,7 +607,7 @@ const termStyle = computed(() => ({
           <button v-if="onlyPhysical" class="md__pill" @click="onlyPhysical = false">Physical copies ✕</button>
           <button class="md__pill-clear" @click="onlyDigital = onlyPhysical = favOnly = onlySaved = deletedOnly = noCoverOnly = false">Clear all</button>
         </span>
-      </nav>
+      </UiSubTabs>
       <!-- stage = the non-scrolling frame: the drawer pins to it, the body scrolls inside -->
       <div class="md__stage">
       <div class="md__body md__body--list" @click="gameKey && go(system)">
@@ -717,11 +723,6 @@ const termStyle = computed(() => ({
 .md__hosts { display: inline-flex; align-items: center; gap: 8px; margin-right: var(--sp-2); }
 .md__hosts img { width: 22px; height: 22px; object-fit: contain; }
 .md__hosts img.is-idle { opacity: 0.35; filter: grayscale(1); }
-.md__kinds { display: flex; align-items: center; gap: var(--sp-4); padding: 0 var(--sp-5); background: var(--surface); border-bottom: 1px solid var(--line); }
-.md__kind-tab { font: inherit; font-size: 13px; font-weight: 600; padding: 8px 2px; color: var(--text-muted); background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer; }
-.md__kind-tab span { font-family: var(--font-mono); font-size: 11px; font-weight: 400; color: var(--text-faint); margin-left: 4px; }
-.md__kind-tab:hover { color: var(--text); }
-.md__kind-tab.is-on { color: var(--text); border-bottom-color: var(--accent); }
 
 .md__body { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-5) var(--sp-5) calc(var(--sp-5) + 80px); }   /* bottom: same room as the game list, clear of the mini chat */
 .md__stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -818,7 +819,6 @@ const termStyle = computed(() => ({
   .md__toolbar { flex-wrap: wrap; padding-left: var(--sp-4); padding-right: var(--sp-4); }
   .md__search { flex: 1 1 100%; }
   .md__group { flex: 1 1 0; width: auto; }
-  .md__kinds { flex-wrap: wrap; padding-left: var(--sp-4); padding-right: var(--sp-4); }
   /* systems grid: filter on its own full-width row, the two buttons share the next */
   .md__actions { flex-wrap: wrap; }
   .md__filter--grid { flex: 1 1 100%; width: 100%; }

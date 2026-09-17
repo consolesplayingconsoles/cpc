@@ -1097,7 +1097,7 @@ onMounted(() => {
           <span v-if="buildMsg" class="tt-build-msg" :class="{ 'tt-build-msg--fail': buildFailed }">{{ buildMsg }}</span>
           <UiButton class="tt-action" :loading="refreshing" loading-text="Refreshing…" :disabled="building || extracting"
                     title="Pull external edits (e.g. from Claude) saved to disk into the table" @click="refreshFromDisk">Refresh</UiButton>
-          <UiButton class="tt-action" :class="{ 'tt-dirty': dirty && !draftSaved && !saveError, 'tt-save-fail': saveError }" :disabled="building || extracting" @click="saveDraft">{{ saveError ? '⚠ Save failed — retry' : draftSaved ? 'Saved ✓' : (dirty ? 'Save draft •' : 'Save draft') }}</UiButton>
+          <UiButton class="tt-action" :class="{ 'tt-dirty': dirty && !draftSaved && !saveError, 'tt-save-fail': saveError }" :disabled="building || extracting" @click="saveDraft">{{ saveError ? '⚠ Save failed: retry' : draftSaved ? 'Saved ✓' : (dirty ? 'Save draft •' : 'Save draft') }}</UiButton>
           <UiButton variant="primary" :loading="building" :disabled="extracting" loading-text="Releasing…" @click="confirmBuild">Build &amp; release to Batocera</UiButton>
         </span>
       </div>
@@ -1151,8 +1151,8 @@ onMounted(() => {
       <table class="tt-table">
         <thead>
           <tr>
-            <th class="col-order" title="Disk / Story # — the scene's disk position and the story order you assign (floats up on save)">Disk/Story #</th>
-            <th class="col-offset" title="Offset — the line's byte position on the disc">Offset</th>
+            <th class="col-order" title="Disk / Story #: the scene's disk position and the story order you assign (floats up on save)">Disk/Story #</th>
+            <th class="col-offset" title="Offset: the line's byte position on the disc">Offset</th>
             <th v-if="showLegend" class="col-speaker">Speaker</th>
             <th class="col-jp">Japanese</th>
             <th class="col-ca">{{ langLabel || 'Catalan' }} <span class="col-ca-pct">{{ tabProg.done.toLocaleString() }}/{{ tabProg.total.toLocaleString() }} <strong>({{ tabProg.pct }}%)</strong></span></th>
@@ -1161,7 +1161,7 @@ onMounted(() => {
                 @click="toggleSortOverflow">
               Bytes <span class="col-bytes-sort">{{ sortMode === 'overflow' ? '▲ over' : '⇅' }}</span>
             </th>
-            <th class="col-done" title="Mark handled — kept as original Japanese">Done</th>
+            <th class="col-done" title="Mark handled: kept as original Japanese">Done</th>
           </tr>
         </thead>
         <tbody>
@@ -1174,10 +1174,10 @@ onMounted(() => {
               <td class="col-order disk-story">
                 <span class="scene-caret">{{ expanded.has(item.scene) ? '▾' : '▸' }}</span>
                 <span class="scene-id mono">{{ item.scene }}/</span>
-                <input class="order-input" type="number" min="1" placeholder="—"
+                <input class="order-input" type="number" min="1" placeholder="-"
                        :class="{ dup: sceneOrder(item.scene) != null && dupStoryOrders.has(sceneOrder(item.scene)!) }"
                        :value="sceneOrder(item.scene)" @change="setSceneOrder(item.scene, $event)" @click.stop
-                       title="Story Scene number — unique; reorders scenes on save" />
+                       title="Story Scene number: unique; reorders scenes on save" />
               </td>
               <td class="col-offset mono">{{ item.offset }}</td>
               <td v-if="showLegend" class="col-speaker">
