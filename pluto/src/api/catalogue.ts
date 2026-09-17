@@ -53,7 +53,13 @@ export interface SystemSummary {
   tools: number; translations: number; mods: number   // tools count inside games
   favourite: boolean; owned: boolean; hardware?: { status?: string; notes?: string } | null
 }
-export interface SystemView { system: string; games: Game[]; hosts: string[]; syncedAt: string | null }
+// catalogue/hardware.json: your console for this system and the peripherals made for it
+export interface HardwareConsole { model?: string; region?: string; status?: string; notes?: string }
+export interface Peripheral { name: string; model?: string; systems: string[]; count?: number; storage?: string; status?: string; notes?: string }
+export interface SystemView {
+  system: string; games: Game[]; hosts: string[]; syncedAt: string | null
+  hardware?: { console: HardwareConsole | null; peripherals: Peripheral[] }
+}
 
 async function getJson<T>(url: string): Promise<T> {
   const r = await fetch(url)
@@ -61,7 +67,7 @@ async function getJson<T>(url: string): Promise<T> {
   return r.json() as Promise<T>
 }
 
-export interface MissingCover { system: string; key: string; title: string }
+export interface MissingCover { system: string; key: string; title: string; info?: string }
 export interface GameHit extends MissingCover { kind: 'game' | 'tool' }
 
 export const catalogueApi = {
@@ -72,6 +78,8 @@ export const catalogueApi = {
   search: (q: string) => getJson<{ games: GameHit[] }>(`${BASE}/search?q=${enc(q)}`),
   // games on a shelf with no digital copy on any node
   physicalOnly: () => getJson<{ games: MissingCover[] }>(`${BASE}/physical-only`),
+  // consoles + peripherals as grid rows (system "" = general purpose)
+  hardware: () => getJson<{ games: MissingCover[] }>(`${BASE}/hardware`),
   setSystemFavourite: async (system: string, on: boolean) => {
     const r = await fetch(`${BASE}/${enc(system)}/favourite-system`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }),

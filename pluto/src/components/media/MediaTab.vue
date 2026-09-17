@@ -77,10 +77,11 @@ watch(() => props.active, (a) => { if (a) load() }, { immediate: true })
 // ── Cross-system game lists, grouped by system; click one -> its drawer.
 //   missing:  games with no image linked in the catalogue (local only)
 //   physical: games you own on a shelf with no digital copy on any node
-type ListMode = 'missing' | 'physical'
+//   hardware: your consoles and peripherals (rows open the system's page)
+type ListMode = 'missing' | 'physical' | 'hardware'
 const listMode = ref<ListMode | ''>('')
 const missingOpen = computed(() => listMode.value !== '')
-const lists = ref<Record<ListMode, MissingCover[] | null>>({ missing: null, physical: null })
+const lists = ref<Record<ListMode, MissingCover[] | null>>({ missing: null, physical: null, hardware: null })
 const missing = computed(() => listMode.value ? lists.value[listMode.value] : null)
 const missingLoading = ref(false)
 async function toggleList(mode: ListMode) {
@@ -88,7 +89,7 @@ async function toggleList(mode: ListMode) {
   if (!listMode.value || missingLoading.value) return
   missingLoading.value = true
   try {
-    const r = mode === 'missing' ? await catalogueApi.missingCovers() : await catalogueApi.physicalOnly()
+    const r = mode === 'missing' ? await catalogueApi.missingCovers() : mode === 'physical' ? await catalogueApi.physicalOnly() : await catalogueApi.hardware()
     lists.value[mode] = r.games
   } catch {
     apiError.value = 'Catalogue API unreachable'
@@ -96,14 +97,19 @@ async function toggleList(mode: ListMode) {
     missingLoading.value = false
   }
 }
+function setGridView(v: 'consoles' | 'hardware') {
+  if (v === 'hardware' && listMode.value !== 'hardware') toggleList('hardware')
+  if (v === 'consoles' && listMode.value) listMode.value = ''
+}
 // Per-system sections fold; big ones (MAME) start folded so the list stays scannable.
 const missingFolded = ref<Record<string, boolean>>({})
 const isFolded = (sys: string, n: number) => missingFolded.value[sys] ?? n > 20
 function toggleFold(sys: string, n: number) { missingFolded.value[sys] = !isFolded(sys, n) }
 const missingBySystem = computed(() => {
   const by = new Map<string, MissingCover[]>()
-  for (const m of missing.value ?? []) if (matchesSystem(m.system)) by.set(m.system, [...(by.get(m.system) ?? []), m])
-  return [...by.entries()].sort(([a], [b]) => systemName(a).localeCompare(systemName(b)))
+  for (const m of missing.value ?? []) if (!m.system || matchesSystem(m.system)) by.set(m.system, [...(by.get(m.system) ?? []), m])
+  // general-purpose hardware (system "") goes last
+  return [...by.entries()].sort(([a], [b]) => (a ? 0 : 1) - (b ? 0 : 1) || systemName(a).localeCompare(systemName(b)))
 })
 
 // Grid filter: system name, brand or folder key ("sega", "dreamcast", "ngpc"). It stays
@@ -163,6 +169,8 @@ const hitsBySystem = computed(() => {
 // plus the ones you starred); neither = all.
 const favSystemsOnly = ref(false)
 const ownedOnly = ref(true)                   // on by default: your own consoles first
+const gridFilters = computed(() => [favSystemsOnly.value, ownedOnly.value].filter(Boolean).length)
+const gridFilterOpen = ref(false)
 function keepSystem(s: SystemSummary) {
   if (!favSystemsOnly.value && !ownedOnly.value) return true
   return (favSystemsOnly.value && s.favourite) || (ownedOnly.value && s.owned)
@@ -204,7 +212,7 @@ const activeFilters = computed(() => [favOnly.value, onlyDigital.value, onlyPhys
 const filterOpen = ref(false)
 const sendMenuOpen = ref(false)
 function closeFilterMenu(e: MouseEvent) {
-  if (!(e.target as HTMLElement)?.closest?.('.md__filter-menu')) { filterOpen.value = false; sendMenuOpen.value = false }
+  if (!(e.target as HTMLElement)?.closest?.('.md__filter-menu')) { filterOpen.value = false; gridFilterOpen.value = false; sendMenuOpen.value = false }
 }
 onMounted(() => document.addEventListener('click', closeFilterMenu))
 onUnmounted(() => document.removeEventListener('click', closeFilterMenu))
@@ -246,10 +254,28 @@ function hostsFor(sys: string): string[] {
 const hostsWithGames = computed(() => new Set((view.value?.games ?? []).flatMap(g => g.nodes)))
 
 // A system page has two tabs: its games and its tools (Dreamkey, DreamShell...).
-const kindTab = ref<'game' | 'tool'>('game')
+const kindTab = ref<'game' | 'tool' | 'hardware'>('game')
+const hardwareCount = computed(() => hardwareGames.value.length)
 const kindCount = (k: 'game' | 'tool') => (view.value?.games ?? []).filter(g => (g.kind ?? 'game') === k).length
+// Hardware tab: the console + its peripherals shown through the SAME list as games (always list),
+// as game-shaped entries (title, region chip; model/storage/status in the subtitle).
+const hardwareGames = computed<Game[]>(() => {
+  const hw = view.value?.hardware
+  if (!hw) return []
+  const item = (key: string, title: string, sub: string[], region = ''): Game => ({
+    key, title, ids: [], files: [], physical: [], meta: {}, regions: region ? [region] : [], nodes: [], saves: [],
+    favourite: false, cover: 'miss', kind: 'game', hardwareInfo: sub.filter(Boolean).join(' · '),
+  } as unknown as Game)
+  const out: Game[] = []
+  if (hw.console) out.push(item('hw-console', systemName(system.value) + (hw.console.model ? ' ' + hw.console.model : ''),
+    [hw.console.status ?? '', hw.console.notes ?? ''], hw.console.region))
+  hw.peripherals.forEach((p, i) => out.push(item('hw-' + i, p.name + ((p.count ?? 1) > 1 ? ' ×' + p.count : ''),
+    [p.model ?? '', p.storage ?? '', p.status ?? '', p.notes ?? ''])))
+  return out
+})
 const games = computed<Game[]>(() => {
   const q = filter.value.trim().toLowerCase()
+  if (kindTab.value === 'hardware') return q ? hardwareGames.value.filter(g => g.title.toLowerCase().includes(q)) : hardwareGames.value
   const all = (view.value?.games ?? []).filter(g => (g.kind ?? 'game') === kindTab.value && (!favOnly.value || g.favourite) &&
     (!onlyDigital.value || g.files.some(f => f.status === 'present')) &&
     (!onlyPhysical.value || g.physical.length > 0) &&
@@ -269,6 +295,8 @@ function go(sys?: string, game?: string) {
 // "Original + 1 translation · 2 mods": the Original prefix only when variants exist too,
 // so "1 mod" alone means there's no original copy (present files only).
 function variantSummary(g: Game): string {
+  const hw = (g as Game & { hardwareInfo?: string }).hardwareInfo
+  if (hw !== undefined) return hw                       // Hardware tab rows: model · storage · status
   const mods = new Set<string>(), tls = new Set<string>()
   let original = false
   for (const f of g.files) {
@@ -374,43 +402,58 @@ const termStyle = computed(() => ({
   <div class="md">
     <!-- ── Grid: systems with games ── -->
     <template v-if="!system">
+      <!-- view toolbar, same look as a system page: search takes the room left -->
+      <div class="md__toolbar md__toolbar--grid">
+        <input v-model="systemFilter" class="md__filter md__search" type="search" placeholder="Search systems and games" />
+        <!-- same Filter menu + pills pattern as a system page -->
+        <span v-if="!missingOpen" class="md__filter-menu">
+          <UiButton :class="{ 'is-on': gridFilters }" @click.stop="gridFilterOpen = !gridFilterOpen">
+            Filter<template v-if="gridFilters"> · {{ gridFilters }}</template> ▾
+          </UiButton>
+          <div v-if="gridFilterOpen" class="md__menu md__menu--right" role="menu">
+            <label><input v-model="favSystemsOnly" type="checkbox" /> Favourites</label>
+            <label><input v-model="ownedOnly" type="checkbox" /> Owned consoles</label>
+          </div>
+        </span>
+        <!-- what the grid shows: consoles or your hardware, a select like a system page's Cards/List -->
+        <span class="md__view md__view--wide">
+          <UiSelect :model-value="listMode === 'hardware' ? 'hardware' : 'consoles'" @update:model-value="setGridView($event as 'consoles' | 'hardware')">
+            <option value="consoles">All consoles</option>
+            <option value="hardware">Hardware</option>
+          </UiSelect>
+        </span>
+        <UiButton class="md__action" :class="{ 'is-on': listMode === 'physical' }" @click="toggleList('physical')">
+          {{ listMode === 'physical' ? 'All systems' : 'Physical only' }}
+        </UiButton>
+        <UiButton class="md__action" :class="{ 'is-on': listMode === 'missing' }" @click="toggleList('missing')">
+          {{ listMode === 'missing' ? 'All systems' : 'Missing covers' }}<template v-if="lists.missing && listMode !== 'missing'"> ({{ lists.missing.length }})</template>
+        </UiButton>
+        <UiButton class="md__action" variant="primary" :loading="syncing" loading-text="Syncing…" @click="sync('*')">Sync all</UiButton>
+        <!-- Physical only shows covers too: same Cards/List choice as a system page -->
+        <span v-if="listMode === 'physical'" class="md__layout">
+          <UiIconButton variant="ghost" :active="layout === 'cards'" title="Cards" @click="setLayout('cards')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
+          </UiIconButton>
+          <UiIconButton variant="ghost" :active="layout === 'list'" title="List" @click="setLayout('list')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 6h14M5 12h14M5 18h14"/></svg>
+          </UiIconButton>
+        </span>
+      </div>
       <div class="md__body">
         <p v-if="systems.length" class="md__stats">{{ stats.join(' · ') }}</p>
-        <div class="md__actions">
-          <input v-model="systemFilter" class="md__filter md__filter--grid" type="search" placeholder="Search systems and games" />
-          <span v-if="!missingOpen" class="md__layout">
-            <UiIconButton variant="ghost" :active="favSystemsOnly" title="Favourite systems" @click="favSystemsOnly = !favSystemsOnly">
-              <svg width="15" height="15" viewBox="0 0 24 24" :fill="favSystemsOnly ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
-            </UiIconButton>
-            <UiIconButton variant="ghost" :active="ownedOnly" title="Consoles you own" @click="ownedOnly = !ownedOnly">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="7" width="18" height="10" rx="3"/><path d="M7 12h3M8.5 10.5v3"/><circle cx="15.5" cy="11" r="0.8" fill="currentColor"/><circle cx="17.5" cy="13" r="0.8" fill="currentColor"/></svg>
-            </UiIconButton>
-          </span>
-          <UiButton class="md__action" :class="{ 'is-on': listMode === 'physical' }" @click="toggleList('physical')">
-            {{ listMode === 'physical' ? 'All systems' : 'Physical only' }}
-          </UiButton>
-          <UiButton class="md__action" :class="{ 'is-on': listMode === 'missing' }" @click="toggleList('missing')">
-            {{ listMode === 'missing' ? 'All systems' : 'Missing covers' }}<template v-if="lists.missing && listMode !== 'missing'"> ({{ lists.missing.length }})</template>
-          </UiButton>
-          <UiButton class="md__action" variant="primary" :loading="syncing" loading-text="Syncing…" @click="sync('*')">Sync all</UiButton>
-          <!-- Physical only shows covers too: same Cards/List choice as a system page -->
-          <span v-if="listMode === 'physical'" class="md__layout">
-            <UiIconButton variant="ghost" :active="layout === 'cards'" title="Cards" @click="setLayout('cards')">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
-            </UiIconButton>
-            <UiIconButton variant="ghost" :active="layout === 'list'" title="List" @click="setLayout('list')">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 6h14M5 12h14M5 18h14"/></svg>
-            </UiIconButton>
-          </span>
-        </div>
+        <span v-if="!missingOpen && gridFilters" class="md__pills md__pills--grid">
+          <button v-if="favSystemsOnly" class="md__pill" @click="favSystemsOnly = false">Favourites ✕</button>
+          <button v-if="ownedOnly" class="md__pill" @click="ownedOnly = false">Owned consoles ✕</button>
+          <button class="md__pill-clear" @click="favSystemsOnly = ownedOnly = false">Clear all</button>
+        </span>
         <template v-if="missingOpen">
-          <p v-if="missingLoading" class="md__state"><UiSpinner /> {{ listMode === 'missing' ? 'Checking covers…' : 'Checking shelves…' }}</p>
-          <p v-else-if="missing && !missing.length" class="md__state">{{ listMode === 'missing' ? 'Every game has a cover.' : 'Every physical game has a digital copy.' }}</p>
+          <p v-if="missingLoading" class="md__state"><UiSpinner /> {{ listMode === 'missing' ? 'Checking covers…' : listMode === 'hardware' ? 'Loading hardware…' : 'Checking shelves…' }}</p>
+          <p v-else-if="missing && !missing.length" class="md__state">{{ listMode === 'missing' ? 'Every game has a cover.' : listMode === 'hardware' ? 'No hardware recorded.' : 'Every physical game has a digital copy.' }}</p>
           <section v-for="[sys, list] in missingBySystem" :key="sys" class="md__missing">
             <button class="md__section md__fold" :aria-expanded="!isFolded(sys, list.length)" @click="toggleFold(sys, list.length)">
               <svg class="md__fold-chev" :class="{ 'is-open': !isFolded(sys, list.length) }" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <img v-if="systemIcon(sys)" :src="systemIcon(sys)" class="md__missing-ic" alt="" />
-              {{ systemName(sys) }} <span>{{ list.length }}</span>
+              <img v-if="systemIcon(sys) || ICONS[sys]" :src="systemIcon(sys) || ICONS[sys]" class="md__missing-ic" alt="" />
+              {{ !sys ? 'General purpose' : SYSTEMS[sys] ? systemName(sys) : nodeName(sys) }} <span>{{ list.length }}</span>
             </button>
             <div v-if="!isFolded(sys, list.length) && listMode === 'physical' && layout === 'cards'" class="md__cards md__cards--mini">
               <div v-for="m in list" :key="m.key" class="md__card" role="button" tabindex="0" @click="go(m.system, m.key)" @keydown.enter="go(m.system, m.key)">
@@ -423,8 +466,9 @@ const termStyle = computed(() => ({
               </div>
             </div>
             <ul v-else-if="!isFolded(sys, list.length)" class="md__list">
-              <li v-for="m in list" :key="m.key" class="md__row" @click="go(m.system, m.key)">
+              <li v-for="m in list" :key="m.system + m.key" class="md__row" @click="listMode === 'hardware' ? (SYSTEMS[m.system] && go(m.system)) : go(m.system, m.key)">
                 <span class="md__title">{{ m.title }}</span>
+                <span v-if="m.info" class="md__variants">{{ m.info }}</span>
               </li>
             </ul>
           </section>
@@ -450,7 +494,7 @@ const termStyle = computed(() => ({
             <span v-else class="md__tile-ic md__tile-letter">{{ systemName(s.system).slice(0, 1) }}</span>
             <span class="md__tile-name">{{ systemName(s.system) }} <UiCopyButton :text="systemName(s.system)" title="Copy system name" /></span>
             <span class="md__tile-count">{{ s.games }} game{{ s.games === 1 ? '' : 's' }}<template v-if="s.physical"> · {{ s.physical }} physical</template></span>
-            <span class="md__tile-nodes">
+            <span v-if="s.nodes.length" class="md__tile-nodes">
               <img v-for="n in hostsFor(s.system)" :key="n" :src="ICONS[n]" alt=""
                    :class="{ 'is-idle': !s.nodes.includes(n) }"
                    :title="nodeName(n) + (s.nodes.includes(n) ? '' : ' (configured, no games yet)')" />
@@ -547,6 +591,7 @@ const termStyle = computed(() => ({
       <nav class="md__kinds">
         <button class="md__kind-tab" :class="{ 'is-on': kindTab === 'game' }" @click="kindTab = 'game'">Games <span>{{ kindCount('game') }}</span></button>
         <button class="md__kind-tab" :class="{ 'is-on': kindTab === 'tool' }" @click="kindTab = 'tool'">Tools <span>{{ kindCount('tool') }}</span></button>
+        <button class="md__kind-tab" :class="{ 'is-on': kindTab === 'hardware' }" @click="kindTab = 'hardware'">Hardware <span>{{ hardwareCount }}</span></button>
         <span v-if="activeFilters" class="md__pills">
           <button v-if="deletedOnly" class="md__pill" @click="deletedOnly = false">Deleted ✕</button>
           <button v-if="onlyDigital" class="md__pill" @click="onlyDigital = false">Digital copies ✕</button>
@@ -565,7 +610,7 @@ const termStyle = computed(() => ({
         <p v-else-if="loading && !view" class="md__state"><UiSpinner /> Loading…</p>
         <template v-for="sec in sections" :key="sec.label">
         <h3 v-if="sec.label" class="md__section">{{ sec.label }} <span>{{ sec.games.length }}</span></h3>
-        <div v-if="layout === 'cards'" class="md__cards">
+        <div v-if="layout === 'cards' && kindTab !== 'hardware'" class="md__cards">
           <div v-for="g in sec.games" :id="'media-row-' + g.key" :key="g.key"
                class="md__card" :class="{ 'is-open': g.key === gameKey, 'is-gone': onlyDeleted(g) }"
                role="button" tabindex="0"
@@ -605,7 +650,7 @@ const termStyle = computed(() => ({
         <ul v-else class="md__list">
           <li v-for="g in sec.games" :id="'media-row-' + g.key" :key="g.key"
               class="md__row" :class="{ 'is-open': g.key === gameKey, 'is-gone': onlyDeleted(g) }"
-              @click.stop="go(system, g.key)">
+              @click.stop="kindTab !== 'hardware' && go(system, g.key)">
             <span class="md__star" :class="{ 'is-on': g.favourite }">{{ g.favourite ? '★' : '' }}</span>
             <span class="md__title">{{ g.title }}</span>
             <span class="md__variants">{{ variantSummary(g) }}</span>
@@ -661,7 +706,9 @@ const termStyle = computed(() => ({
 .md__toolbar { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-5); background: var(--surface); border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .md__search { flex: 1 1 auto; width: auto; min-width: 0; }
 .md__view { width: 110px; flex: none; }
+.md__view--wide { width: 140px; }
 .md__pills { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; padding: 4px 0; }
+.md__pills--grid { justify-content: flex-end; margin: calc(-1 * var(--sp-2)) 0 var(--sp-3); }
 .md__pill { font: inherit; font-size: 12px; padding: 3px 10px; color: var(--accent); background: var(--accent-soft, var(--surface-2)); border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
 .md__pill-clear { font: inherit; font-size: 12px; color: var(--text-muted); background: none; border: 0; cursor: pointer; }
 .md__pill-clear:hover { color: var(--text); }

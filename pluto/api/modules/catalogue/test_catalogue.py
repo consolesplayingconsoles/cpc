@@ -891,6 +891,32 @@ def test_systems_carry_favourite_and_owned_console():
     assert store.load_favourites(root)["systems"] == []
 
 
+def test_cover_falls_back_to_another_systems_art():
+    root = tempfile.mkdtemp()
+    game = {"key": "virtua-tennis", "title": "Virtua Tennis", "files": [], "physical": [{"title": "Virtua Tennis"}]}
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 16
+    class R:
+        def __init__(self, data): self.data = data
+        def read(self): return self.data
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    def opener(req, timeout=None):
+        url = req.full_url
+        if "git/trees" in url:
+            names_ = ["Virtua Tennis (Europe)"] if "Dreamcast" in url else ["Other Game (Japan)"]
+            return R(json.dumps({"tree": [{"path": "Named_Boxarts/%s.png" % n} for n in names_]}).encode())
+        if "Dreamcast" in url and "Virtua%20Tennis" in url:
+            return R(png)
+        from urllib.error import HTTPError
+        raise HTTPError(url, 404, "nf", None, None)
+    path = covers.fetch(root, "naomi", game, ["Sega_-_Naomi", "Sega_-_Dreamcast"], opener)
+    assert path and path.endswith("naomi/covers/virtua-tennis.png")
+    assert sorted(os.listdir(os.path.join(root, "naomi", "covers"))) == ["_index-Sega_-_Dreamcast.json", "_index.json", "virtua-tennis.png"]
+    # nothing anywhere -> one clean miss
+    assert covers.fetch(root, "naomi", dict(game, key="nope", title="Nope", physical=[]), ["Sega_-_Naomi", "Sega_-_Dreamcast"], opener) is None
+    assert covers.cached(root, "naomi", "nope") == "miss"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
