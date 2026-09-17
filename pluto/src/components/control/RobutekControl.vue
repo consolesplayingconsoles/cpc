@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiSidePanel from '../ui/UiSidePanel.vue'
 import { ref, computed, watch, onBeforeUnmount, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import PetIcon from '../PetIcon.vue'
@@ -97,7 +98,6 @@ const selIdx = ref(0)
 watch(visible, () => { selIdx.value = 0 }, { flush: 'sync' })
 const sel = computed<Session | null>(() => visible.value[selIdx.value] ?? null)
 
-const collapsed = ref(false)   // table collapse-to-left
 
 // ── status labels ─────────────────────────────────────────────────
 // Defensive fallback only: the API now sends `status_human` (single source in
@@ -508,8 +508,8 @@ async function signIn() {
     <template #nw>
     <div class="rb-nw">
 
-      <!-- collapsible session table -->
-      <aside class="rb-table" :class="{ collapsed }">
+      <!-- collapsible, resizable session table -->
+      <UiSidePanel :width="280" storage-key="cpc.dreame.listWidth" label="list">
         <div class="rb-table-head">
           <span class="rb-table-title">Past Cleans</span>
           <label v-if="sweepCount" class="rb-toggle">
@@ -539,13 +539,8 @@ async function signIn() {
             {{ history.length ? 'no cleans match the filter' : loading ? 'loading…' : 'no cleans cached' }}
           </div>
         </div>
-      </aside>
+      </UiSidePanel>
 
-      <!-- collapse toggle: rides the table edge, stays on-screen when collapsed -->
-      <button class="rb-collapse" :style="{ left: collapsed ? '8px' : '268px' }"
-        @click="collapsed = !collapsed" :title="collapsed ? 'expand list' : 'collapse list'">
-        {{ collapsed ? '›' : '‹' }}
-      </button>
 
       <!-- route map -->
       <div class="rb-map">
@@ -765,13 +760,6 @@ async function signIn() {
 .rb-nw { position: relative; display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 
 /* table */
-.rb-table {
-  position: relative; width: 280px; flex-shrink: 0; display: flex; flex-direction: column;
-  background: var(--surface); border-right: 1px solid var(--line);
-  overflow: hidden; transition: width 0.18s ease;
-}
-.rb-table.collapsed { border-right: 0; }
-.rb-table.collapsed { width: 0; }
 .rb-table-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line);
@@ -799,13 +787,6 @@ async function signIn() {
 .rb-row-id-line { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .rb-row-id { flex: 0 1 auto; min-width: 0; font-size: 10px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rb-empty { padding: var(--sp-5) var(--sp-4); font-size: 13px; color: var(--text-muted); text-align: center; }
-.rb-collapse {
-  position: absolute; top: 12px; z-index: 5; width: 24px; height: 24px;
-  display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%;
-  background: var(--surface); color: var(--text-muted); cursor: pointer; box-shadow: var(--shadow-sm);
-  font-size: 14px; transition: left 0.18s ease;
-}
-.rb-collapse:hover { color: var(--accent); border-color: var(--accent); }
 
 /* map */
 .rb-map { flex: 1; position: relative; display: grid; place-items: center; min-width: 0; min-height: 0; background: var(--surface); }

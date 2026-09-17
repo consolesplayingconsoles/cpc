@@ -10,6 +10,7 @@ import GroupChat from './components/GroupChat.vue'
 import ControlTab from './components/control/ControlTab.vue'
 import TranslationTable from './components/translation/TranslationTable.vue'
 import MediaTab from './components/media/MediaTab.vue'
+import HomebrewTab from './components/homebrew/HomebrewTab.vue'
 import AchievementToast from './components/AchievementToast.vue'
 import MiniChat from './components/MiniChat.vue'
 import UiIconButton from './components/ui/UiIconButton.vue'
@@ -44,7 +45,7 @@ function toggleTheme() {
 // '/' → network, '/control/...' → Control, and so on. Chat is no longer a tab: the mini
 // chat dock sits on every tab, and /command opens the full chat as an OVERLAY on top of
 // whichever tab you were on (lastTab), so closing it returns you there.
-type Tab = 'network' | 'control' | 'translation' | 'media'
+type Tab = 'network' | 'control' | 'translation' | 'media' | 'homebrew'
 const chatOpen = computed(() => route.name === 'command')
 const lastTab = ref<Tab>('network')
 const activeTab = computed<Tab>(() => {
@@ -52,17 +53,19 @@ const activeTab = computed<Tab>(() => {
   if (route.name === 'media') return 'media'
   if (route.name === 'control') return 'control'
   if (route.name === 'translation') return 'translation'
+  if (route.name === 'homebrew') return 'homebrew'
   return 'network'
 })
 
 // open-tab key (and the switcher buttons) → path. The Control tab lands on the bare
 // surface (it auto-selects the first available source); the node drawer's
 // 'robutek'/'dreame' jump straight to the dreame source.
-function goToTab(tab: 'network' | 'chat' | 'control' | 'translation' | 'media' | 'robutek' | 'dreame') {
+function goToTab(tab: 'network' | 'chat' | 'control' | 'translation' | 'media' | 'homebrew' | 'robutek' | 'dreame') {
   const path = tab === 'chat' ? '/command'
     : tab === 'control' ? '/control'
     : tab === 'translation' ? '/translation'
     : tab === 'media' ? '/media'
+    : tab === 'homebrew' ? '/homebrew'
     : (tab === 'robutek' || tab === 'dreame') ? '/control/dreame'
     : '/'
   if (route.path !== path) router.push(path)
@@ -242,7 +245,7 @@ const displayNodes = computed(() => {
         </div>
       </div>
 
-      <!-- Floating tab switcher — the three top-level Pluto surfaces, always present. -->
+      <!-- Floating tab switcher — the top-level Pluto surfaces, always present. -->
       <div class="tab-switcher">
         <button
           class="tab"
@@ -256,14 +259,19 @@ const displayNodes = computed(() => {
         >Control</button>
         <button
           class="tab"
+          :class="{ 'tab--active': activeTab === 'media' }"
+          @click="goToTab('media')"
+        >Media</button>
+        <button
+          class="tab"
           :class="{ 'tab--active': activeTab === 'translation' }"
           @click="goToTab('translation')"
         >Translation</button>
         <button
           class="tab"
-          :class="{ 'tab--active': activeTab === 'media' }"
-          @click="goToTab('media')"
-        >Media</button>
+          :class="{ 'tab--active': activeTab === 'homebrew' }"
+          @click="goToTab('homebrew')"
+        >Homebrew</button>
       </div>
 
       <div class="panels">
@@ -278,6 +286,8 @@ const displayNodes = computed(() => {
         <TranslationTable v-show="activeTab === 'translation'" />
 
         <MediaTab v-show="activeTab === 'media'" :active="activeTab === 'media'" :nodes="nodes" />
+
+        <HomebrewTab v-show="activeTab === 'homebrew'" :active="activeTab === 'homebrew'" />
 
         <!-- Mini chat dock on every tab; hidden while the full chat overlay is open. -->
         <MiniChat v-if="!chatOpen" :nodes="nodes" :unread="unreadCount" @expand="goToTab('chat')" @seen="markChatSeen" />

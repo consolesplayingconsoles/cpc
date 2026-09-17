@@ -108,7 +108,7 @@ const lineStatus = computed<'pending' | 'ok' | 'warn' | 'over'>(() => {
 
     <td class="col-done">
       <input type="checkbox" v-model="block.done" @change="emit('commit')"
-             title="Done — keep original Japanese" />
+             title="Done: keep original Japanese" />
     </td>
   </tr>
 </template>

@@ -161,15 +161,15 @@ defineExpose({ signal, capture, frameSrc, postLog, refreshLog, sendSignal })
 
     <!-- session controls -->
     <div class="cap-controls">
-      <button class="cap-btn cap-btn--go"   :disabled="sending" @click="sendSignal('go')"  title="Go — start capture and let the source run">▶</button>
-      <button class="cap-btn cap-btn--wait" :disabled="sending" @click="sendSignal('wait')" title="Wait — pause (recording keeps running)">⏸</button>
-      <button class="cap-btn cap-btn--stop" :disabled="!capture.running" @click="endCapture" title="Stop — end capture and save the take">⏹</button>
+      <button class="cap-btn cap-btn--go"   :disabled="sending" @click="sendSignal('go')"  title="Go: start capture and let the source run">▶</button>
+      <button class="cap-btn cap-btn--wait" :disabled="sending" @click="sendSignal('wait')" title="Wait: pause (recording keeps running)">⏸</button>
+      <button class="cap-btn cap-btn--stop" :disabled="!capture.running" @click="endCapture" title="Stop: end capture and save the take">⏹</button>
 
       <template v-if="showGameActions">
         <div class="cap-divider" />
-        <button class="cap-btn cap-btn--action" @click="cmdWatch"  title="Watch — read the current frame">👁</button>
-        <button class="cap-btn cap-btn--action" @click="cmdRun"    title="Run — analog forward">🏃</button>
-        <button class="cap-btn cap-btn--action" @click="cmdAttach" title="Attach — engage">🔫</button>
+        <button class="cap-btn cap-btn--action" @click="cmdWatch"  title="Watch: read the current frame">👁</button>
+        <button class="cap-btn cap-btn--action" @click="cmdRun"    title="Run: analog forward">🏃</button>
+        <button class="cap-btn cap-btn--action" @click="cmdAttach" title="Attach: engage">🔫</button>
       </template>
 
       <slot name="extra-actions" />

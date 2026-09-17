@@ -18,6 +18,7 @@ tags:
   - { name: chat }
   - { name: nodes }
   - { name: deploy }
+  - { name: homebrew, description: 'Mods / Games / Tools tabs: build, run and deploy projects found under nodes/local/<node>/homebrew' }
   - { name: mappings }
   - { name: control }
   - { name: google }
@@ -294,6 +295,46 @@ paths:
       summary: Persist a project's state (PUT alias)
       parameters: [{ name: game, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: Saved } }
+  /homebrew:
+    get:
+      tags: [homebrew]
+      summary: Every buildable item (mods/<game>/<mod>, games/<game>, tools/<tool>) with actions and .env.sample params
+      responses: { '200': { description: "{ items: [...] }" } }
+  /homebrew/stream:
+    get:
+      tags: [homebrew]
+      summary: SSE stream of an item's build.sh / run.sh / deploy.sh ('line', 'step', 'done' events)
+      parameters:
+        - { name: id, in: query, required: true, schema: { type: string }, description: 'item id, e.g. dc/mods/tokyo-bus-guide/translation' }
+        - { name: action, in: query, required: false, schema: { type: string, enum: [build, run, deploy], default: build } }
+      responses: { '200': { description: text/event-stream }, '404': { description: no such item } }
+  /homebrew/params:
+    put:
+      tags: [homebrew]
+      summary: Save an item's parameters to the .env beside its .env.sample
+      parameters: [{ name: id, in: query, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { values: { type: object, additionalProperties: { type: string } } } } } } }
+      responses: { '200': { description: The updated item }, '400': { description: no params / bad body }, '404': { description: no such item } }
+  /homebrew/stop:
+    post:
+      tags: [homebrew]
+      summary: Stop an item's running action (kills its process group)
+      parameters: [{ name: id, in: query, required: true, schema: { type: string } }]
+      responses: { '200': { description: "{ stopped: bool }" } }
+  /homebrew/open:
+    post:
+      tags: [homebrew]
+      summary: Open an item's folder in the file manager on the machine running Pluto
+      parameters: [{ name: id, in: query, required: true, schema: { type: string } }]
+      responses: { '200': { description: "{ opened: path }" }, '404': { description: no such item } }
+  /homebrew/deploy/stream:
+    get:
+      tags: [homebrew]
+      summary: SSE deploy of an item's last build output through the catalogue (publish to Lab, rescan, send to the node)
+      parameters:
+        - { name: id, in: query, required: true, schema: { type: string } }
+        - { name: node, in: query, required: true, schema: { type: string }, description: 'a deployTargets id, e.g. lab or batocera' }
+      responses: { '200': { description: text/event-stream } }
   /docs:
     get: { tags: [docs], summary: Swagger UI over the CPC API specs, responses: { '200': { description: HTML } } }
   /docs/{spec}.yaml:

@@ -145,7 +145,7 @@ watch(messages, scrollToBottom, { deep: true })
       <!-- Left sidebar: ordered online → offline → unconfigured -->
       <aside class="sidebar">
         <div v-if="onlineMembers.length > 0">
-          <p class="sidebar-section">Online &mdash; {{ onlineMembers.length }}</p>
+          <p class="sidebar-section">Online: {{ onlineMembers.length }}</p>
           <div v-for="n in onlineMembers" :key="n.id" class="member">
             <ConsoleAvatar :id="n.id" :icon="ICONS[n.id]" :status="n.status" :color="n.color" :size="36" />
             <span class="member-name" :style="{ color: readableBrand(n.color ?? 'var(--text)') }">
@@ -155,7 +155,7 @@ watch(messages, scrollToBottom, { deep: true })
         </div>
 
         <div v-if="offlineMembers.length > 0">
-          <p class="sidebar-section sidebar-section--dim">Offline &mdash; {{ offlineMembers.length }}</p>
+          <p class="sidebar-section sidebar-section--dim">Offline: {{ offlineMembers.length }}</p>
           <div v-for="n in offlineMembers" :key="n.id" class="member member--offline">
             <ConsoleAvatar :id="n.id" :icon="ICONS[n.id]" :status="n.status" :color="n.color" :size="36" />
             <span class="member-name member-name--dim">
@@ -165,7 +165,7 @@ watch(messages, scrollToBottom, { deep: true })
         </div>
 
         <div v-if="unconfiguredMembers.length > 0">
-          <p class="sidebar-section sidebar-section--dim">Not present &mdash; {{ unconfiguredMembers.length }}</p>
+          <p class="sidebar-section sidebar-section--dim">Not present: {{ unconfiguredMembers.length }}</p>
           <div v-for="n in unconfiguredMembers" :key="n.id" class="member member--unconfigured">
             <ConsoleAvatar :id="n.id" :icon="ICONS[n.id]" :status="n.status" :color="n.color" :size="36" />
             <span class="member-name member-name--dim">
@@ -216,7 +216,7 @@ watch(messages, scrollToBottom, { deep: true })
           </template>
 
           <div v-if="messageGroups.length === 0" class="feed-empty">
-            No messages yet &mdash; say something
+            No messages yet, say something
           </div>
         </div>
 

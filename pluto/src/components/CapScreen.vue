@@ -35,8 +35,8 @@ defineSlots<{
 
     <!-- shared input buttons: GO / WAIT / STOP, emitted up to the parent -->
     <div v-if="controls" class="cap-controls">
-      <button class="cap-btn cap-btn--go"   :disabled="busy"     @click="emit('go')"   title="Go — start">▶</button>
-      <button class="cap-btn cap-btn--wait" :disabled="busy"     @click="emit('wait')" title="Wait — pause">⏸</button>
+      <button class="cap-btn cap-btn--go"   :disabled="busy"     @click="emit('go')"   title="Go: start">▶</button>
+      <button class="cap-btn cap-btn--wait" :disabled="busy"     @click="emit('wait')" title="Wait: pause">⏸</button>
       <button class="cap-btn cap-btn--stop" :disabled="!running" @click="emit('stop')" title="Stop">⏹</button>
       <slot name="actions" />
     </div>

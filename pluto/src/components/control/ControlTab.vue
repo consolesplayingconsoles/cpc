@@ -244,7 +244,7 @@ function openMappingDir() {
         <span class="rail-arrow" aria-hidden="true">›</span>
         <label class="rail-ctl" :class="{ off: !source || !visibleMappings.length }"><span>Mapping</span>
           <select :value="effMapping" :disabled="!source || !visibleMappings.length" @change="pick('mapping', ($event.target as HTMLSelectElement).value)">
-            <option v-if="!visibleMappings.length" value="">—</option>
+            <option v-if="!visibleMappings.length" value="">-</option>
             <option v-for="m in visibleMappings" :key="m" :value="m">{{ m }}</option>
           </select>
         </label>

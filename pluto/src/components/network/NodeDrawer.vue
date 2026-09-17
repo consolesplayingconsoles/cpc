@@ -319,7 +319,7 @@ function postCommand(text: string) {
             <span v-if="p.iface" class="nd__pico-badge is-iface" title="HID mode the board presents to the console (generic / ps3 / switch …)">{{ p.iface }}</span>
             <span class="nd__pico-badge" :class="deployClass(p.deploy)"
                   :title="p.deploy === 'pluto' ? 'Flashed by the Pluto deploy pipeline (firmware/' + p.role + '/ exists)'
-                        : p.deploy === 'pi' ? 'Deployed locally on the Pi — Pluto does not flash it'
+                        : p.deploy === 'pi' ? 'Deployed locally on the Pi: Pluto does not flash it'
                         : 'Deploy ownership not determinable here'">
               {{ p.deploy || 'deploy?' }}
             </span>

@@ -43,6 +43,7 @@ from modules.google import scanner as google_scanner
 from modules.vmu import vmufs
 from modules.catalogue import service as catalogue
 from modules.catalogue import send as catalogue_send
+from modules.homebrew import service as homebrew
 
 
 def open_path(path):
@@ -2262,6 +2263,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/catalogue/{system}"),
         ("GET", "/catalogue/{system}/cover/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
+        ("GET", "/homebrew"), ("GET", "/homebrew/stream"), ("PUT", "/homebrew/params"), ("POST", "/homebrew/stop"), ("POST", "/homebrew/open"), ("GET", "/homebrew/deploy/stream"),
         ("POST", "/messages"), ("POST", "/dreame/login"), ("POST", "/dreame/logout"),
         ("POST", "/control/signal"), ("POST", "/control/capture"),
         ("POST", "/control/capture/grab"), ("POST", "/control/google/lens"),
@@ -2294,6 +2296,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif parsed.path == "/connections":
             self._send(200, self._build_connections())
+
+        elif parsed.path == "/homebrew":
+            self._send(200, {"items": self._homebrew_items()})
+
+        elif parsed.path == "/homebrew/stream":
+            self._handle_homebrew_stream(urllib.parse.parse_qs(parsed.query))
+
+        elif parsed.path == "/homebrew/deploy/stream":
+            self._handle_homebrew_deploy_stream(urllib.parse.parse_qs(parsed.query))
 
         elif parsed.path == "/control/config":
             self._send(200, self._build_control_config())
@@ -2439,6 +2450,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_dreame_login()
         elif parsed.path == "/dreame/logout":
             self._handle_dreame_logout()
+        elif parsed.path == "/homebrew/stop":
+            item_id = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
+            self._send(200, {"stopped": homebrew.stop(item_id)})
+        elif parsed.path == "/homebrew/open":
+            item = homebrew.find(self._repo_root(), (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0])
+            if not item:
+                self._send(404, {"error": "no such homebrew item"})
+            else:
+                open_path(os.path.join(self._repo_root(), item["path"]))
+                self._send(200, {"opened": item["path"]})
         elif parsed.path == "/control/signal":
             self._handle_control_signal()
         elif parsed.path == "/control/capture":
@@ -2525,6 +2546,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parts  = parsed.path.strip("/").split("/")
         if len(parts) == 2 and parts[0] == "translate":
             self._handle_translate_put(parts[1])
+        elif parsed.path == "/homebrew/params":
+            self._handle_homebrew_params(urllib.parse.parse_qs(parsed.query))
         else:
             self._send(404, {"error": "not found"})
 
@@ -3530,6 +3553,186 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 emit("done", "failed:%d" % proc.returncode)
         except Exception as e:
             emit("done", "failed:%s" % e)
+
+    # ── Homebrew (Mods / Games / Tools tabs) ────────────────────────────────────
+    # Items are discovered by path convention (modules/homebrew). The client only ever
+    # sends an item id; paths and scripts are resolved server-side from discovery.
+
+    def _repo_root(self):
+        homebrew.set_outputs_file(os.path.join(self.__class__.base_dir, "logs", "homebrew-outputs.json"))
+        return os.path.dirname(self.__class__.base_dir)
+
+    def _homebrew_items(self):
+        """Discovered items plus where each can be deployed: the catalogue send targets for
+        its game's system (Lab first), only once there is a build output to send."""
+        items = homebrew.discover(self._repo_root())
+        by_system = {}
+        for it in items:
+            game = it.get("game")
+            if not (game and game.get("listed") and it.get("output")):
+                it["deployTargets"] = []
+                continue
+            system = game["system"]
+            if system not in by_system:
+                by_system[system] = self._homebrew_targets(system)
+            it["deployTargets"] = by_system[system]
+        return items
+
+    def _homebrew_targets(self, system):
+        """Nodes that host this system in the catalogue (config nodeConsoles) and can take
+        games (catalogue send strategy_for): the same rule as the Media tab's Send."""
+        hosts = self.__class__.consoles_config.get("nodeConsoles", {})
+        roster = self.__class__.node_roster or {}
+        targets = []
+        for node in ["lab"] + sorted(n for n in hosts if n != "lab"):
+            consoles = hosts.get(node, [])
+            if "*" not in consoles and system not in consoles:
+                continue
+            cfg = self.__class__.config if node == "lab" else (roster.get(node) or {})
+            kind = catalogue_send.strategy_for(cfg, node)
+            only = [x.strip() for x in (cfg.get("SD_SEND_SYSTEMS") or "").split(",") if x.strip()]
+            if not kind or kind == "hdd" or (only and system not in only):
+                continue
+            targets.append({"id": node, "name": "Lab" if node == "lab" else (cfg.get("NODE_NAME") or node), "kind": kind})
+        return targets
+
+    def _handle_homebrew_deploy_stream(self, qs):
+        """GET /homebrew/deploy/stream?id=<item>&node=<node> -> SSE. Publishes the item's last
+        build output into the Lab library under its catalogue name (a variant of the game),
+        rescans Lab, then (for any other node) runs the catalogue send, which copies it and
+        rescans that node. Same line/step/done events as the build stream."""
+        import shutil
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self._cors_headers()
+        self.end_headers()
+
+        def emit(event, data):
+            try:
+                for chunk in str(data).splitlines() or [""]:
+                    self.wfile.write(("event: %s\ndata: %s\n\n" % (event, chunk)).encode("utf-8"))
+                self.wfile.flush()
+            except Exception:
+                pass
+
+        def fail(why):
+            emit("line", "ERROR " + why)
+            emit("done", "failed")
+
+        item = homebrew.find(self._repo_root(), (qs.get("id") or [""])[0])
+        node = (qs.get("node") or [""])[0]
+        if not item:
+            return fail("no such homebrew item")
+        game = item.get("game")
+        if not (game and game.get("listed")):
+            return fail("%s has no CATALOGUE game, so it can't go through the catalogue" % item["id"])
+        out = item.get("output")
+        if not out:
+            return fail("nothing built yet: run Build first")
+        system = game["system"]
+        if node not in {t["id"] for t in self._homebrew_targets(system)}:
+            return fail("%s can't take %s games" % (node or "that node", system))
+        roms = os.path.expanduser((self.__class__.config.get("ROMS_PATH") or "").strip())
+        if not roms:
+            return fail("ROMS_PATH is not set in pluto/.env: no Lab library to publish to")
+        print("  [HOMEBREW:deploy] %s -> %s" % (item["id"], node))
+        try:
+            name = homebrew.lab_filename(item, out["path"])
+            dest = os.path.join(roms, system, "roms", name)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            emit("step", "publish")
+            emit("line", "publish to Lab: %s" % name)
+            shutil.copyfile(out["path"], dest + ".part")
+            if os.path.getsize(dest + ".part") != os.path.getsize(out["path"]):
+                os.remove(dest + ".part")
+                return fail("copy size mismatch")
+            os.replace(dest + ".part", dest)
+
+            emit("step", "sync")
+            if not self._catalogue_lock.acquire(timeout=120):
+                return fail("the catalogue is busy (a sync or send is running)")
+            try:
+                catalogue.sync(
+                    self._catalogue_root(), system, self.__class__.consoles_config,
+                    lambda n, argv, stdin=None: self._node_ssh(n, argv, timeout=600, connect_timeout=10, stdin=stdin),
+                    self._catalogue_saves, lambda line: emit("line", line),
+                    datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    lab_roms=roms, sd_nodes=self._catalogue_sd_nodes(), only=["lab"])
+            finally:
+                self._catalogue_lock.release()
+
+            if node != "lab":
+                emit("step", "send")
+                result = self._catalogue_send_run(system, {"node": node, "path": name}, lambda line: emit("line", line))
+                if result.get("status") == "command":
+                    emit("line", "run this in Terminal to finish: " + result["command"])
+            emit("done", "ok")
+        except catalogue_send.NotAvailable as exc:
+            fail(str(exc))
+        except Exception as exc:
+            fail("deploy crashed: %s" % exc)
+
+    def _handle_homebrew_params(self, qs):
+        """PUT /homebrew/params?id=<item> {values: {KEY: value}} -> the updated item."""
+        item = homebrew.find(self._repo_root(), (qs.get("id") or [""])[0])
+        if not item:
+            self._send(404, {"error": "no such homebrew item"}); return
+        body = self._read_json_body()
+        if body is None:
+            return
+        values = body.get("values") or {}
+        if not isinstance(values, dict):
+            self._send(400, {"error": "values must be an object"}); return
+        try:
+            homebrew.save_params(self._repo_root(), item, {str(k): str(v) for k, v in values.items()})
+        except ValueError as e:
+            self._send(400, {"error": str(e)}); return
+        self._send(200, homebrew.find(self._repo_root(), item["id"]))
+
+    def _handle_homebrew_stream(self, qs):
+        """GET /homebrew/stream?id=<item>&action=build|run|deploy -> SSE: 'line' per output
+        line, 'step' for ##STEP:<name> lines, then 'done' with ok | failed:<why>."""
+        item   = homebrew.find(self._repo_root(), (qs.get("id") or [""])[0])
+        action = (qs.get("action") or ["build"])[0]
+        if not item:
+            self._send(404, {"error": "no such homebrew item"}); return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self._cors_headers()
+        self.end_headers()
+
+        def emit(event, data):
+            try:
+                self.wfile.write(("event: %s\ndata: %s\n\n" % (event, data)).encode("utf-8"))
+                self.wfile.flush()
+            except Exception:
+                pass
+
+        print("  [HOMEBREW:%s] %s" % (action, item["id"]))
+        try:
+            proc = homebrew.start(self._repo_root(), item, action)
+        except RuntimeError as e:
+            emit("done", "failed:%s" % e); return
+        try:
+            for line in proc.stdout:
+                line = line.rstrip()
+                if line.startswith("##STEP:"):
+                    emit("step", line[7:])
+                elif line.startswith("##OUTPUT:"):
+                    homebrew.record_output(item["id"], line[9:].strip())
+                    emit("output", line[9:].strip())
+                else:
+                    emit("line", line)
+            proc.wait()
+            emit("done", "ok" if proc.returncode == 0 else "failed:%d" % proc.returncode)
+        except Exception as e:
+            emit("done", "failed:%s" % e)
+        finally:
+            homebrew.finish(item["id"])
 
     # ── Media catalogue ─────────────────────────────────────────────────────────
     # Data lives in <repo>/catalogue (its own private repo, gitignored); the logic in

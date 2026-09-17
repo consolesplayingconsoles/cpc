@@ -79,7 +79,7 @@ function copyPrompt() {
         :value="modelValue"
         rows="3"
         spellcheck="false"
-        placeholder="One per line — dubbed episode, character wiki, fan script, glossary…"
+        placeholder="One per line: dubbed episode, character wiki, fan script, glossary…"
         @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
       />
       <span class="pc__hint">Saved with the project and reused in every prompt for consistent tone.</span>

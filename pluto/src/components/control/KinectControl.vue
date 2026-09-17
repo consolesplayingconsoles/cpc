@@ -24,7 +24,7 @@
     <!-- NE: live pose log (the text context that rides along with each /frame). -->
     <template #ne>
       <ControlFeed title="Pose Log" :lines="logLines" :show-input="false"
-        :empty-text="running ? (paused ? 'Paused — press Play to resume reading.' : 'Reading your pose…') : 'Press Play to start reading your pose'" />
+        :empty-text="running ? (paused ? 'Paused: press Play to resume reading.' : 'Reading your pose…') : 'Press Play to start reading your pose'" />
     </template>
   </ControlLayout>
 </template>
