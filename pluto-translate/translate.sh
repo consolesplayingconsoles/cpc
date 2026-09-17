@@ -47,9 +47,13 @@ GAME_KEY="$GAME [$LANG2]"                  # state key in Pluto, e.g. "Boku Dora
 OUT_SYSDIR="$ROMS_OUT/$SYSTEM"
 # Output name follows the catalogue convention: "<Game> (Region) [T-<Code> <ver>]" with the ISO
 # code from config/languages.json, e.g. "Boku Doraemon (Japan) [T-Ca v1.0]". Pluto's Media tab
-# reads that as a translation (language ca, version 1.0) of the base game.
+# reads that as a translation (language ca, version 1.0) of the base game. AUTHOR (env, passed by
+# the Pluto API from the catalogue credits) makes it "[T-Ca by cpc v1.0]": the same name Pluto
+# gives the translation when it copies it anywhere (names.canonical_name).
 CODE=$(printf '%s' "$LANG2" | cut -c1 | tr '[:lower:]' '[:upper:]')$(printf '%s' "$LANG2" | cut -c2-)
-DEST="$OUT_SYSDIR/$GAME [T-$CODE $VER]"
+AUTHOR="${AUTHOR:-}"
+DEST="$OUT_SYSDIR/$GAME [T-$CODE${AUTHOR:+ by $AUTHOR} $VER]"
+PREV_DEST="$OUT_SYSDIR/$GAME [T-$CODE $VER]"     # the same build before it carried its author
 OLD_DEST="$OUT_SYSDIR/$GAME $LANGNAME [$LEGACY] ($VER)"
 
 WORK=$(mktemp -d)
@@ -85,6 +89,7 @@ echo "[3/5] copy GDI -> $DEST (track05 real, rest linked)"
 mkdir -p "$OUT_SYSDIR"
 # An earlier build under the legacy name is this same output: take it over so it's replaced, not duplicated.
 if [ -d "$OLD_DEST" ] && [ ! -e "$DEST" ]; then mv "$OLD_DEST" "$DEST"; fi
+if [ "$PREV_DEST" != "$DEST" ] && [ -d "$PREV_DEST" ] && [ ! -e "$DEST" ]; then mv "$PREV_DEST" "$DEST"; fi
 rm -rf "$DEST"; mkdir -p "$DEST"
 for f in "$GAMEDIR"/*; do
   b=$(basename "$f")
@@ -112,12 +117,15 @@ with urllib.request.urlopen(url, timeout=120) as r:
     tarfile.open(fileobj=io.BytesIO(r.read())).extractall(dest)
 print("  textures fetched from %s" % url)
 PY
+TAB=$(printf '\t')
 for f in "$TEX"/*.PVR "$TEX"/*.PVM; do
-  [ -f "$f" ] || continue; b=$(basename "$f")
-  # a texture may live in a subdir in the extract (e.g. INFO/JYOU_00.PVR) -> match by basename
-  orig=$(find "$EXTRACT" -name "$b" -print -quit 2>/dev/null)
-  [ -n "$orig" ] || continue
-  python3 "$HERE/dc/inplace.py" "$DEST/track05.bin" "$orig" "$f" || echo "  (skipped tex $b)"
+  [ -f "$f" ] || continue
+  # dc/texture_targets.py picks the disc copies (a texture can sit in a subdir, e.g. INFO/JYOU_00.PVR, and
+  # one picture can exist several times, e.g. CONT_0.PVR at root + MEMORY/ + DOUGU/). Every copy gets the
+  # repaint with its own GBIX index. make_dcp.py uses the same helper, so the patch matches the image.
+  python3 "$HERE/dc/texture_targets.py" "$EXTRACT" "$f" "$TEX/copies" | while IFS="$TAB" read -r rel patched; do
+    python3 "$HERE/dc/inplace.py" "$DEST/track05.bin" "$EXTRACT/$rel" "$patched" || echo "  (skipped tex $rel)"
+  done
 done
 # SOD / week-transition banner: one glyph atlas lives as chunk #170 inside STORYGRA.PAC (~464 MB).
 # We ship only the 128 KB patched chunk and splice just that region in place (never load the PAC).
@@ -136,5 +144,11 @@ if [ -f "$DEST/disc.gdi" ]; then mv "$DEST/disc.gdi" "$DEST/$(basename "$DEST").
 # (It used to be "<Game> <LangName>", which renamed catalogue-curated entries on every rebuild.)
 python3 "$HERE/gamelist_name.py" "$OUT_SYSDIR/gamelist.xml" "$OUT_SYSDIR" "$DEST" "$(basename "$DEST")" ".gdi" || \
   echo "  (gamelist name skipped)"
+# EmulationStation keeps the game list it loaded at boot. A build that creates or renames the folder
+# (e.g. adding the author) leaves ES with the old path, and its /launch answers "OK" for a path it
+# doesn't know while launching nothing: Pluto's Boot silently did nothing. Reload so it can boot now.
+# While a game runs ES queues this on its UI thread, so it still applies once the game ends.
+curl -s -m 30 http://127.0.0.1:1234/reloadgames >/dev/null && echo "  EmulationStation game list reloaded" || \
+  echo "  (EmulationStation reload not confirmed -- Boot may need Batocera's own 'update gamelists')"
 
 echo "DONE: $DEST"

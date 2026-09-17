@@ -837,7 +837,11 @@ async function runBuild() {
       buildMsg.value = `Build failed: ${data.error}`.slice(0, 80)
     } else {
       const secs = Math.round((Date.now() - startedAt) / 1000)
-      unlock(`Released to Batocera — ${selGameName.value || 'game'}`, `${secs}s`, bootAction(data.dest))
+      // the release patch rides along: say where it went, or why there isn't one
+      const patch = data.dcp?.path ? ` · patch saved: ${data.dcp.path.split('/').pop()}`
+        : data.dcp?.error ? ` · patch failed: ${data.dcp.error}`
+        : data.dcp?.skipped ? ` · no patch: ${data.dcp.skipped}` : ''
+      unlock(`Released to Batocera — ${selGameName.value || 'game'}`, `${secs}s${patch}`, bootAction(data.dest))
     }
   } catch {
     buildFailed.value = true

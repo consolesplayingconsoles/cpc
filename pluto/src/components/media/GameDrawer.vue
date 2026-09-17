@@ -54,6 +54,10 @@ const meta = computed<GameMeta>(() => ({
 const coverFailed = ref(false)
 const coverLoaded = ref(false)
 watch(() => props.game.key, () => { coverFailed.value = false; coverLoaded.value = false })
+// The drawer stays mounted while you step from game to game: start each one at its top, or it
+// opens scrolled (header and close button out of view) wherever the last game was left.
+const drawerEl = ref<HTMLElement | null>(null)
+watch(() => props.game.key, () => { if (drawerEl.value) drawerEl.value.scrollTop = 0 })
 const coverSrc = computed(() => props.game.cover === 'miss' || coverFailed.value ? '' : catalogueApi.coverUrl(props.system, props.game.key, props.coverVersion))
 
 // Your own cover (homebrew, hacks, anything libretro lacks): click the cover to upload.
@@ -108,7 +112,7 @@ function openNode(id: string) {
   if (props.nodes[id]) router.push({ path: '/', query: { node: id } })
 }
 
-// A translation variant links to its Translation-tab project, with progress. Match on the
+// A translation variant links to its Translation-tab project. Match on the
 // disc's header ID + language (both stored by the project), then title + language.
 const projects = ref<ProjectSummary[]>([])
 onMounted(() => {
@@ -124,7 +128,6 @@ function projectFor(g: Group): ProjectSummary | null {
     ?? pool.find(p => names.key(names.title(p.gameName)) === names.key(props.game.title))
     ?? null
 }
-const pct = (p: ProjectSummary) => (p.total ? Math.round((p.done / p.total) * 100) : 0)
 function openProject(p: ProjectSummary) { router.push('/translation/' + encodeURIComponent(p.ns)) }
 
 const KIND_LABEL = { original: 'Original', translation: 'Translation', mod: 'Mod' }
@@ -161,6 +164,18 @@ const { canPlay, playTitle, canOpen, canQuit, play, quit, openFolder, actionErro
   useRomActions(toRef(props, 'system'), toRef(props, 'nodes'))
 watch(() => props.game.key, () => { sendCommand.value = '' })
 
+// A lab copy that's still on disk can be deleted: to the Mac's Trash, then out of the catalogue.
+async function deleteLab(f: CatalogueFile) {
+  if (!window.confirm(`Move "${fileName(f.path)}" to the Trash?`)) return
+  actionError.value = ''
+  try {
+    await catalogueApi.deleteLab(props.system, props.game.key, f.path)
+    emit('changed')
+  } catch (e) {
+    actionError.value = (e as Error).message
+  }
+}
+
 // A copy marked Deleted (gone from its node's disk) can be removed from the catalogue.
 async function forget(f: CatalogueFile) {
   actionError.value = ''
@@ -174,7 +189,7 @@ async function forget(f: CatalogueFile) {
 </script>
 
 <template>
-  <aside class="gd" @click.stop>
+  <aside ref="drawerEl" class="gd" @click.stop>
     <header class="gd__head">
       <button class="gd__cover" :class="{ 'gd__cover--art': coverSrc }" :title="game.cover === 'custom' ? 'Replace cover' : 'Upload cover'" :disabled="uploading" @click="fileEl?.click()">
         <template v-if="coverSrc">
@@ -225,7 +240,7 @@ async function forget(f: CatalogueFile) {
         <span v-if="g.kind !== 'original'" class="gd__group-name">{{ g.label }}</span>
         <span v-if="g.authors.length" class="gd__group-meta">by {{ g.authors.join(', ') }}</span>
         <button v-if="projectFor(g)" class="gd__project" :title="'Open the ' + projectFor(g)!.ns + ' project'" @click="openProject(projectFor(g)!)">
-          {{ pct(projectFor(g)!) }}% · Open in Translation &rarr;
+          Open in Translation &rarr;
         </button>
       </div>
 
@@ -250,11 +265,14 @@ async function forget(f: CatalogueFile) {
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
           </UiIconButton>
           <template v-if="canSend(f)">
-            <UiIconButton v-for="t in sendTargets" :key="t.id" :class="{ 'gd__open': !canPlay(f) && !canOpen(f) }" :title="'Send to ' + t.name" @click="send(f, t.id)">
+            <UiIconButton v-for="t in sendTargets.filter(x => x.id !== f.node)" :key="t.id" :class="{ 'gd__open': !canPlay(f) && !canOpen(f) }" :title="'Send to ' + t.name" @click="send(f, t.id)">
               <img v-if="ICONS[t.id]" :src="ICONS[t.id]" class="gd__send-ic" alt="" />
               <span v-else>{{ t.name }}</span>
             </UiIconButton>
           </template>
+          <UiIconButton v-if="f.status === 'present' && f.node === 'lab'" title="Delete: move to the Trash" @click="deleteLab(f)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
+          </UiIconButton>
           <UiIconButton v-if="f.status === 'deleted'" class="gd__open" title="Remove from the catalogue" @click="forget(f)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
           </UiIconButton>

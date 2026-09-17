@@ -161,6 +161,34 @@ def variant_label(variants):
     return " + ".join(parts) if parts else "original"
 
 
+def canonical_name(title, file):
+    """The name Pluto files a copy under when it writes one to a node: the game's title (its
+    label when set), the copy's regions, its release version and its variants, in the same
+    convention parse() reads back ("Title (Japan) (v1.1) [T-En by Team v1.0][Boss Versus v0.3]").
+    Regions come from the header when there is one, else from the file's own region tags.
+    No extension. parse(canonical_name(...) + ".iso") gives the same title/version/variants."""
+    regions = list(file.get("regions") or []) or [t for t in file.get("tags") or [] if has_region_tag([t])]
+    out = title.strip()
+    if regions:
+        out += " (%s)" % ", ".join(regions)
+    # Release version only from the file's own (Rev x)/(vx) tag: parse() also reports a
+    # variant's bracket version as `version`, which must not become the game's.
+    rev = next((m for m in (_REV_TAG.match(t.strip()) for t in file.get("tags") or []) if m), None)
+    if rev:
+        out += " (%s)" % ("Rev " + rev.group(1) if rev.group(1) else "v" + rev.group(2))
+    brackets = ""
+    for v in file.get("variants") or []:
+        inner = ("T-" if v["kind"] == "translation" else "") + v["name"]
+        if v.get("author"):
+            inner += " by " + v["author"]
+        if v.get("version"):
+            inner += " v" + v["version"]
+        brackets += "[%s]" % inner
+    if brackets:
+        out += " " + brackets
+    return re.sub(r"\s+", " ", out).strip()
+
+
 def variant_key(game_key, v):
     """Composite key a mod/translation is indexed and credited by: game + name, no version."""
     return "%s/%s%s" % (game_key, "T-" if v["kind"] == "translation" else "", v["name"])

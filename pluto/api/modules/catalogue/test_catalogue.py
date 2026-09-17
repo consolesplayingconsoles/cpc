@@ -20,6 +20,7 @@ import headers
 import metadata
 import names
 import scan
+import send
 import service
 import shutil
 import store
@@ -96,6 +97,21 @@ def test_key_matches_the_frontend_mirror():
 def test_key_folds_trailing_article():
     assert names.key("Legend of Zelda, The - A Link to the Past") == \
         names.key("The Legend of Zelda: A Link to the Past")
+
+
+def test_canonical_name_round_trips_through_parse():
+    for path in ("Sonic the Hedgehog (Europe) [T-Cat v0.6-Beta][Boss Versus v0.3].md",
+                 "Mother 3 (Japan) [T-En by Chewy & Jeffman & Tomato v1.3].zip",
+                 "Game (USA) (v1.1).gba", "Kunoichi (Japan).7z"):
+        p = names.parse(path)
+        f = {"regions": [], "tags": p["tags"], "version": p["version"], "variants": p["variants"]}
+        back = names.parse(names.canonical_name(p["title"], f) + ".iso")
+        assert (back["title"], back["variants"]) == (p["title"], p["variants"]), (path, back)
+    assert names.canonical_name("Game", {"tags": ["USA", "v1.1"], "variants": []}) == "Game (USA) (v1.1)"
+    assert names.canonical_name("Game", {"tags": ["Rev 1"], "variants": [{"kind": "mod", "name": "Hack", "version": "2"}]}) == "Game (Rev 1) [Hack v2]"
+    p = names.parse("Front Mission 5 - Scars of the War (Patch 4 Complete)(Translated OP addendum).7z")
+    f = {"regions": ["Japan"], "tags": p["tags"], "version": None, "variants": []}
+    assert names.canonical_name("Front Mission 5 - Scars of the War", f) == "Front Mission 5 - Scars of the War (Japan)"
 
 
 # -- headers -----------------------------------------------------------------
@@ -780,6 +796,83 @@ def test_admin_node_prints_its_command_and_a_posted_list_merges_like_a_scan():
         assert False, "a node may only post systems it hosts"
     except ValueError:
         pass
+
+
+def test_systems_count_tools_translations_and_mods():
+    root = tempfile.mkdtemp()
+    doc = store.empty("megadrive")
+    store.merge(doc, "batocera", [{"path": "Sonic the Hedgehog (USA, Europe).md", "header": None},
+                                  {"path": "Sonic the Hedgehog (Europe) [T-Cat v0.6].md", "header": None},
+                                  {"path": "Sonic the Hedgehog (Europe) [T-Cat v0.7].md", "header": None},
+                                  {"path": "Sonic the Hedgehog (Europe) [Boss Versus v0.3].md", "header": None},
+                                  {"path": "Everdrive Menu.md", "header": None}], NOW)
+    os.makedirs(os.path.join(root, "megadrive")); store.save(root, doc)
+    with open(os.path.join(root, "kinds.json"), "w") as f:
+        json.dump({"megadrive": {"everdrive-menu": "tool"}}, f)
+    s = service.systems(root)[0]
+    assert (s["games"], s["tools"], s["translations"], s["mods"]) == (2, 1, 1, 1), s
+
+
+def test_send_plan_skips_what_the_target_has_and_prefers_lab_sources():
+    root = tempfile.mkdtemp()
+    doc = store.empty("ps2")
+    store.merge(doc, "batocera", [{"path": "Okami (Europe) (En,Fr,De).chd", "header": None},
+                                  {"path": "Futurama (USA).iso", "header": None},
+                                  {"path": "Kunoichi (Japan).iso", "header": None}], NOW)
+    store.merge(doc, "lab", [{"path": "Okami (Europe) (En,Fr,De).7z", "header": None},
+                             {"path": "Kunoichi (Japan) [T-En v1.0].7z", "header": None}], NOW)
+    store.merge(doc, "ps2", [{"path": "Futurama (USA).iso", "header": None}], NOW)
+    os.makedirs(os.path.join(root, "ps2")); store.save(root, doc)
+
+    p = send.plan(root, "ps2", "ps2", ["lab", "batocera"], all_missing=True)
+    got = sorted((c["name"], c["source"]["node"]) for c in p["copies"])
+    assert got == [("Kunoichi (Japan)", "batocera"), ("Kunoichi (Japan) [T-En v1.0]", "lab"),
+                   ("Okami (Europe)", "lab")], got
+    assert [s["game"] for s in p["skipped"]] == ["Futurama"]
+    picked = send.plan(root, "ps2", "ps2", ["lab", "batocera"], files=[{"node": "batocera", "path": "Okami (Europe) (En,Fr,De).chd"}])
+    assert [(c["source"]["node"], c["name"]) for c in picked["copies"]] == [("batocera", "Okami (Europe)")]
+    assert send.strategy_for({"PS2_HDD_BYTES": "1"}) == "hdd" and send.strategy_for({}) is None
+
+
+def test_sd_strategy_copies_single_file_roms_and_skips_what_the_card_has():
+    p = {"copies": [{"game": "a", "name": "Sonic (USA)", "source": {"node": "lab", "path": "Sonic (USA).zip", "inner": "Sonic (USA).md"}},
+                    {"game": "b", "name": "Ecco (Europe)", "source": {"node": "batocera", "path": "Ecco (Europe).md"}},
+                    {"game": "c", "name": "Snatcher (USA)", "source": {"node": "lab", "path": "Snatcher (USA).cue"}}],
+         "skipped": []}
+    put, events = [], []
+    card = {"mount": lambda: events.append("mount"), "exists": lambda n: n == "Ecco (Europe).md",
+            "put": lambda src, name: put.append((src, name)), "finish": lambda: events.append("finish") or ["rescanned"]}
+    ctx = {"target": "megadrive", "card": card, "locate": lambda s: "/roms/" + s["path"], "unpack": True, "system": "megadrive",
+           "rom_ext": lambda s: os.path.splitext(s.get("inner") or s["path"])[1]}
+    got = send.STRATEGIES["sd"](p, ctx)
+    assert put == [("/roms/Sonic (USA).zip", "Sonic (USA).md")], put
+    assert got["status"] == "done" and got["count"] == 1 and events == ["mount", "finish"] and "rescanned" in got["lines"]
+    assert sorted(s["game"] for s in p["skipped"]) == ["Ecco (Europe)", "Snatcher (USA)"]
+    assert send.strategy_for({"SD_LABEL": "EDMD"}) is None and send.strategy_for({"SD_LABEL": "EDMD", "SD_ROMS_DIR": "Mega Drive"}) == "sd"
+    nothing = send.STRATEGIES["sd"]({"copies": [], "skipped": []}, ctx)
+    assert nothing["status"] == "done" and nothing["count"] == 0 and events == ["mount", "finish"]      # no mount for nothing
+
+
+def test_tools_are_not_missing_covers():
+    root = tempfile.mkdtemp()
+    doc = store.empty("gamecube")
+    store.merge(doc, "batocera", [{"path": "GCTestSuite.iso", "header": None}, {"path": "Ikaruga (Japan).iso", "header": None}], NOW)
+    os.makedirs(os.path.join(root, "gamecube")); store.save(root, doc)
+    with open(os.path.join(root, "kinds.json"), "w") as f:
+        json.dump({"gamecube": {"gctestsuite": "tool"}}, f)
+    assert [g["title"] for g in service.missing_covers(root)["games"]] == ["Ikaruga"]
+
+
+def test_search_finds_games_across_systems_by_folded_title():
+    root = tempfile.mkdtemp()
+    for s, path in (("megadrive", "Sonic the Hedgehog (USA, Europe).md"), ("gamegear", "Sonic Chaos (Europe).gg"), ("snes", "Pokémon Stadium.sfc")):
+        doc = store.empty(s)
+        store.merge(doc, "batocera", [{"path": path, "header": None}], NOW)
+        os.makedirs(os.path.join(root, s)); store.save(root, doc)
+    got = sorted((g["system"], g["title"]) for g in service.search(root, "sonic")["games"])
+    assert got == [("gamegear", "Sonic Chaos"), ("megadrive", "Sonic the Hedgehog")], got
+    assert [g["title"] for g in service.search(root, "pokemon")["games"]] == ["Pokémon Stadium"]
+    assert service.search(root, "  ")["games"] == []
 
 
 def test_systems_carry_favourite_and_owned_console():

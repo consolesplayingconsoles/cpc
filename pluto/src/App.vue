@@ -436,7 +436,7 @@ const displayNodes = computed(() => {
 .main {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: clip;              /* clip, not hidden: focus/scrollIntoView inside a tab must never scroll the whole view (it cut the Media drawer's top) */
   position: relative;
   display: flex;
   flex-direction: column;
@@ -596,7 +596,7 @@ const displayNodes = computed(() => {
    header, drop the desktop-only "Show unconfigured" admin toggle, and tighten the tab
    switcher so it fits. overflow-x:hidden is the safety net. ── */
 @media (max-width: 640px) {
-  .shell { overflow-x: hidden; }
+  .shell { overflow-x: clip; }
   .header { padding: 0 12px; }
   .header-controls { gap: 12px; }
   .toggle-label { display: none; }         /* admin-only; not needed on a phone controller */
