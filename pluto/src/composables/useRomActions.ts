@@ -4,6 +4,7 @@ import { computed, ref, type Ref } from 'vue'
 import type { CatalogueFile } from '../api/catalogue'
 import { catalogueApi } from '../api/catalogue'
 import { API_BASE, type NodeMap } from './useNodes'
+import { useAchievement } from './useAchievement'
 import consolesConfig from '../../config/consoles.json'
 
 // Open the ROM's FOLDER (not the file, so Finder doesn't try to launch a .chd). Any node
@@ -72,16 +73,31 @@ export function useRomActions(system: Ref<string>, nodes: Ref<NodeMap>) {
   // this system. The API can't write that drive: it answers with the Terminal command to run.
   const hosts = (consolesConfig as { nodeConsoles?: Record<string, string[]> }).nodeConsoles ?? {}
   const sendTargets = computed(() => Object.values(nodes.value)
-    .filter(n => n.send && (hosts[n.id] ?? []).includes(system.value)))
+    .filter(n => n.send && ((hosts[n.id] ?? []).includes(system.value) || (hosts[n.id] ?? []).includes('*')) &&
+      (!n.sendSystems || n.sendSystems.includes(system.value))))
   const canSend = (f: CatalogueFile) => f.status === 'present' && f.node === 'lab'
+  // The API answers either with a Terminal command (PS2 drive: root only) or having done the
+  // copy itself (SD card): then the success banner, and sentAt tells the page to reload.
   const sendCommand = ref('')
-  function send(f: CatalogueFile | null, node: string) {    // null = every lab game the node lacks
+  const sending = ref('')                                   // target node id while a send runs
+  const sentAt = ref(0)
+  const { unlock } = useAchievement()
+  function send(f: CatalogueFile | null, node: string) {    // null = every game the node lacks
     actionError.value = ''
     sendCommand.value = ''
+    sending.value = node
+    const startedAt = Date.now()
     catalogueApi.send(system.value, f?.path ?? '', node, !f)
-      .then(r => { sendCommand.value = r.command })
+      .then(r => {
+        if (r.status === 'command') sendCommand.value = r.command ?? ''
+        else {
+          sentAt.value = Date.now()
+          unlock(`Sent ${r.count ?? 0} game${r.count === 1 ? '' : 's'} to ${nodes.value[node]?.name ?? node}`, `${Math.round((Date.now() - startedAt) / 1000)}s`)
+        }
+      })
       .catch(err => { actionError.value = (err as Error).message })
+      .finally(() => { sending.value = '' })
   }
 
-  return { emulator, canPlay, playTitle, canOpen, canQuit, play, quit, openFolder, actionError, sendTargets, canSend, send, sendCommand }
+  return { emulator, canPlay, playTitle, canOpen, canQuit, play, quit, openFolder, actionError, sendTargets, canSend, send, sendCommand, sending, sentAt }
 }

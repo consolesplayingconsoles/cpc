@@ -44,7 +44,8 @@ def load_physical(root, system):
 
 def systems(root):
     """Systems that hold at least one digital file or physical item, with whether you
-    starred the system and whether you own the console (hardware.json)."""
+    starred the system and whether you own the console (hardware.json). Counts for the Media
+    header: tools (kinds.json), and translations/mods = distinct variants with a present copy."""
     out = []
     if not os.path.isdir(root):
         return out
@@ -55,7 +56,12 @@ def systems(root):
             continue
         view = system_view(root, system)
         if view["games"]:
+            variants = {(g["key"], f["variant"], any(v["kind"] == "mod" for v in f["variants"]))
+                        for g in view["games"] for f in g["files"] if f["status"] == "present" and f["variants"]}
             out.append({"system": system, "games": len(view["games"]),
+                        "tools": sum(1 for g in view["games"] if g["kind"] == "tool"),
+                        "translations": sum(1 for v in variants if not v[2]),
+                        "mods": sum(1 for v in variants if v[2]),
                         "nodes": sorted({n for g in view["games"] for n in g["nodes"]}),
                         "physical": sum(1 for g in view["games"] if g["physical"]),
                         "favourite": system in fav_systems,
@@ -149,13 +155,29 @@ def cover(root, system, game_key, consoles_config, read_node_file=None):
 
 def missing_covers(root):
     """Present games with no image linked in the catalogue (no upload, no downloaded art),
-    across all systems. Local only: a game whose art was never fetched counts as missing."""
+    across all systems. Local only: a game whose art was never fetched counts as missing.
+    Tools (kinds.json: boot discs, test suites, loaders) have no box art to find: left out."""
     out = []
     for s in systems(root):
         system = s["system"]
         for g in system_view(root, system)["games"]:
-            if (g["nodes"] or g["physical"]) and not covers.linked(root, system, g["key"]):
+            if g["kind"] != "tool" and (g["nodes"] or g["physical"]) and not covers.linked(root, system, g["key"]):
                 out.append({"system": system, "key": g["key"], "title": g["title"]})
+    return {"games": out}
+
+
+def search(root, query):
+    """Games whose title, label or file title contains query, across all systems. Accents and
+    punctuation fold like game keys ("pokemon" finds Pokémon). -> {"games": [{system, key, title, kind}]}"""
+    q = names.key(query or "")
+    out = []
+    if not q:
+        return {"games": out}
+    for s in systems(root):
+        system = s["system"]
+        for g in system_view(root, system)["games"]:
+            if any(q in names.key(t) for t in (g["title"], g.get("fileTitle") or "") if t):
+                out.append({"system": system, "key": g["key"], "title": g["title"], "kind": g["kind"]})
     return {"games": out}
 
 
@@ -290,7 +312,7 @@ def _scan_sd(run_ssh, hub_node, labels, roms_dir, fmt, skip):
 
 
 def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=BATOCERA_ROMS, lab_roms=None, sd_nodes=None,
-         admin_nodes=None):
+         admin_nodes=None, only=None):
     """Sync one system ('*' = everything). emit(line) streams progress.
     consoles_config = config/consoles.json (nodeConsoles for hosts, systems for headers).
 
@@ -311,7 +333,8 @@ def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=B
     formats = header_formats(consoles_config)
     ignored = set(consoles_config.get("ignoreSystems") or [])   # ports Batocera restores on boot
     node_consoles = consoles_config.get("nodeConsoles") or {}
-    hosts = [n for n, cs in sorted(node_consoles.items()) if system == "*" or "*" in cs or system in cs]
+    hosts = [n for n, cs in sorted(node_consoles.items()) if (system == "*" or "*" in cs or system in cs)
+             and (only is None or n in only)]           # only = rescan just these nodes (after a send)
     label = "all systems" if system == "*" else system
 
     jobs = {}
@@ -403,16 +426,17 @@ def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=B
     return {"merged": merged, "skipped": skipped}
 
 
-def forget_file(root, system, game_key, node, path):
+def forget_file(root, system, game_key, node, path, removed_from_disk=False):
     """Drop one copy the last sync marked deleted. A present copy can't be forgotten (the
-    next sync would add it straight back); a game left with no copies goes too, its shelf
-    copies (physical.json) still show it."""
+    next sync would add it straight back) unless its file was just removed from disk
+    (removed_from_disk). A game left with no copies goes too; its shelf copies
+    (physical.json) still show it."""
     doc = store.load(root, system)
     game = doc["games"].get(game_key)
     f = next((f for f in (game or {}).get("files", []) if f["node"] == node and f["path"] == path), None)
     if f is None:
         raise ValueError("no such copy in the catalogue")
-    if f["status"] != "deleted":
+    if f["status"] != "deleted" and not removed_from_disk:
         raise ValueError("only deleted copies can be removed from the catalogue")
     game["files"].remove(f)
     if not game["files"]:

@@ -50,6 +50,7 @@ export interface Game {
 // favourite = starred on the grid; owned = you have the console (catalogue/hardware.json)
 export interface SystemSummary {
   system: string; games: number; nodes: string[]; physical: number
+  tools: number; translations: number; mods: number   // tools count inside games
   favourite: boolean; owned: boolean; hardware?: { status?: string; notes?: string } | null
 }
 export interface SystemView { system: string; games: Game[]; hosts: string[]; syncedAt: string | null }
@@ -61,11 +62,14 @@ async function getJson<T>(url: string): Promise<T> {
 }
 
 export interface MissingCover { system: string; key: string; title: string }
+export interface GameHit extends MissingCover { kind: 'game' | 'tool' }
 
 export const catalogueApi = {
   systems: () => getJson<{ systems: SystemSummary[] }>(BASE),
   system:  (system: string) => getJson<SystemView>(`${BASE}/${enc(system)}`),
   missingCovers: () => getJson<{ games: MissingCover[] }>(`${BASE}/missing-covers`),
+  // every system's games whose title/label contains q (accents and punctuation folded)
+  search: (q: string) => getJson<{ games: GameHit[] }>(`${BASE}/search?q=${enc(q)}`),
   // games on a shelf with no digital copy on any node
   physicalOnly: () => getJson<{ games: MissingCover[] }>(`${BASE}/physical-only`),
   setSystemFavourite: async (system: string, on: boolean) => {
@@ -103,7 +107,14 @@ export const catalogueApi = {
     })
     const j = await r.json().catch(() => ({}))
     if (!r.ok) throw new Error(j?.error || `send -> ${r.status}`)
-    return j as { command: string; count?: number }
+    return j as { status: 'command' | 'done'; command?: string; count?: number; lines?: string[]; skipped?: { game: string; why: string }[] }
+  },
+  // Delete a lab copy: the API moves it (or its game folder) to the Mac's Trash and drops it.
+  deleteLab: async (system: string, game: string, path: string) => {
+    const r = await fetch(`${BASE}/${enc(system)}/delete`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game, node: 'lab', path }),
+    })
+    if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `delete -> ${r.status}`)
   },
   // Remove a copy the last sync marked deleted (gone from that node's disk).
   forget: async (system: string, game: string, node: string, path: string) => {
@@ -133,6 +144,9 @@ export const catalogueApi = {
     })
     if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `cover link -> ${r.status}`)
   },
+  // SSE form of send (all = every game the node lacks): line events, a `command` event when
+  // the target needs a Terminal command, then done ok/failed. Same console as sync.
+  sendStreamUrl: (system: string, node: string) => `${BASE}/${enc(system)}/send/stream?node=${enc(node)}&all=1`,
   // SSE, read-only against nodes. '*' = everything Batocera has.
   syncUrl: (system: string) => `${BASE}/sync/stream?system=${enc(system)}`,
 }

@@ -291,8 +291,14 @@ _CA = _Profile(ACCENT_SPEC, _CSPEC, _CSLOT, _COMPOSE, _OSLOT, _CLEAN, _CLSLOT,
 # shared hyphen + baseline ellipsis. No accents, no digraphs, so the whole Greek block is free.
 # The full alphabet is authored now; prune the unused combos against the real English text later.
 _EN_WIDE = set("mnw")                        # widest lowercase letters -> squeezed right-apostrophe
+# Round letters whose LEFT stroke the 20->14 squeeze merges from 2 px to 1 px, so it reads as cut
+# off in-game (operator, hardware QA 2026-09-17: o' and e'). Shifting the source 1 column right before
+# the squeeze changes which columns merge and keeps the plain letter's stroke weights (o 2/2, e 2/1);
+# the letter moves right 1 col, the apostrophe stays put, 2 cols of gap remain. English-only kind.
+_EN_SHIFT1 = set("oe")
 _EN_CSPEC = ([("I'", "I", "r")] +            # I'm / I'll / I've / I'd (the one common capital combo)
-             [(chr(c) + "'", chr(c), "rq" if chr(c) in _EN_WIDE else "r")
+             [(chr(c) + "'", chr(c),
+               "rq" if chr(c) in _EN_WIDE else ("r1" if chr(c) in _EN_SHIFT1 else "r"))
               for c in range(ord('a'), ord('z') + 1)])
 # free slots for en: the whole Greek block MINUS the authored-hyphen slot (0x83C9), + kana reserve.
 _EN_FREE = [c for c in range(0x839F, 0x83D7)
@@ -347,6 +353,7 @@ def _build(src_bytes, prof):
         g = decode(bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE]))
         if   kind == 'r':  g = _apos_r(g, False)
         elif kind == 'rq': g = _apos_r(g, True)
+        elif kind == 'r1': g = _apos_r([[0] + row[:W - 1] for row in g], False)   # letter 1 col right
         rec = bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE])   # borrow base header
         rec[BMP:BMP+ROWS*BPR] = encode(g)
         code = prof.cslot[seq]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)

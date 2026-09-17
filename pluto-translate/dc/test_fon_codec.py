@@ -192,6 +192,31 @@ def test_unknown_lang_raises():
 
 
 # ── English profile (en): alphabet-wide right-apostrophe combos, no accents/digraphs ────────────
+def test_en_round_combos_keep_their_left_stroke():
+    """o'/e' (hardware QA 2026-09-17): the 20->14 squeeze merged the round letter's 2 px LEFT stroke into
+    1 px, which read as cut off. The combo must keep at least as thick a left stroke as the plain letter,
+    with the apostrophe untouched at the right edge."""
+    font = f.build_patched_font(_raw, "en")
+    def grid(code):
+        jhi, jlo = f.sjis2jis(code >> 8, code & 0xFF)
+        return f.decode(bytearray(font[f.jis_index(jhi, jlo) * f.STRIDE:][:f.STRIDE]))
+    def left_stroke(g):                      # thinnest solid run at the left edge over the letter's body rows
+        widths = []
+        for r in range(6, 17):
+            cols = [c for c in range(f.W) if g[r][c] >= 2]
+            if not cols: continue
+            c, w = cols[0], 0
+            while c < f.W and g[r][c] >= 2: w += 1; c += 1
+            widths.append(w)
+        return min(widths)
+    for ch in "oe":
+        plain = f.decode(bytearray(font[f.jis_index(0x23, 0x61 + ord(ch) - 97) * f.STRIDE:][:f.STRIDE]))
+        combo = grid(f._EN_CSLOT[ch + "'"])
+        assert left_stroke(combo) >= left_stroke(plain), "%s' left stroke thinner than plain %s" % (ch, ch)
+        for r, c in ((0, 16), (1, 17), (2, 18), (3, 17), (4, 16)):     # apostrophe where it always was
+            assert combo[r][c] == 3, "%s' apostrophe moved (%d,%d)" % (ch, r, c)
+
+
 def test_en_font_builds_and_places_every_combo_distinctly():
     """The English font builds (same size) and authors every <letter>' combo to a distinct in-range slot."""
     data = f.build_patched_font(_raw, "en")

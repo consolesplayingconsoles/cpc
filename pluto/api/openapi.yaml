@@ -158,18 +158,40 @@ paths:
       summary: Launch a ROM (body {path, node}) -- node lab = desktop emulator on the API host (macOS); node batocera = remote boot via EmulationStation
       parameters: [{ name: system, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: Launched }, '400': { description: No emulator associated, or not a lab ROM }, '502': { description: The emulator failed to open } }
+  /catalogue/search:
+    get:
+      tags: [catalogue]
+      summary: Games across all systems whose title or label contains q (accents/punctuation folded)
+      parameters: [{ name: q, in: query, required: true, schema: { type: string } }]
+      responses: { '200': { description: "{games [{system, key, title, kind}]}" } }
   /catalogue/{system}/send:
     post:
       tags: [catalogue]
-      summary: Send a lab ROM to a node's drive (body {path, node}, or {all true, node} = every lab game the node doesn't have). Only nodes with PS2_HDD_BYTES; the API can't write the drive (root only), so it returns the Terminal command that does
+      summary: "Copy games onto any node (body {node, files [{node, path}]} or {node, all true}). Skips what the target has, picks a source node (lab, batocera, ...), writes canonical names. The target's strategy (hdd = PS2 drive; sd, ftp not built yet) answers {status command, command, count, skipped} or {status done, lines}"
       parameters: [{ name: system, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: "{command}" }, '400': { description: Node can't take games, or not a lab ROM } }
+      responses: { '200': { description: "{status, strategy, command | lines, skipped}" }, '400': { description: "{error, skipped}: node can't take games, strategy not built, or nothing to send" } }
+  /catalogue/{system}/send/stream:
+    get:
+      tags: [catalogue]
+      summary: "SSE form of the send, for the Media console (query node, and all=1 or one path): line events as it goes, a command event (JSON) when the target's strategy answers with a Terminal command, then done"
+      parameters:
+        - { name: system, in: path, required: true, schema: { type: string } }
+        - { name: node, in: query, required: true, schema: { type: string } }
+        - { name: all, in: query, schema: { type: string, enum: ["1", "true"] } }
+        - { name: path, in: query, schema: { type: string } }
+      responses: { '200': { description: text/event-stream of line / command / done events } }
   /catalogue/{system}/scan/{node}:
     post:
       tags: [catalogue]
       summary: A node's complete game list read outside the API (body {files [{path, size}]}), merged like a sync scan (the PS2 HDD command posts here)
       parameters: [{ name: system, in: path, required: true, schema: { type: string } }, { name: node, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: "{ok, lines}" }, '400': { description: Bad body, or the node doesn't host the system }, '409': { description: A sync is running } }
+  /catalogue/{system}/delete:
+    post:
+      tags: [catalogue]
+      summary: Delete a lab copy (body {game, node, path}) -- moved to the Mac's Trash (its folder when the game has one), then dropped from the catalogue
+      parameters: [{ name: system, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: "{ok, trashed}" }, '400': { description: Not a lab copy }, '404': { description: No such file }, '409': { description: Sync running } }
   /catalogue/{system}/forget:
     post:
       tags: [catalogue]

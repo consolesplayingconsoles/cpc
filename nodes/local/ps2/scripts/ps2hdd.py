@@ -4,7 +4,7 @@ ps2hdd.py -- install PS2 games from this Mac onto the PS2's internal HDD (APA fo
 
     sudo python3 ps2hdd.py status
     sudo python3 ps2hdd.py sync
-    sudo python3 ps2hdd.py install [--dry-run] [--allow-same-id] FILE [FILE ...]
+    sudo python3 ps2hdd.py install [--dry-run] [--allow-same-id] [FILE ...] [--game NAME SOURCE ...]
     sudo python3 ps2hdd.py rename "OLD NAME" "NEW NAME"
 
 Pluto's Media tab hands out these commands: it can't read the raw disk itself. sync (and
@@ -12,7 +12,11 @@ every install, at the end) POSTs the drive's game list to Pluto (PLUTO_API), whi
 it into the catalogue like any sync: new games added, missing ones marked deleted.
 
 FILE is a path under PS2_GAMES_PATH (absolute, or relative to it): .iso, .cue (+ .bin),
-.chd, or a .7z/.zip holding one of those. sudo is needed to read/write the raw disk.
+.chd, or a .7z/.zip holding one of those; it is named on the drive after the file. --game
+NAME SOURCE names it NAME instead (Pluto passes the canonical name), and SOURCE may also be
+node:/path on another machine (e.g. batocera:/userdata/roms/ps2/...), pulled over SSH as the
+user who ran sudo (their ~/.ssh config) into PS2_HDD_WORK_PATH first. sudo is needed to
+read/write the raw disk.
 
 Every run checks the drive first and stops with an error when any check fails:
   - an external USB disk of exactly PS2_HDD_BYTES (pick with --disk diskN if several)
@@ -116,7 +120,9 @@ def _plist(args):
 
 
 def find_drive(expected, disk=None):
-    """-> {"disk": "disk6", "dev": "/dev/rdisk6"} after every safety check, else Fail."""
+    """-> {"disk": "disk6", "raw": "/dev/rdisk6", "dev": "/dev/disk6"} after every safety check.
+    hdl_dump gets the buffered BLOCK device (dev): its game writes fail midway on macOS's raw
+    character device, leaving a half-made partition. Header reads here use raw."""
     if disk:
         names = [disk.replace("/dev/", "").replace("rdisk", "disk")]
     else:
@@ -142,15 +148,15 @@ def find_drive(expected, disk=None):
         raise Fail("%s is a partition, not a whole disk, refusing" % name)
     if size != expected:
         raise Fail("%s is %s, expected %s (PS2_HDD_BYTES), refusing" % (name, gb(size), gb(expected)))
-    dev = "/dev/r" + name
+    raw = "/dev/r" + name
     try:
-        with open(dev, "rb") as f:
+        with open(raw, "rb") as f:
             head = f.read(4096)
     except PermissionError:
-        raise Fail("Can't read %s: run with sudo" % dev)
+        raise Fail("Can't read %s: run with sudo" % raw)
     if head[4:8] != b"APA\0" or head[0x10:0x15] != b"__mbr":
         raise Fail("%s is not a PS2 drive (no APA header), refusing" % name)
-    return {"disk": name, "dev": dev}
+    return {"disk": name, "raw": raw, "dev": "/dev/" + name}
 
 
 def hdl(env, args, check=True):
@@ -186,7 +192,7 @@ def backup_headers(env, drive):
     makedirs(out_dir)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     blob, index, lba, seen = bytearray(), [], 0, set()
-    with open(drive["dev"], "rb") as f:
+    with open(drive["raw"], "rb") as f:
         f.seek(0)
         blob += f.read(1 << 20)
         index.append({"lba": 0, "bytes": 1 << 20})
@@ -209,6 +215,19 @@ def backup_headers(env, drive):
     as_user(base + ".bin")
     as_user(base + ".json")
     return base + ".bin"
+
+
+def flush(drive):
+    """Push everything written so far onto the disk and make the drive empty its own write
+    cache (F_FULLFSYNC): after this, pulling the plug loses nothing already installed. Run
+    after every game, so a batch is as safe as ejecting between games."""
+    import fcntl
+    subprocess.call(["sync"])
+    fd = os.open(drive["dev"], os.O_RDONLY)
+    try:
+        fcntl.fcntl(fd, getattr(fcntl, "F_FULLFSYNC", 51))
+    finally:
+        os.close(fd)
 
 
 def eject(drive):
@@ -351,8 +370,15 @@ def drive_name(filename):
     """Name on the drive: the file name without its extension, so the catalogue reads the
     drive copy exactly like the file it came from (regions, [T-En] translations)."""
     name = re.sub(r"\s+", " ", os.path.splitext(os.path.basename(filename))[0]).strip()
-    if len(name) > NAME_MAX:
-        name = name[:NAME_MAX].rsplit(" ", 1)[0].rstrip(" -")
+    # Too long: drop whole trailing (...) / [...] tags first, then words, never leaving a
+    # bracket open ("Game (Patch 4" would read as another game in the catalogue).
+    while len(name) > NAME_MAX:
+        shorter = re.sub(r"\s*(\([^()]*\)|\[[^\[\]]*\])\s*$", "", name)
+        if shorter == name:
+            shorter = name.rsplit(" ", 1)[0]
+        name = shorter.rstrip(" -")
+    while name.count("(") > name.count(")") or name.count("[") > name.count("]"):
+        name = name[:max(name.rfind("("), name.rfind("["))].rstrip(" -")
     return name
 
 
@@ -363,14 +389,45 @@ def chd_kind(path):
     return "cd" if "CHT2" in info or "CHTR" in info else "dvd"
 
 
-def describe(env, source):
+REMOTE = re.compile(r"^([A-Za-z0-9_.-]+):(/.*)$")
+
+
+def pull(env, source, dest):
+    """node:/path -> a local copy under dest, over SSH as the sudo-ing user (their keys and
+    ~/.ssh config). A .cue comes with its whole folder (its .bin files sit next to it)."""
+    host, path = REMOTE.match(source).groups()
+    target = os.path.dirname(path) if path.lower().endswith(".cue") else path
+    user = os.environ.get("SUDO_USER")
+    ssh = (["sudo", "-u", user] if user else []) + ["ssh", host, "tar -C %s -cf - %s" % (
+        shlex_quote(os.path.dirname(target)), shlex_quote(os.path.basename(target)))]
+    makedirs(dest)
+    fetch = subprocess.Popen(ssh, stdout=subprocess.PIPE)
+    untar = subprocess.run(["tar", "-xf", "-", "-C", dest], stdin=fetch.stdout)
+    fetch.stdout.close()
+    if fetch.wait() != 0 or untar.returncode != 0:
+        raise Fail("could not pull %s" % source)
+    local = os.path.join(dest, os.path.basename(target))
+    return os.path.join(local, os.path.basename(path)) if target != path else local
+
+
+def shlex_quote(s):
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+def describe(env, source, name=None):
     """What a source file is, without writing anything:
-    {source, name, kind cd|dvd|?, id or None, iso_bytes (estimate), how}."""
+    {source, name, kind cd|dvd|?, id or None, iso_bytes (estimate), how}. A remote source
+    (node:/path) can't be read before it is pulled: only its name and kind are known."""
+    if REMOTE.match(source):
+        ext = os.path.splitext(source)[1].lower()
+        return {"source": source, "path": None, "name": drive_name((name or os.path.basename(source)) + ".x"),
+                "id": None, "iso_bytes": 0, "how": "remote",
+                "kind": {".iso": "dvd", ".cue": "cd"}.get(ext, "?")}
     path = source if os.path.isabs(source) else os.path.join(env["PS2_GAMES_PATH"], source)
     if not os.path.isfile(path):
         raise Fail("No such file: %s" % path)
     rel = os.path.relpath(path, env["PS2_GAMES_PATH"])
-    g = {"source": rel, "path": path, "name": drive_name(path), "id": None}
+    g = {"source": rel, "path": path, "name": drive_name((name + ".x") if name else path), "id": None}
     ext = os.path.splitext(path)[1].lower()
     if ext == ".iso":
         g.update(kind="dvd", iso_bytes=os.path.getsize(path), how="iso")
@@ -522,9 +579,9 @@ def plan(env, args, drive):
     for x in games:
         by_id.setdefault(x["id"], x)
     todo, skipped, names = [], [], set()
-    for source in args.files:
+    for name, source in [(None, f) for f in args.files] + [tuple(g) for g in args.game or []]:
         try:
-            g = describe(env, source)
+            g = describe(env, source, name)
         except Fail as e:
             skipped.append((source, str(e)))
             continue
@@ -545,7 +602,8 @@ def cmd_install(env, args):
     todo, skipped, need, free = plan(env, args, drive)
     print("Drive %s: PS2 APA, %s free" % (drive["disk"], gb(free)))
     for g in todo:
-        print("  INSTALL %-3s %-12s %s  <- %s (%s)" % (g["kind"].upper(), g["id"] or "?", g["name"], g["source"], gb(g["iso_bytes"])))
+        size = gb(g["iso_bytes"]) if g["how"] != "remote" else "size known once pulled"
+        print("  INSTALL %-3s %-12s %s  <- %s (%s)" % (g["kind"].upper(), g["id"] or "?", g["name"], g["source"], size))
     for source, why in skipped:
         print("  SKIP    %s: %s" % (source, why))
     print("Needs %s, %s free" % (gb(need), gb(free)))
@@ -569,6 +627,16 @@ def cmd_install(env, args):
             makedirs(tmp)
             print("%s: preparing" % g["name"])
             try:
+                if g["how"] == "remote":
+                    print("  pulling %s" % g["source"])
+                    g = describe(env, pull(env, g["source"], os.path.join(tmp, "pull")), g["name"])
+                    on_drive, free_now = drive_games(env, drive)
+                    same = [x for x in on_drive if g["id"] and x["id"] == g["id"]]
+                    if same and not args.allow_same_id:
+                        print("  SKIP: disc ID %s already on drive as '%s'" % (g["id"], same[0]["name"]))
+                        continue
+                    if g["iso_bytes"] > free_now:
+                        raise Fail("not enough space on the drive: needs %s, %s free" % (gb(g["iso_bytes"]), gb(free_now)))
                 iso, kind = prepare(env, g, tmp)
             except (Fail, subprocess.CalledProcessError) as e:
                 print("  FAILED preparing: %s" % e)
@@ -580,14 +648,17 @@ def cmd_install(env, args):
                 reason = " ".join(out.strip().splitlines()[-2:])
                 print("  FAILED: %s" % reason)
                 failed += 1
-                continue
-            subprocess.call(["sync"])
+                if g["name"] in [x["name"] for x in drive_games(env, drive)[0]]:
+                    print("  A PARTIAL copy of '%s' is now on the drive: delete it on the PS2 before installing it again." % g["name"])
+                print("Stopping here: the other games were not attempted.")
+                break
+            flush(drive)
             check = os.path.join(tmp, "readback.iso")
             print("%s: verifying" % g["name"])
             rc, out = hdl(env, ["extract", drive["dev"], g["name"], check], check=False)
             size = os.path.getsize(iso)
             if rc == 0 and os.path.getsize(check) >= size and same_prefix(iso, check, size):
-                print("  VERIFIED")
+                print("  VERIFIED (flushed to the drive)")
             else:
                 print("  FAILED: read-back does not match the source")
                 failed += 1
@@ -614,7 +685,9 @@ def main():
     p = sub.add_parser("install", help="install game files")
     p.add_argument("--dry-run", action="store_true", help="show the plan, write nothing")
     p.add_argument("--allow-same-id", action="store_true", help="install even if the disc ID is already on the drive")
-    p.add_argument("files", nargs="+")
+    p.add_argument("--game", nargs=2, action="append", metavar=("NAME", "SOURCE"),
+                   help="install SOURCE (a file, or node:/path) named NAME on the drive")
+    p.add_argument("files", nargs="*")
     args = ap.parse_args()
     if not args.cmd:
         ap.print_help()

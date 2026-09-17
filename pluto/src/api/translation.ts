@@ -32,6 +32,9 @@ export interface ProjectSummary {
   meta?: { product?: string } | null; total: number; done: number
 }
 
+// The build's release patch (.dcp): written path, or why it was skipped / failed (the build itself still succeeded).
+export interface ReleasePatch { path?: string; skipped?: string; error?: string; log?: string }
+
 export const translationApi = {
   // discovery / listing
   listProjects: () => getJson<{ projects?: unknown[] }>(`${BASE}/projects`),
@@ -51,7 +54,7 @@ export const translationApi = {
   createState: (ns: string, body: unknown) => sendJson<Record<string, unknown>>('POST', `${BASE}/${enc(ns)}`, body),
 
   // actions
-  run:     (path: string, lang: string) => sendJson<{ error?: string; dest?: string }>('POST', `${BASE}/run`, { path, lang }),
+  run:     (path: string, lang: string) => sendJson<{ error?: string; dest?: string; dcp?: ReleasePatch }>('POST', `${BASE}/run`, { path, lang }),
   openDir: (ns: string) => fetch(`${BASE}/open`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ ns }) }),
   remove:  (ns: string) => fetch(`${BASE}/delete`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ ns }) }),
 }

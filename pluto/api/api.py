@@ -42,6 +42,7 @@ from modules.substack import sender as substack
 from modules.google import scanner as google_scanner
 from modules.vmu import vmufs
 from modules.catalogue import service as catalogue
+from modules.catalogue import send as catalogue_send
 
 
 def open_path(path):
@@ -2257,7 +2258,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/translate/projects"), ("GET", "/translate/systems"), ("GET", "/translate/games"),
         ("GET", "/translate/extract"), ("GET", "/translate/sources"), ("GET", "/translate/meta"),
         ("GET", "/translate/{game}/textures"), ("GET", "/translate/{game}"),
-        ("GET", "/catalogue"), ("GET", "/catalogue/sync/stream"), ("GET", "/catalogue/missing-covers"), ("GET", "/catalogue/physical-only"),
+        ("GET", "/catalogue"), ("GET", "/catalogue/sync/stream"), ("GET", "/catalogue/search"), ("GET", "/catalogue/{system}/send/stream"), ("GET", "/catalogue/missing-covers"), ("GET", "/catalogue/physical-only"),
         ("GET", "/catalogue/{system}"),
         ("GET", "/catalogue/{system}/cover/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
@@ -2268,7 +2269,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("POST", "/workspace/{node}"), ("POST", "/config/open"), ("POST", "/native/{node}/{action}"),
         ("POST", "/sd/{node}"), ("POST", "/catalogue/{system}/favourite"), ("POST", "/catalogue/{system}/favourite-system"), ("POST", "/catalogue/{system}/label"), ("POST", "/catalogue/{system}/open"),
         ("POST", "/catalogue/{system}/cover/{game}"), ("POST", "/catalogue/{system}/play"),
-        ("POST", "/catalogue/{system}/send"), ("POST", "/catalogue/{system}/scan/{node}"), ("POST", "/catalogue/{system}/forget"),
+        ("POST", "/catalogue/{system}/send"), ("POST", "/catalogue/{system}/scan/{node}"), ("POST", "/catalogue/{system}/forget"), ("POST", "/catalogue/{system}/delete"),
         ("POST", "/translate/run"), ("POST", "/translate/open"), ("POST", "/translate/delete"),
         ("POST", "/translate/upload"), ("POST", "/translate/{game}"),
         ("PUT", "/translate/{game}"),
@@ -2316,6 +2317,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             qs = urllib.parse.parse_qs(parsed.query)
             self._handle_catalogue_sync_stream((qs.get("system") or ["*"])[0])
 
+        elif len(parts) == 4 and parts[0] == "catalogue" and parts[2] == "send" and parts[3] == "stream":
+            qs = urllib.parse.parse_qs(parsed.query)
+            self._handle_catalogue_send_stream(urllib.parse.unquote(parts[1]), {
+                "node": (qs.get("node") or [""])[0], "all": (qs.get("all") or [""])[0] in ("1", "true"),
+                "path": (qs.get("path") or [""])[0] or None})
+        elif parsed.path == "/catalogue/search":
+            qs = urllib.parse.parse_qs(parsed.query)
+            self._send(200, catalogue.search(self._catalogue_root(), (qs.get("q") or [""])[0]))
         elif parsed.path == "/catalogue/missing-covers":
             self._send(200, catalogue.missing_covers(self._catalogue_root()))
         elif parsed.path == "/catalogue/physical-only":
@@ -2455,11 +2464,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "send":
             body = self._read_json_body()
             if body is not None:
-                self._handle_catalogue_send(parts[1], str(body.get("path", "")), str(body.get("node") or ""), bool(body.get("all")))
+                self._handle_catalogue_send(parts[1], body)
         elif len(parts) == 4 and parts[0] == "catalogue" and parts[2] == "scan":
             body = self._read_json_body()
             if body is not None:
                 self._handle_catalogue_scan_post(parts[1], parts[3], body)
+        elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "delete":
+            body = self._read_json_body()
+            if body is not None:
+                self._handle_catalogue_delete(parts[1], str(body.get("game", "")), str(body.get("node", "")), str(body.get("path", "")))
         elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "forget":
             body = self._read_json_body()
             if body is not None:
@@ -3688,28 +3701,218 @@ class Handler(http.server.BaseHTTPRequestHandler):
         script = os.path.normpath(os.path.join(self.__class__.base_dir, "..", "nodes", "local", node, "scripts", "ps2hdd.py"))
         return "sudo python3 " + " ".join(shlex.quote(a) for a in [script] + args)
 
-    def _handle_catalogue_send(self, system, rel, node, send_all=False):
-        """Send a lab ROM (or, all=true, every present lab ROM of a game the node doesn't have
-        yet) to a node's drive. Only admin-drive nodes can take one, and the API can't write
-        their drive: the answer is the ONE Terminal command that does."""
-        if node not in self._catalogue_admin_nodes():
-            self._send(400, {"error": "sending games to %s is not available" % (node or "that node")}); return
-        if not send_all:
-            path = self._lab_rom(system, rel)
-            if not path or not os.path.isfile(path):
-                self._send(400, {"error": "not a lab ROM file"}); return
-            self._send(200, {"command": self._admin_command(node, ["install", path])}); return
-        if not re.match(r"^[A-Za-z0-9_.-]+$", system):
-            self._send(400, {"error": "bad system"}); return
-        paths = []
-        for g in catalogue.store.load(self._catalogue_root(), system)["games"].values():
-            present = [f for f in g["files"] if f["status"] == "present"]
-            if any(f["node"] == node for f in present):
-                continue
-            paths += [p for p in (self._lab_rom(system, f["path"]) for f in present if f["node"] == "lab") if p and os.path.isfile(p)]
-        if not paths:
-            self._send(400, {"error": "nothing to send: no lab game missing from %s" % node}); return
-        self._send(200, {"command": self._admin_command(node, ["install"] + sorted(paths)), "count": len(paths)})
+    def _handle_catalogue_send(self, system, body):
+        """POST form of the send (see _catalogue_send_run): one JSON answer at the end."""
+        lines = []
+        try:
+            result = self._catalogue_send_run(system, body, lines.append)
+        except catalogue_send.NotAvailable as exc:
+            self._send(400, {"error": str(exc), "lines": lines}); return
+        self._send(200, dict(result, lines=result.get("lines") or lines))
+
+    def _handle_catalogue_send_stream(self, system, body):
+        """SSE form of the send, for the Media console: `line` events as it goes, a `command`
+        event (JSON) when the target's strategy answers with a Terminal command, then `done`."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self._cors_headers()
+        self.end_headers()
+
+        def emit(event, data):
+            try:
+                for chunk in str(data).splitlines() or [""]:
+                    self.wfile.write(("event: %s\ndata: %s\n\n" % (event, chunk)).encode("utf-8"))
+                self.wfile.flush()
+            except Exception:
+                pass
+        try:
+            result = self._catalogue_send_run(system, body, lambda line: emit("line", line))
+            if result.get("status") == "command":
+                emit("command", json.dumps({"command": result["command"], "count": result.get("count")}))
+            emit("done", "ok")
+        except catalogue_send.NotAvailable as exc:
+            emit("line", "ERROR " + str(exc))
+            emit("done", "failed")
+        except Exception as exc:
+            emit("line", "send crashed: %s" % exc)
+            emit("done", "failed")
+
+    def _catalogue_send_run(self, system, body, emit):
+        """POST /catalogue/<system>/send {node, files: [{node, path}] | all: true} -- copy games
+        onto a node, whatever the node is. modules/catalogue/send.py plans the copies (skip what
+        the target has, pick a source node, canonical names) and the target's strategy runs
+        them; this handler never branches on the strategy. Answer: {status: "command", command}
+        (run it in Terminal) or {status: "done", lines}; a 400 says why nothing was sent."""
+        target = str(body.get("node") or "")
+        files = body.get("files") or ([{"node": "lab", "path": body["path"]}] if body.get("path") else [])
+        if not re.match(r"^[A-Za-z0-9_.-]+$", system) or not isinstance(files, list):
+            raise catalogue_send.NotAvailable("bad request")
+        target_cfg = self.__class__.config if target == "lab" else ((self.__class__.node_roster or {}).get(target) or {})
+        kind = catalogue_send.strategy_for(target_cfg, target)
+        if not kind:
+            raise catalogue_send.NotAvailable("%s can't take games" % (target or "that node"))
+        only_systems = [x.strip() for x in (target_cfg.get("SD_SEND_SYSTEMS") or "").split(",") if x.strip()]
+        if only_systems and system not in only_systems:
+            raise catalogue_send.NotAvailable("%s only takes %s games (SD_SEND_SYSTEMS)" % (target, ", ".join(only_systems)))
+        roster = self.__class__.node_roster or {}
+        sources = ["lab", "batocera"] + sorted(n for n in roster if n not in ("lab", "batocera", target))
+
+        def locate(src):
+            """Where the target's strategy can read a copy: lab = a local path, an SSH node =
+            node:/path (Batocera's roms layout); anything else (SD cards) not yet."""
+            if src["node"] == "lab":
+                p = self._lab_rom(system, src["path"])
+                return p if p and os.path.isfile(p) else None
+            alias = ((roster.get(src["node"]) or {}).get("CUSTOM_SSH_ALIAS") or "").strip()
+            if src["node"] == "batocera" and alias:
+                return "%s:/userdata/roms/%s/%s" % (alias, system, os.path.normpath(src["path"]))
+            return None
+
+        with self._catalogue_lock:
+            plan = catalogue_send.plan(self._catalogue_root(), system, target, sources,
+                                       files=[f for f in files if isinstance(f, dict)], all_missing=bool(body.get("all")))
+        emit("%s: %d to copy, %d skipped (%s)" % (target, len(plan["copies"]), len(plan["skipped"]), kind))
+        ctx = {"target": target, "system": system, "locate": locate, "emit": emit,
+               "command": lambda args: self._admin_command(target, args),
+               "rom_ext": lambda src: os.path.splitext(src.get("inner") or src["path"])[1], "unpack": kind == "sd",
+               "card": self._send_dest(kind, target, target_cfg, system) if kind in ("local", "batocera", "sd") else None}
+        try:
+            result = catalogue_send.STRATEGIES[kind](plan, ctx)
+        finally:
+            for sk in plan["skipped"]:
+                emit("skipped %s: %s" % (sk["game"], sk["why"]))
+        result.update(strategy=kind, skipped=plan["skipped"])
+        return result
+
+    def _send_dest(self, kind, node, cfg, system):
+        """I/O for the file-per-game send strategies (modules/catalogue/send.py _files):
+        {mount, exists, put, finish}. Every source is first fetched to a local temp file (a
+        node:/path source over SSH, which must come back whole; a .zip unpacked to its ROM for
+        cards), then written beside the target as .part, size-checked there, and renamed:
+        a send never leaves an empty or partial file.
+          local     <ROMS_PATH>/<system>/roms on this Mac
+          batocera  /userdata/roms/<system> over SSH
+          sd        the node's card in the Pi hub under SD_ROMS_DIR, mounted read-write"""
+        import shlex
+        import shutil
+        import zipfile
+        state = {"have": set(), "ours": False}
+        roster = self.__class__.node_roster or {}
+
+        def fetch(src, tmp, unpack):
+            m = re.match(r"^([A-Za-z0-9_.-]+):(/.*)$", src)
+            local = src
+            if m:
+                local = os.path.join(tmp, "src" + os.path.splitext(src)[1])
+                with open(local, "wb") as f:
+                    r = subprocess.run(["ssh", "-o", "ConnectTimeout=6", m.group(1), "cat " + shlex.quote(m.group(2))],
+                                       stdout=f, stderr=subprocess.PIPE, timeout=1800)
+                if r.returncode != 0 or os.path.getsize(local) == 0:
+                    raise catalogue_send.NotAvailable("could not read %s from %s: %s" % (
+                        os.path.basename(m.group(2)), m.group(1), r.stderr.decode("utf-8", "replace").strip()[-200:] or "empty file"))
+            if unpack and local.lower().endswith(".zip"):
+                with zipfile.ZipFile(local) as z:
+                    member = next(i for i in z.namelist() if not i.endswith("/"))
+                    rom = os.path.join(tmp, "rom")
+                    with z.open(member) as zi, open(rom, "wb") as f:
+                        shutil.copyfileobj(zi, f)
+                local = rom
+            if os.path.getsize(local) == 0:
+                raise catalogue_send.NotAvailable("%s is empty at the source" % os.path.basename(src))
+            return local
+
+        def ssh_sh(host, script, *args, stdin=None):
+            r = subprocess.run(["ssh", "-o", "ConnectTimeout=6", host,
+                                "sh -c %s _ %s" % (shlex.quote(script), " ".join(shlex.quote(a) for a in args))],
+                               stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=1800)
+            return r.returncode, r.stdout.decode("utf-8", "replace")
+
+        # One remote write, the same for Batocera and the Pi: .part, size check, rename.
+        REMOTE_PUT = ('%s sh -c \'cat > "$1.part"\' _ "$1" && [ "$(stat -c %%s "$1.part")" = "$2" ] '
+                      '&& %s mv "$1.part" "$1" || { %s rm -f "$1.part"; echo "size mismatch at the target"; exit 1; }')
+
+        def rescan(only, **kw):
+            lines = []
+            now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            try:
+                with self._catalogue_lock:
+                    catalogue.sync(self._catalogue_root(), system, self.__class__.consoles_config,
+                                   lambda n, argv, stdin=None: self._node_ssh(n, argv, timeout=600, connect_timeout=10, stdin=stdin),
+                                   None, lines.append, now, only=[only], **kw)
+            except Exception as exc:
+                lines.append("WARN rescan failed, run Sync: %s" % exc)
+            return lines
+
+        if kind == "local":
+            base = os.path.join(os.path.expanduser((self.__class__.config.get("ROMS_PATH") or "").strip()), system, "roms")
+
+            def mount():
+                os.makedirs(base, exist_ok=True)
+                state["have"] = set(os.listdir(base))
+
+            def put(src, name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    local = fetch(src, tmp, False)
+                    part = os.path.join(base, name + ".part")
+                    try:
+                        shutil.copyfile(local, part)
+                        if os.path.getsize(part) != os.path.getsize(local):
+                            raise catalogue_send.NotAvailable("size mismatch writing %s" % name)
+                        os.replace(part, os.path.join(base, name))
+                    finally:
+                        if os.path.exists(part):
+                            os.remove(part)
+                state["have"].add(name)
+
+            def finish():
+                return rescan("lab", lab_roms=(self.__class__.config.get("ROMS_PATH") or "").strip())
+
+        else:
+            if kind == "batocera":
+                host = ((roster.get("batocera") or {}).get("CUSTOM_SSH_ALIAS") or "batocera").strip()
+                base, sudo = "/userdata/roms/" + system, ""
+            else:
+                host = ((roster.get("pi") or {}).get("CUSTOM_SSH_ALIAS") or "pipc").strip()
+                label = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()][0]
+                mnt = "/mnt/cpc-sd/" + "".join(c for c in label if c.isalnum() or c in "-_")
+                base, sudo = mnt + "/" + (cfg.get("SD_ROMS_DIR") or "").strip().strip("/"), "sudo"
+
+            def mount():
+                if kind == "sd":
+                    rc, out = ssh_sh(host, 'D=/dev/disk/by-label/$1; [ -e "$D" ] || { echo "no card labelled $1 in the hub"; exit 2; }; '
+                                           'if mountpoint -q "$2"; then sudo mount -o remount,rw "$2" && echo reused; '
+                                           'else sudo mkdir -p "$2" && sudo mount "$D" "$2" && echo mounted; fi; '
+                                           'sudo mkdir -p "$3" && ls -1 "$3"', label, mnt, base)
+                else:
+                    rc, out = ssh_sh(host, 'mkdir -p "$1" && echo reused && ls -1 "$1"', base)
+                if rc != 0:
+                    raise catalogue_send.NotAvailable((out.strip().splitlines() or ["could not reach " + node])[-1])
+                lines = out.splitlines()
+                state["ours"] = bool(lines) and lines[0] == "mounted"
+                state["have"] = set(lines[1:])
+
+            def put(src, name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    local = fetch(src, tmp, kind == "sd")
+                    with open(local, "rb") as stream:
+                        rc, out = ssh_sh(host, REMOTE_PUT % (sudo, sudo, sudo), base + "/" + name,
+                                         str(os.path.getsize(local)), stdin=stream)
+                if rc != 0:
+                    raise catalogue_send.NotAvailable("copy failed for %s: %s" % (name, out.strip()[-200:]))
+                state["have"].add(name)
+
+            def finish():
+                if kind == "batocera":
+                    return rescan("batocera")
+                rc, out = ssh_sh(host, 'sync; if [ "$2" = 1 ]; then sudo umount "$1"; else sudo mount -o remount,ro "$1"; fi',
+                                 mnt, "1" if state["ours"] else "0")
+                lines = ["card flushed and %s" % ("unmounted: safe to pull" if state["ours"] else "back to read-only") if rc == 0
+                         else "WARN could not unmount the card: %s" % out.strip()[-200:]]
+                return lines + rescan(node, sd_nodes=self._catalogue_sd_nodes())
+
+        return {"mount": mount, "exists": lambda name: name in state["have"], "put": put, "finish": finish}
 
     def _handle_catalogue_scan_post(self, system, node, body):
         """POST /catalogue/<system>/scan/<node> {files: [{path, size}]}: a node's complete game
@@ -3731,6 +3934,40 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._catalogue_lock.release()
         print("  [CATALOGUE:%s] %s" % (node, " | ".join(lines)))
         self._send(200, {"ok": True, "lines": lines})
+
+    def _handle_catalogue_delete(self, system, game, node, rel):
+        """Delete a LAB copy: move it to this Mac's Trash (Finder, so Put Back works) and drop
+        it from the catalogue. A game in its own folder (.gdi/.cue + tracks) goes as the whole
+        folder, unless other catalogued games share that folder."""
+        if node != "lab":
+            self._send(400, {"error": "deleting from %s is not available, only lab copies" % node}); return
+        path = self._lab_rom(system, rel)
+        if not path:
+            self._send(404, {"error": "no such file in the lab ROMs"}); return
+        target = path
+        top = rel.replace("\\", "/").split("/")[0]
+        if "/" in rel.replace("\\", "/"):
+            doc = catalogue.store.load(self._catalogue_root(), system)
+            shared = [f for g in doc["games"].values() for f in g["files"]
+                      if f["node"] == "lab" and f["path"] != rel and f["path"].split("/")[0] == top]
+            if not shared:
+                target = self._lab_rom(system, top) or path
+        if not self._catalogue_lock.acquire(blocking=False):
+            self._send(409, {"error": "a catalogue sync is running, try again when it's done"}); return
+        try:
+            if platform.system() != "Darwin":
+                self._send(501, {"error": "moving to the Trash is macOS only"}); return
+            script = 'tell application "Finder" to delete (POSIX file %s as alias)' % json.dumps(target)
+            r = subprocess.run(["osascript", "-e", script], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60)
+            if r.returncode != 0 or os.path.exists(target):
+                self._send(502, {"error": "could not move to the Trash: %s" % (r.stdout or "").strip()[-200:]}); return
+            catalogue.forget_file(self._catalogue_root(), system, game, node, rel, removed_from_disk=True)
+        except ValueError as exc:
+            self._send(400, {"error": str(exc)}); return
+        finally:
+            self._catalogue_lock.release()
+        print("  [CATALOGUE:delete] %s -> Trash" % target)
+        self._send(200, {"ok": True, "trashed": target})
 
     def _handle_catalogue_forget(self, system, game, node, rel):
         """Remove one DELETED copy from the catalogue (it's gone from the node's disk)."""
@@ -4095,8 +4332,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not lang:
             self._send(400, {"error": "lang required"})
             return
+        # The build names its output like the catalogue does, author included: the credit
+        # comes from catalogue/<system>/variants.json for "<game>/T-<Code>".
+        game_dir = os.path.basename(os.path.dirname(path))
+        system = os.path.basename(os.path.dirname(os.path.dirname(path)))
+        code = lang[:1].upper() + lang[1:]
+        credits = catalogue.store.load_credits(self._catalogue_root(), system) if re.match(r"^[A-Za-z0-9_.-]+$", system) else {}
+        game_key = catalogue.names.key(catalogue.names.parse(game_dir + ".gdi")["title"])
+        author = ((credits.get(catalogue.names.variant_key(game_key, {"kind": "translation", "name": code}))) or {}).get("author") or ""
         rc, out = self._node_ssh("batocera",
-                                 ["sh", "/userdata/cpc-scripts/translate.sh", path, lang],
+                                 ["env", "AUTHOR=" + author, "sh", "/userdata/cpc-scripts/translate.sh", path, lang],
                                  timeout=600)
         dest = ""
         for line in out.splitlines():
@@ -4105,7 +4350,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if rc != 0:
             self._send(500, {"ok": False, "error": "translate failed", "log": out})
             return
-        self._send(200, {"ok": True, "dest": dest, "log": out})
+        dcp = self._make_release_patch(game_dir, system, lang, dest) if dest else {"skipped": "no DONE: line"}
+        self._send(200, {"ok": True, "dest": dest, "log": out, "dcp": dcp})
+
+    def _make_release_patch(self, game_dir, system, lang, dest):
+        """Write this build's Universal Dreamcast Patcher .dcp next to the game's releases:
+        <RELEASES_DIR>/<system>/<game>/<lang>/dist/<build name>.dcp, named exactly like the Batocera
+        image (the catalogue convention). Runs pluto-translate/dc/make_dcp.py here on the Lab, where
+        xdelta3 is. Needs the disc's extracted originals in dist/translate-originals/<game>/ (ROM data:
+        gitignored, never in a repo). Anything missing is reported, never fatal to the build itself."""
+        releases = (self.__class__.config.get("RELEASES_DIR") or "").strip()
+        if not releases:
+            return {"skipped": "RELEASES_DIR is not set in pluto/.env"}
+        script = os.path.join(os.path.dirname(self.__class__.base_dir), "pluto-translate", "dc", "make_dcp.py")
+        if not os.path.isfile(script):
+            return {"skipped": "make_dcp.py not on this host"}
+        originals = os.path.join(_dist_dir(), "translate-originals", game_dir)
+        if not os.path.isdir(originals):
+            return {"skipped": "no extracted originals at %s" % originals}
+        out_path = os.path.join(releases, system, game_dir, lang, "dist", os.path.basename(dest) + ".dcp")
+        textures = os.path.join(_translations_root(), "%s [%s]" % (game_dir, lang), "textures")
+        try:
+            r = subprocess.run([sys.executable, script, "%s [%s]" % (game_dir, lang), originals, textures,
+                                out_path, "http://localhost:%d" % PORT],
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=900)
+        except subprocess.TimeoutExpired:
+            return {"error": "make_dcp.py timed out"}
+        log = r.stdout.decode(errors="replace")
+        if r.returncode != 0:
+            return {"error": (log.strip().splitlines() or ["make_dcp.py failed"])[-1], "log": log}
+        return {"path": out_path, "log": log}
 
     # ── Node / connection builders ────────────────────────────────────────────
 
@@ -4236,8 +4510,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "folder": bool(smb),
                 # Set = this console's saves live on a card read via the Pi hub.
                 "sd":     (console_cfg.get("SD_LABEL") or "").strip() or None,
-                # Set = the Media tab can send lab ROMs to this node's drive (PS2 HDD).
-                "send":   bool((console_cfg.get("PS2_HDD_BYTES") or "").strip()),
+                # Set = the Media tab can send games to this node (catalogue send strategy:
+                # PS2 drive, or an SD card with SD_ROMS_DIR). sendSystems narrows which of
+                # the node's systems (SD_SEND_SYSTEMS), None = all it hosts.
+                "send":   bool(catalogue_send.strategy_for(console_cfg, node_id)),
+                "sendSystems": [x.strip() for x in (console_cfg.get("SD_SEND_SYSTEMS") or "").split(",") if x.strip()] or None,
                 "code":   has_code,
                 # Precedence: .env OS= override > known-by-definition > probe TTL.
                 # (e.g. OS=native on a Wii homebrew build to drop the Tux.)
@@ -4279,6 +4556,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "code":   False,
                 "os":     lab_os,
                 "lab":    True,
+                # the Lab takes games into its own library (send strategy "local")
+                "send":   bool(deploy_engine and (cfg.get("ROMS_PATH") or "").strip()),
             }
 
         # The 'cloud' hub is virtual -- like 'gateway' it has no config dir. Cloud
