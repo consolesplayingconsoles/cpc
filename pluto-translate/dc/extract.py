@@ -18,10 +18,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import sources                              # _load_config (typology + parser per kind)
-from parsers import nullsplit, lines, ptrtable, exemsg, itemtbl   # console-agnostic format strategies
+from parsers import nullsplit, lines, ptrtable, exemsg, itemtbl, tbgtext   # console-agnostic format strategies
 
 PARSERS = {"nullsplit": nullsplit.parse, "lines": lines.parse, "ptrtable": ptrtable.parse,
-           "exemsg": exemsg.parse, "itemtbl": itemtbl.parse}
+           "exemsg": exemsg.parse, "itemtbl": itemtbl.parse, "tbgtext": tbgtext.parse}
 
 
 def _has_gaiji(hexstr):

@@ -20,9 +20,10 @@ never by fragile in-place shifting.
 
 from . import ptrtable          # noqa: F401
 from . import nullsplit         # noqa: F401
+from . import tbgtext           # noqa: F401
 
 # ptrtable.pack -> bytes ; nullsplit.pack -> (bytes, stats). Callers handle the shape.
-PACKERS = {"ptrtable": ptrtable.pack, "nullsplit": nullsplit.pack}
+PACKERS = {"ptrtable": ptrtable.pack, "nullsplit": nullsplit.pack, "tbgtext": tbgtext.pack}
 
 
 def pack(kind, orig, blocks, encode, **kw):

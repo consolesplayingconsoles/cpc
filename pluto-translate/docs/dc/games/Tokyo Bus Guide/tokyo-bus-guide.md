@@ -28,8 +28,14 @@ Two surfaces, two techniques.
 | Surface | Where | Technique |
 |---|---|---|
 | Menu / course labels | `\SYSTEM\menu.pvm` (+ `title.pvm`, `common.pvm`) | PVR repaint (`../../textures.md`) |
-| Instructor dialogue | `1ST_READ.BIN` | `exemsg` same-size in-exe rewrite |
-| Save / VM menu strings | `1ST_READ.BIN` | same |
+| Instructor dialogue | `1ST_READ.BIN` | **done**: rebuilt from the decomp, no byte limit |
+| Save / VM menu strings | `1ST_READ.BIN` | **done**: same |
+| Chat while driving | `*_TEXT.DAT` (21 files) | `tbgtext` parser + packer, grows the file |
+
+The executable surfaces are already translated, and not by patching bytes: the game
+is rebuilt from lhsazevedo's decompilation, so a string may be any length. See
+`nodes/local/dc/homebrew/mods/tokyo-bus-guide` in `dreamcast-homebrew`. Lines still
+have to fit the on-screen box: **22 full-width characters per line, 2 lines**.
 
 Menu labels are **sprites, not strings**: the engine draws them with
 `TxtDrawSprite(group, texture_id, x, y, priority)`, so "Story", "Free Run",
@@ -37,8 +43,27 @@ Menu labels are **sprites, not strings**: the engine draws them with
 
 The dialogue is the opposite: 133 Shift-JIS literals sit in the executable as
 `{char *text, int portrait}` arrays (the whole instructor script), plus 9 more in
-the VM save menu. Same shape the `exemsg` packer already handles, so that surface
-needs wiring rather than new tooling.
+the VM save menu. Those are translated in the decomp source itself.
+
+### Chat while driving: `*_TEXT.DAT`
+
+The passengers' conversations, three files per area (`S_`, `W_`, `O_`), all
+little-endian:
+
+    [u32 scene table]   first entry = the table's own size, so count = first // 4;
+                        each entry points into the pair area
+    [pair area]         (u32 textOffset, u32 id) records; a scene is a run of them
+                        ending in one whose id is 0x7fffffff and whose text is empty
+    [strings]           NUL-terminated Shift-JIS, 4-aligned, `<E>` = line break
+
+`id` is a voice id, except in `SYSTEM/S_TEXT.DAT` where the second field is a second
+line. The 21 files on the disc repeat across areas, so they hold only **1,292
+distinct lines** (~26,000 characters).
+
+`parsers/tbgtext.py` reads them and `packers/tbgtext.py` writes them back by index
+rewrite: the scene table and pair area keep their size, the strings are re-emitted and
+every pointer is repointed, so English can be longer. All 21 files round-trip
+byte-identically when nothing is translated.
 
 ## Resource group format
 
@@ -109,11 +134,9 @@ read.
 
 ### Pipeline blockers to clear first
 
-**The texture splice is uppercase-only.** `translate.sh` globs
-`"$TEX"/*.PVR "$TEX"/*.PVM` and matches the original with a case-sensitive `find`.
-Doraemon's filenames are uppercase; this game's are lowercase (`menu.pvm`,
-`\SYSTEM`). As written a repainted `menu.pvm` is never picked up and the build
-reports success having patched nothing.
+(The texture splice's case-sensitive globs are fine here: the filenames on the disc
+are uppercase, as Doraemon's are. The lowercase names in the decomp sources are how
+the code spells them, not how they are stored.)
 
 **`build_patch.py`'s `PLAN` is Doraemon-only.** A source with no `PLAN` entry is
 skipped silently, so this game currently produces no patched files at all.
@@ -125,12 +148,11 @@ plus a `DONE:` line.
 (The hardcoded `S18RM04.FON` font step was the same class of bug and is fixed:
 it now skips when the disc has no such file.)
 
-### Cheaper first, if the goal is just to be playing
+### What is left
 
-The menu needs a new repaint script; the instructor dialogue does not. Those 133
-strings are already the shape `exemsg` handles. If the aim is readable text
-soonest, dialogue is the shorter path, and four menu items are learnable by
-position anyway.
+The executable text is done. What remains is the chat while driving (1,292 lines,
+tooling ready) and the menu/course labels, which are pixels and need a repaint
+script.
 
 ## Gotcha: reading the decomp sources
 
