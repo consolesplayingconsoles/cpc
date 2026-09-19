@@ -17,6 +17,8 @@
   "savePatterns": {
     "saturn":     [".bkr", ".bcr", ".smpc", ".brm", "ss_save.bin", "ss_mems.bin"],
     "megadrive":  [".srm"],
+    "mastersystem": [".srm"],
+    "sg1000":     [".srm"],
     "gb":         [".sav", ".srm"],
     "gbc":        [".sav", ".srm"],
     "gba":        [".sav", ".srm"],
@@ -35,6 +37,7 @@
   "systems": {
     "megadrive":      { "brand": "Sega", "name": "Mega Drive", "icon": "megadrive", "header": "megadrive", "thumbnails": "Sega_-_Mega_Drive_-_Genesis" },
     "mastersystem":   { "brand": "Sega", "name": "Master System", "icon": "sms", "header": "sms", "thumbnails": "Sega_-_Master_System_-_Mark_III", "extensions": [".sms"] },
+    "sg1000":         { "brand": "Sega", "name": "SG-1000", "icon": "sg1000", "thumbnails": "Sega_-_SG-1000", "extensions": [".sg", ".sc"] },
     "gamegear":       { "brand": "Sega", "name": "Game Gear", "icon": "gamegear", "header": "sms", "thumbnails": "Sega_-_Game_Gear" },
     "saturn":         { "brand": "Sega", "name": "Saturn", "icon": "saturn", "header": "saturn", "thumbnails": "Sega_-_Saturn" },
     "dreamcast":      { "brand": "Sega", "name": "Dreamcast", "icon": "dc", "header": "dreamcast", "thumbnails": "Sega_-_Dreamcast", "emulator": "flycast" },
@@ -53,7 +56,7 @@
     "nes":            { "brand": "Nintendo", "name": "NES", "icon": "nes", "thumbnails": "Nintendo_-_Nintendo_Entertainment_System" },
     "n64":            { "brand": "Nintendo", "name": "Nintendo 64", "icon": "n64", "thumbnails": "Nintendo_-_Nintendo_64" },
     "gb":             { "brand": "Nintendo", "name": "Game Boy", "icon": "gb", "thumbnails": "Nintendo_-_Game_Boy" },
-    "gbc":            { "brand": "Nintendo", "name": "Game Boy Color", "icon": "gbc", "thumbnails": "Nintendo_-_Game_Boy_Color" },
+    "gbc":            { "brand": "Nintendo", "name": "Game Boy Color", "icon": "gbc", "thumbnails": "Nintendo_-_Game_Boy_Color", "extensions": [".gbc", ".gb"] },
     "nds":            { "brand": "Nintendo", "name": "Nintendo DS", "icon": "nds", "thumbnails": "Nintendo_-_Nintendo_DS" },
     "psx":            { "brand": "Sony", "name": "PlayStation", "icon": "psx", "thumbnails": "Sony_-_PlayStation" },
     "ps2":            { "brand": "Sony", "name": "PlayStation 2", "icon": "ps2", "thumbnails": "Sony_-_PlayStation_2" },
@@ -92,13 +95,16 @@
     "mgba":    { "name": "mGBA",    "app": "mGBA",    "args": ["{rom}"] },
     "ppsspp":  { "name": "PPSSPP",  "app": "PPSSPPSDL", "args": ["{rom}"] }
   },
+  "_scanSkipDirsComment": "Directories a scan walks past, on top of scan.py's own list. The Master System EverDrive card ships every game twice: all 447 under 'ROM A-Z' and the same ones again split by region, so those folders are duplicates, not games. SAVE is the cart's save folder and System Volume Information is Windows bookkeeping.",
+  "scanSkipDirs": ["ROM-Europe", "ROM-USA Europe", "ROM-JAPAN", "ROM-Brazil", "ROM-USA", "ROM-JUE", "ROM-Korea", "SAVE", "System Volume Information"],
   "nodeConsoles": {
     "dc":        ["dreamcast"],
     "vmu":       ["dreamcast"],
     "wii":       ["wii", "gamecube"],
     "megadrive": ["megadrive", "mastersystem"],
+    "sms":       ["mastersystem", "sg1000"],
     "saturn":    ["saturn"],
-    "gba":       ["gba"],
+    "gba":       ["gba", "gbc"],
     "ws":        ["wswan", "wswanc"],
     "ps3":       ["ps3"],
     "ps2":       ["ps2"],

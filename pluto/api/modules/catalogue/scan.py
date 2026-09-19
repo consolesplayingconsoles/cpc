@@ -33,6 +33,10 @@ except ImportError:
 
 SKIP_DIRS = {"images", "videos", "manuals", "media", "downloaded_images", "downloaded_videos",
              "EDMD"}                                   # Mega EverDrive firmware + its saves, not games
+# More dirs to walk past, per install rather than per code change: config/consoles.json
+# `scanSkipDirs`. A pre-loaded card ships the same games twice -- the Master System
+# EverDrive card files all 447 under "ROM A-Z" AND again under "ROM-Europe", "ROM-JAPAN"
+# and so on -- and those copies are not extra games, they are the same ones.
 SKIP_EXTS = {".xml", ".txt", ".png", ".jpg", ".jpeg", ".mp4", ".pdf", ".cfg", ".srm", ".sav",
              # not games: shortcuts, backups, unfinished downloads, scene/OS leftovers
              ".url", ".lnk", ".old", ".bak", ".tmp", ".part", ".crdownload", ".nfo", ".sfv",
@@ -105,7 +109,8 @@ def scan_dir(sysdir, fmt=None, skip=None):
     skip = skip or {}
     files = []
     for dirpath, dirnames, filenames in os.walk(sysdir):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not d.startswith("."))
+        skip_dirs = SKIP_DIRS | set(skip.get("dirs") or [])
+        dirnames[:] = sorted(d for d in dirnames if d not in skip_dirs and not d.startswith("."))
         for name in sorted(filenames):
             if _skipped(name, skip):
                 continue
@@ -149,16 +154,18 @@ def scan_dir(sysdir, fmt=None, skip=None):
 
 
 def skip_rules(consoles_config):
-    """Save/state files to leave out of a scan, from config/consoles.json: every
-    savePatterns/statePatterns entry (an extension or an exact file name) and the
-    saveFormats.stateContains substrings (batocera's .state1, .state2, ...)."""
+    """What a scan leaves out, from config/consoles.json: every savePatterns/statePatterns
+    entry (an extension or an exact file name), the saveFormats.stateContains substrings
+    (batocera's .state1, .state2, ...) and scanSkipDirs (whole directories: a pre-loaded
+    card's duplicate region folders)."""
     exts, names_ = set(), set()
     for group in ("savePatterns", "statePatterns"):
         for pats in (consoles_config.get(group) or {}).values():
             for p in pats:
                 (exts if p.startswith(".") else names_).add(p.lower())
     contains = [c.lower() for c in ((consoles_config.get("saveFormats") or {}).get("stateContains") or [])]
-    return {"exts": sorted(exts), "names": sorted(names_), "contains": contains}
+    return {"exts": sorted(exts), "names": sorted(names_), "contains": contains,
+            "dirs": sorted(consoles_config.get("scanSkipDirs") or [])}
 
 
 def remote_library():

@@ -208,8 +208,11 @@ const onlyDigital = ref(false)
 const onlyPhysical = ref(false)
 const onlySaved = ref(false)
 const deletedOnly = ref(false)                  // games whose every file is gone from its node
-const noCoverOnly = ref(false)                  // no image linked in the catalogue (same rule as Missing covers)
-const activeFilters = computed(() => [favOnly.value, onlyDigital.value, onlyPhysical.value, onlySaved.value, deletedOnly.value, noCoverOnly.value].filter(Boolean).length)
+const noCoverOnly = ref(false)
+// Nodes: none checked = every node; several = a game on ANY of them.
+const nodeFilter = ref<string[]>([])
+const toggleNode = (n: string) => { nodeFilter.value = nodeFilter.value.includes(n) ? nodeFilter.value.filter(x => x !== n) : [...nodeFilter.value, n] }                  // no image linked in the catalogue (same rule as Missing covers)
+const activeFilters = computed(() => [favOnly.value, onlyDigital.value, onlyPhysical.value, onlySaved.value, deletedOnly.value, noCoverOnly.value, nodeFilter.value.length > 0].filter(Boolean).length)
 const filterOpen = ref(false)
 const sendMenuOpen = ref(false)
 function closeFilterMenu(e: MouseEvent) {
@@ -217,7 +220,7 @@ function closeFilterMenu(e: MouseEvent) {
 }
 onMounted(() => document.addEventListener('click', closeFilterMenu))
 onUnmounted(() => document.removeEventListener('click', closeFilterMenu))
-watch(system, () => { favOnly.value = false; onlyDigital.value = false; onlyPhysical.value = false; onlySaved.value = false; deletedOnly.value = false; noCoverOnly.value = false; groupBy.value = ''; kindTab.value = 'game' })
+watch(system, () => { favOnly.value = false; onlyDigital.value = false; onlyPhysical.value = false; onlySaved.value = false; deletedOnly.value = false; noCoverOnly.value = false; nodeFilter.value = []; groupBy.value = ''; kindTab.value = 'game' })
 
 // Group by a metadata field. Which fields: systems.<x>.filters, else defaultFilters, and
 // only those with at least one value among this system's games (coverage is uneven).
@@ -282,7 +285,8 @@ const games = computed<Game[]>(() => {
     (!onlyPhysical.value || g.physical.length > 0) &&
     (!onlySaved.value || g.saves.length > 0) &&
     (!deletedOnly.value || onlyDeleted(g)) &&
-    (!noCoverOnly.value || (g.cover !== 'custom' && g.cover !== 'cached')))
+    (!noCoverOnly.value || (g.cover !== 'custom' && g.cover !== 'cached')) &&
+    (!nodeFilter.value.length || g.nodes.some(n => nodeFilter.value.includes(n))))
   return q ? all.filter(g => g.title.toLowerCase().includes(q) || g.files.some(f => f.path.toLowerCase().includes(q))
                           || Object.values(g.meta ?? {}).some(v => v.toLowerCase().includes(q))) : all
 })
@@ -360,6 +364,30 @@ function sync(target: string) {
     if (syncOut.value) syncOut.value = { ...syncOut.value, ok, step: ok ? 'done' : 'failed' }
     if (ok) setTimeout(() => unlock(`Successfully Synced ${target === '*' ? 'All Systems' : systemName(target)}`, `${Math.round((Date.now() - startedAt) / 1000)}s`), 600)
     load()
+  })
+  es.onerror = () => {
+    es.close()
+    if (syncOut.value?.ok === null) syncOut.value = { ...syncOut.value, raw: syncOut.value.raw + '\n[connection lost]', ok: false, step: 'failed' }
+  }
+}
+// Saved games: its own button next to this console's Sync, because backing up saves is the
+// step you want BEFORE writing to a card -- for THIS console, not every card you own.
+// Streams into the same console as sync.
+function syncSaves(target: string) {
+  termTitle.value = 'saves'
+  adminCommands.value = []
+  syncOut.value = { raw: '', ok: null, step: systemName(target) + ' saves', startedAt: Date.now() }
+  const es = new EventSource(catalogueApi.savesUrl(target))
+  es.addEventListener('line', (e: MessageEvent) => {
+    if (syncOut.value) syncOut.value = { ...syncOut.value, raw: syncOut.value.raw + e.data + '\n' }
+  })
+  es.addEventListener('step', (e: MessageEvent) => {
+    if (syncOut.value) syncOut.value = { ...syncOut.value, step: e.data }
+  })
+  es.addEventListener('done', (e: MessageEvent) => {
+    es.close()
+    const ok = e.data === 'ok'
+    if (syncOut.value) syncOut.value = { ...syncOut.value, ok, step: ok ? 'done' : 'failed' }
   })
   es.onerror = () => {
     es.close()
@@ -548,6 +576,7 @@ const termStyle = computed(() => ({
           </span>
           <span v-if="view?.syncedAt" class="md__synced">Synced {{ view.syncedAt.slice(0, 16).replace('T', ' ') }}</span>
           <UiButton :loading="syncing" loading-text="Syncing…" @click="sync(system)">Sync</UiButton>
+          <UiButton :disabled="syncing" @click="syncSaves(system)">Sync saves</UiButton>
           <span v-if="sendTargets.length" class="md__filter-menu">
             <UiButton :disabled="syncing" @click.stop="sendMenuOpen = !sendMenuOpen">Send all to ▾</UiButton>
             <div v-if="sendMenuOpen" class="md__menu md__menu--right" role="menu">
@@ -573,6 +602,10 @@ const termStyle = computed(() => ({
             <label><input v-model="onlySaved" type="checkbox" /> Has a save</label>
             <label><input v-model="noCoverOnly" type="checkbox" /> No cover</label>
             <label><input v-model="onlyPhysical" type="checkbox" /> Physical copies</label>
+            <span v-if="view?.hosts.length" class="md__menu-sep">Nodes</span>
+            <label v-for="n in view?.hosts ?? []" :key="n">
+              <input type="checkbox" :checked="nodeFilter.includes(n)" @change="toggleNode(n)" /> {{ nodeName(n) }}
+            </label>
           </div>
         </span>
         <span v-if="groupFields.length" class="md__group">
@@ -605,7 +638,8 @@ const termStyle = computed(() => ({
           <button v-if="onlySaved" class="md__pill" @click="onlySaved = false">Has a save ✕</button>
           <button v-if="noCoverOnly" class="md__pill" @click="noCoverOnly = false">No cover ✕</button>
           <button v-if="onlyPhysical" class="md__pill" @click="onlyPhysical = false">Physical copies ✕</button>
-          <button class="md__pill-clear" @click="onlyDigital = onlyPhysical = favOnly = onlySaved = deletedOnly = noCoverOnly = false">Clear all</button>
+          <button v-for="n in nodeFilter" :key="n" class="md__pill" @click="toggleNode(n)">{{ nodeName(n) }} ✕</button>
+          <button class="md__pill-clear" @click="onlyDigital = onlyPhysical = favOnly = onlySaved = deletedOnly = noCoverOnly = false; nodeFilter = []">Clear all</button>
         </span>
       </UiSubTabs>
       <!-- stage = the non-scrolling frame: the drawer pins to it, the body scrolls inside -->
@@ -761,6 +795,7 @@ const termStyle = computed(() => ({
 .md__menu label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 13px; border-radius: var(--r-sm); cursor: pointer; white-space: nowrap; }
 .md__menu label:hover, .md__menu-item:hover { background: var(--surface-2); }
 .md__menu--right { left: auto; right: 0; }
+.md__menu-sep { margin: 4px 0 0; padding: 4px 6px 0; border-top: 1px solid var(--line); font-size: 11px; font-weight: 600; color: var(--text-faint); }
 .md__menu-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font: inherit; font-size: 13px; color: var(--text); text-align: left; background: none; border: 0; border-radius: var(--r-sm); cursor: pointer; white-space: nowrap; }
 .md__menu-item img { width: 20px; height: 20px; object-fit: contain; }
 .md__state { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); margin-bottom: var(--sp-4); }

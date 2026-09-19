@@ -346,8 +346,9 @@ def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=B
 
     run_ssh(node, argv, stdin=None) -> (rc, output); saves_lookup(system) -> {stem: [nodes]} or None.
     lab_roms = this machine's ROMS_PATH (None = no lab source).
-    sd_nodes = {node: {"labels": [...], "roms_dir": "SAROO/ISO", "hub": "pi"}} for consoles
-    whose games live on SD cards read through the Pi hub (node .env SD_LABEL / SD_ROMS_DIR).
+    sd_nodes = {node: {"labels": [...], "roms_dir": "SAROO/ISO", "hub": "pi", "strip": regex}}
+    for consoles whose games live on SD cards read through the Pi hub (node .env SD_LABEL /
+    SD_ROMS_DIR / SD_NAME_STRIP -- the last one for a card that numbers its game files).
     admin_nodes = {node: command} for drives only root can read (the PS2 HDD): sync prints the
     command to run in Terminal, which reads the drive and POSTs it back (merge_posted).
 
@@ -426,7 +427,8 @@ def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=B
                 for s, prefixed in by_system.items():
                     try:
                         _merge_system(root, s, node, {"files": prefixed, "gamelist": ""}, favs, saves_once, emit, now,
-                                      ((consoles_config.get("systems") or {}).get(s) or {}).get("thumbnails"), scope=label + "/")
+                                      ((consoles_config.get("systems") or {}).get(s) or {}).get("thumbnails"),
+                                      scope=label + "/", strip=(sd_nodes.get(node) or {}).get("strip"))
                         merged += 1
                     except Exception as exc:
                         emit("WARN %s/%s[%s]: merge failed, skipped (%s)" % (node, s, label, exc)); skipped += 1
@@ -521,9 +523,9 @@ def _systems_with_node(root, node):
     return out
 
 
-def _merge_system(root, system, node, found, favs, saves_lookup, emit, now, thumbnails=None, scope=None):
+def _merge_system(root, system, node, found, favs, saves_lookup, emit, now, thumbnails=None, scope=None, strip=None):
     doc = store.load(root, system)
-    counts, warnings, renames = store.merge(doc, node, found["files"], now, scope)
+    counts, warnings, renames = store.merge(doc, node, found["files"], now, scope, strip)
     scraped = gamelist.parse(found["gamelist"]) if found["gamelist"] else {}
     store.apply_scraped(doc, node, scraped)
     imported = store.import_favourites(favs, doc, node, scraped, now)

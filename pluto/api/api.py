@@ -550,7 +550,7 @@ def _collect_save_items(system, sysdir):
     return [items[k] for k in sorted(items)]
 
 
-def _sync_batocera(roster):
+def _sync_batocera(roster, emit=None, only=None):
     """MVP Sync (Pluto-orchestrated): mirror batocera's /userdata/saves -> Dropbox in
     TWO trees by whether a file can travel to real hardware:
       - battery SAVES -> /saves/<console>/     (canonical, shared, conflict-tracked)
@@ -559,18 +559,25 @@ def _sync_batocera(roster):
     Each tree keeps its own _cpc.json ledger (crc32 + timestamp + last-writer + name +
     save|state class). Save conflicts -- a cloud entry owned by ANOTHER node with a
     different checksum -- are FLAGGED and never overwritten (start firing once VMU writes
-    the same console). Overrides snapshot to /backups first. Reports to the chat feed."""
+    the same console). Overrides snapshot to /backups first. Reports to the chat feed, and
+    to emit(line) when the caller is streaming (Media's Sync saves) -- say() does both.
+    only = one console (the Media page backs up the console you are looking at, not the lot)."""
     sender = "dropbox"
+
+    def say(msg):
+        _new_message(sender, msg)
+        if emit:
+            emit(msg)
     try:
         token = _dropbox_access_token(roster)
     except DropboxAuthError as exc:
-        _new_message(sender, "backup: %s." % exc); return
+        say("backup: %s." % exc); return
     if not token:
-        _new_message(sender, "backup: no Dropbox credentials -- set the refresh trio (or DROPBOX_TOKEN) in nodes/cloud/dropbox/.env."); return
+        say("backup: no Dropbox credentials -- set the refresh trio (or DROPBOX_TOKEN) in nodes/cloud/dropbox/.env."); return
     bato = (roster or {}).get("batocera") or {}
     tgt  = bato.get("CUSTOM_SSH_ALIAS", "").strip() or bato.get("HOST_IP", "").strip()
     if not tgt:
-        _new_message(sender, "backup: batocera has no SSH alias or HOST_IP."); return
+        say("backup: batocera has no SSH alias or HOST_IP."); return
 
     # Pull a local mirror first -- rsync handles SSH, spaces in names, and deltas, so
     # everything after is a local file walk (crc/classify/diff) + targeted uploads.
@@ -578,12 +585,17 @@ def _sync_batocera(roster):
     excludes = []
     for d in _FORMATS["skipDirs"]:
         excludes += ["--exclude", d + "/"]
+    src = "%s:/userdata/saves/%s" % (tgt, (only + "/") if only else "")
+    dest = os.path.join(scratch, only) if only else scratch
+    # ConnectTimeout: saves back-ups run one node after another (two nodes writing one
+    # console's ledger would race), so a powered-off Batocera must fail in seconds rather
+    # than hold the queue for SSH's default ~75s.
     try:
-        subprocess.run(["rsync", "-a", "--timeout=30"] + excludes +
-                       ["%s:/userdata/saves/" % tgt, scratch + "/"],
+        subprocess.run(["rsync", "-a", "--timeout=30",
+                        "-e", "ssh -o ConnectTimeout=8 -o BatchMode=yes"] + excludes + [src, dest + "/"],
                        capture_output=True, timeout=180, check=True)
     except Exception as exc:
-        _new_message(sender, "backup: couldn't pull batocera saves (%s)." % exc); return
+        say("backup: couldn't pull batocera saves (%s)." % exc); return
 
     now   = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     stamp = now.replace(":", "").replace("-", "")          # path-safe ts for /backups
@@ -591,7 +603,7 @@ def _sync_batocera(roster):
     conflict_names = []
     _sync_audit(event="sync_start", node="batocera")
 
-    for system in sorted(os.listdir(scratch)):
+    for system in ([only] if only else sorted(os.listdir(scratch))):
         sysdir = os.path.join(scratch, system)
         if not os.path.isdir(sysdir):
             continue
@@ -642,7 +654,7 @@ def _sync_batocera(roster):
                 _dropbox_upload(token, cloud_path, data)
             except Exception as exc:
                 _sync_audit(event="upload_failed", console=system, file=rel, error=str(exc))
-                _new_message(sender, "backup: upload failed for %s/%s (%s)" % (system, rel, exc))
+                say("backup: upload failed for %s/%s (%s)" % (system, rel, exc))
                 continue
             up += 1
             _sync_audit(event="upload", console=system, file=rel, sum=summ,
@@ -655,20 +667,20 @@ def _sync_batocera(roster):
         if saves_new:
             body = json.dumps({"console": system, "saves": saves_new}, indent=2).encode()
             try:    _dropbox_upload(token, saves_lp, body)
-            except Exception as exc: _new_message(sender, "backup: saves ledger write failed for %s (%s)" % (system, exc))
+            except Exception as exc: say("backup: saves ledger write failed for %s (%s)" % (system, exc))
         if states_new:
             body = json.dumps({"console": system, "node": "batocera", "saves": states_new}, indent=2).encode()
             try:    _dropbox_upload(token, states_lp, body)
-            except Exception as exc: _new_message(sender, "backup: states ledger write failed for %s (%s)" % (system, exc))
+            except Exception as exc: say("backup: states ledger write failed for %s (%s)" % (system, exc))
 
     _sync_audit(event="sync_done", node="batocera", uploaded=up, unchanged=unchanged,
                 overrides=overrides, conflicts=conflicts)
-    msg = "batocera backup: %d uploaded, %d unchanged" % (up, unchanged)
+    msg = "batocera %sbackup: %d uploaded, %d unchanged" % ((only + " ") if only else "", up, unchanged)
     if overrides:
         msg += " (%d override(s) backed up to /backups)" % overrides
     if conflicts:
         msg += ", %d CONFLICT(s) flagged (kept cloud copy): %s" % (conflicts, ", ".join(conflict_names[:6]))
-    _new_message(sender, msg + ".")
+    say(msg + ".")
 
 
 # VMU saves ARE Dreamcast saves, so they share the canonical console namespace rather
@@ -728,7 +740,7 @@ def _dropbox_error_hint(exc):
     return "%s: %s" % (exc.__class__.__name__, exc)
 
 
-def _sync_vmu_to_cloud(roster):
+def _sync_vmu_to_cloud(roster, emit=None):
     """Thread entrypoint: run the backup, and make sure ANY failure reaches the feed.
 
     A background sync that dies on an unhandled exception is worse than one that simply
@@ -737,14 +749,16 @@ def _sync_vmu_to_cloud(roster):
     the ledger fetch's 401 propagated out and the daemon thread vanished in silence.
     """
     try:
-        _sync_vmu_run(roster)
+        _sync_vmu_run(roster, emit)
     except Exception as exc:
         detail = _dropbox_error_hint(exc)
         _sync_audit(event="sync_failed", node="vmu", error=detail)
         _new_message("dropbox", "vmu backup failed: %s." % detail)
+        if emit:
+            emit("vmu backup failed: %s." % detail)
 
 
-def _sync_vmu_run(roster):
+def _sync_vmu_run(roster, emit=None):
     """BACKUP the physical VMU -> Dropbox /saves/dreamcast, one cloud object per save.
 
     UPLOAD ONLY. Nothing in this path writes to the VMU: the card is the source of
@@ -763,23 +777,29 @@ def _sync_vmu_run(roster):
     # (uploads, ledger, what lost to a newer copy), so the cloud connector speaks for
     # every sync whichever node was read. Same voice as the batocera sync.
     sender = "dropbox"
+
+    def say(msg):
+        _new_message(sender, msg)
+        if emit:
+            emit(msg)
+
     try:
         token = _dropbox_access_token(roster)
     except DropboxAuthError as exc:
-        _new_message(sender, "backup: %s." % exc); return
+        say("backup: %s." % exc); return
     if not token:
-        _new_message(sender, "backup: no Dropbox credentials -- set the refresh trio (or DROPBOX_TOKEN) in nodes/cloud/dropbox/.env."); return
+        say("backup: no Dropbox credentials -- set the refresh trio (or DROPBOX_TOKEN) in nodes/cloud/dropbox/.env."); return
     pi_cfg = (roster or {}).get("pi") or {}
 
     raw, err = _vmu_read_image(pi_cfg)
     if err:
         _sync_audit(event="read_failed", node="vmu", error=err)
-        _new_message(sender, "backup: couldn't read the VMU (%s)." % err); return
+        say("backup: couldn't read the VMU (%s)." % err); return
     try:
         saves = vmufs.read_saves(raw)
     except vmufs.VmuError as exc:
         _sync_audit(event="parse_failed", node="vmu", error=str(exc))
-        _new_message(sender, "backup: unreadable VMU image (%s)." % exc); return
+        say("backup: unreadable VMU image (%s)." % exc); return
 
     now   = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     stamp = now.replace(":", "").replace("-", "")          # path-safe ts for /backups
@@ -829,7 +849,7 @@ def _sync_vmu_run(roster):
             _dropbox_upload(token, cloud_path, data)
         except Exception as exc:
             _sync_audit(event="upload_failed", console=_VMU_CONSOLE, file=name, error=str(exc))
-            _new_message(sender, "backup: upload failed for %s (%s)" % (name, exc))
+            say("backup: upload failed for %s (%s)" % (name, exc))
             continue
         up += 1
         _sync_audit(event="upload", console=_VMU_CONSOLE, file=name, sum=summ,
@@ -846,7 +866,7 @@ def _sync_vmu_run(roster):
             body = json.dumps({"console": _VMU_CONSOLE, "saves": new_all}, indent=2).encode()
             _dropbox_upload(token, ledger_path, body)
         except Exception as exc:
-            _new_message(sender, "backup: ledger write failed (%s)" % exc)
+            say("backup: ledger write failed (%s)" % exc)
 
     msg = "vmu backup: %d uploaded, %d unchanged" % (up, unchanged)
     if overrides:
@@ -856,10 +876,10 @@ def _sync_vmu_run(roster):
     if conflicts:
         msg += ", %d not newer than the cloud (skipped): %s" % (
             conflicts, ", ".join(conflict_names[:6]))
-    _new_message(sender, msg + ".")
+    say(msg + ".")
 
 
-def _sd_backup(node_id, roster, consoles_cfg):
+def _sd_backup(node_id, roster, consoles_cfg, emit=None, only=None):
     """BACKUP a console's SD/flash card -> Dropbox. Upload only, like every other backup.
 
     The card is physically in the Pi hub, not in the console: everything is (or will be)
@@ -872,10 +892,16 @@ def _sd_backup(node_id, roster, consoles_cfg):
     so are 117GB of disc images sitting on the same card.
     """
     sender = "dropbox"
+
+    def say(msg):
+        _new_message(sender, msg)
+        if emit:
+            emit(msg)
+
     cfg   = (roster or {}).get(node_id) or {}
     labels = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()]
     if not labels:
-        _new_message(sender, "%s has no SD_LABEL set." % node_id); return
+        say("%s has no SD_LABEL set." % node_id); return
     label = labels[0]
     if len(labels) > 1:
         # several cards for one console: back up the one that's in the hub right now
@@ -889,16 +915,16 @@ def _sd_backup(node_id, roster, consoles_cfg):
             pass
     ccfg     = consoles_cfg or {}
     consoles = (ccfg.get("nodeConsoles") or {}).get(node_id) or []
-    consoles = [c for c in consoles if c != "*"]
+    consoles = [c for c in consoles if c != "*" and (not only or c == only)]
     if not consoles:
-        _new_message(sender, "%s maps to no console (see config/consoles.json)." % node_id); return
+        say("%s maps to no console%s (see config/consoles.json)." % (node_id, (" called " + only) if only else "")); return
 
     try:
         token = _dropbox_access_token(roster)
     except DropboxAuthError as exc:
-        _new_message(sender, "backup: %s." % exc); return
+        say("backup: %s." % exc); return
     if not token:
-        _new_message(sender, "backup: no Dropbox credentials -- set the refresh trio (or DROPBOX_TOKEN) in nodes/cloud/dropbox/.env."); return
+        say("backup: no Dropbox credentials -- set the refresh trio (or DROPBOX_TOKEN) in nodes/cloud/dropbox/.env."); return
 
     saves_pat  = ccfg.get("savePatterns")  or {}
     states_pat = ccfg.get("statePatterns") or {}
@@ -906,6 +932,11 @@ def _sd_backup(node_id, roster, consoles_cfg):
     stamp = now.replace(":", "").replace("-", "")
     up = unchanged = skipped_old = 0
     notes = []
+    # A card can serve several consoles (the GBA card holds Game Boy Color games too) and
+    # their save patterns overlap -- .sav is .sav. Each file belongs to ONE console, so the
+    # first console that matches it owns it (nodeConsoles order) and later ones skip it,
+    # instead of the same save landing under two /saves/<console> trees.
+    claimed = set()
 
     for console in consoles:
         want_save  = [p.lower() for p in (saves_pat.get(console)  or [])]
@@ -915,7 +946,7 @@ def _sd_backup(node_id, roster, consoles_cfg):
         rep = _pi_sd_collect(roster, label, want_save + want_state)
         if rep.get("error"):
             _sync_audit(event="sd_read_failed", node=node_id, label=label, error=rep["error"])
-            _new_message(sender, "backup: %s." % rep["error"]); return
+            say("backup: %s." % rep["error"]); return
 
         saves_lp   = "%s/%s/%s" % (_SAVES_ROOT, console, _LEDGER_NAME)
         states_lp  = "/states/%s/%s/%s" % (console, node_id, _LEDGER_NAME)
@@ -924,6 +955,9 @@ def _sd_backup(node_id, roster, consoles_cfg):
 
         for f in rep.get("files", []):
             on_card = f["path"]
+            if on_card in claimed:
+                continue
+            claimed.add(on_card)
             key     = os.path.basename(on_card)           # the card's dir layout is its own business
             data    = base64.b64decode(f["data"])
             summ    = format(zlib.crc32(data) & 0xffffffff, "08x")
@@ -951,7 +985,7 @@ def _sd_backup(node_id, roster, consoles_cfg):
                 _dropbox_upload(token, cloud_path, data)
             except Exception as exc:
                 _sync_audit(event="upload_failed", console=console, file=key, error=str(exc))
-                _new_message(sender, "backup: upload failed for %s (%s)" % (key, exc)); continue
+                say("backup: upload failed for %s (%s)" % (key, exc)); continue
             up += 1
             _sync_audit(event="upload", console=console, file=key, sum=summ, node=node_id,
                         cls=("state" if is_state else "save"), card=on_card)
@@ -967,12 +1001,12 @@ def _sd_backup(node_id, roster, consoles_cfg):
                     _dropbox_upload(token, lp, json.dumps(
                         {"console": console, "saves": body_map}, indent=2).encode())
                 except Exception as exc:
-                    _new_message(sender, "backup: ledger write failed (%s)" % exc)
+                    say("backup: ledger write failed (%s)" % exc)
 
     msg = "%s SD (%s): %d uploaded, %d unchanged" % (node_id, label, up, unchanged)
     if skipped_old: msg += ", %d not newer than the cloud" % skipped_old
     if notes:       msg += " -- " + "; ".join(notes)
-    _new_message(sender, msg + ".")
+    say(msg + ".")
 
 
 def _pi_sd_collect(roster, label, patterns):
@@ -2259,7 +2293,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/translate/projects"), ("GET", "/translate/systems"), ("GET", "/translate/games"),
         ("GET", "/translate/extract"), ("GET", "/translate/sources"), ("GET", "/translate/meta"),
         ("GET", "/translate/{game}/textures"), ("GET", "/translate/{game}"),
-        ("GET", "/catalogue"), ("GET", "/catalogue/sync/stream"), ("GET", "/catalogue/search"), ("GET", "/catalogue/{system}/send/stream"), ("GET", "/catalogue/missing-covers"), ("GET", "/catalogue/physical-only"), ("GET", "/catalogue/hardware"),
+        ("GET", "/catalogue"), ("GET", "/catalogue/sync/stream"), ("GET", "/catalogue/saves/stream"), ("GET", "/catalogue/search"), ("GET", "/catalogue/{system}/send/stream"), ("GET", "/catalogue/missing-covers"), ("GET", "/catalogue/physical-only"), ("GET", "/catalogue/hardware"),
         ("GET", "/catalogue/{system}"),
         ("GET", "/catalogue/{system}/cover/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
@@ -2325,6 +2359,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/catalogue/sync/stream":
             qs = urllib.parse.parse_qs(parsed.query)
             self._handle_catalogue_sync_stream((qs.get("system") or ["*"])[0])
+
+        elif parsed.path == "/catalogue/saves/stream":
+            qs = urllib.parse.parse_qs(parsed.query)
+            self._handle_catalogue_saves_stream((qs.get("system") or ["*"])[0])
 
         elif len(parts) == 4 and parts[0] == "catalogue" and parts[2] == "send" and parts[3] == "stream":
             qs = urllib.parse.parse_qs(parsed.query)
@@ -2752,8 +2790,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """A node's NATIVE-system action (e.g. the Wii's homebrew flash / game library),
         as opposed to its Linux side (SSH deploy / SMB). Batocera: quit-game (stop the
         running emulator) and restart-es (restart EmulationStation, which also drops any
-        launches ES queued while a game ran). Anything else isn't built yet -- we surface
-        the capability in the drawer and let the API say so honestly, rather than hide it."""
+        launches ES queued while a game ran). Any node with an SD card (SD_LABEL): unmount-sd,
+        so the card can be pulled -- the Pi hub mounts a card on insert and keeps it mounted,
+        which is what makes it browsable. Anything else isn't built yet -- we surface the
+        capability in the drawer and let the API say so honestly, rather than hide it."""
+        if action == "unmount-sd":
+            cfg = (self.__class__.node_roster or {}).get(node_id) or {}
+            labels = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()]
+            if not labels:
+                self._send(400, {"ok": False, "error": "%s has no SD card (SD_LABEL)" % node_id}); return
+            script = ('for l in "$@"; do m="/mnt/cpc-sd/$l"; '
+                      'if mountpoint -q "$m"; then sync; sudo umount -l "$m" && echo "$l unmounted: safe to pull" '
+                      '|| echo "WARN $l is busy, still mounted"; else echo "$l was not mounted"; fi; done')
+            rc, out = self._node_ssh("pi", ["sh", "-c", script, "unmount"] + labels, timeout=60, connect_timeout=5)
+            if rc != 0:
+                self._send(502, {"ok": False, "error": (out.strip()[-200:] or "rc %d" % rc)}); return
+            lines = [l for l in out.splitlines() if l.strip()]
+            print("  [NATIVE:%s] unmount-sd: %s" % (node_id, " | ".join(lines)))
+            self._send(200, {"ok": not any(l.startswith("WARN") for l in lines), "lines": lines,
+                             "error": next((l for l in lines if l.startswith("WARN")), "")}); return
         if node_id == "batocera" and action in ("quit-game", "restart-es"):
             script = (self._BATOCERA_QUIT + 'echo quit') if action == "quit-game" else \
                      'curl -s -m 10 http://127.0.0.1:1234/restart >/dev/null; echo restarting'
@@ -3925,14 +3980,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _catalogue_sd_nodes(self):
         """Nodes whose games live on SD cards read through the Pi hub: SD_LABEL (one or more
         labels, comma-separated: a console can own several cards) + SD_ROMS_DIR (where the
-        games sit on the card, e.g. SAROO/ISO). A node without SD_ROMS_DIR only backs up saves."""
+        games sit on the card, e.g. SAROO/ISO). A node without SD_ROMS_DIR only backs up saves.
+        SD_NAME_STRIP is an optional regex cut off a file NAME before its title is read, for a
+        card that numbers its games ("157 Golden Axe Warrior (USA, Europe).sms"); the file
+        itself is left alone."""
         out = {}
         for node, cfg in (self.__class__.node_roster or {}).items():
             labels = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()]
             roms_dir = (cfg.get("SD_ROMS_DIR") or "").strip().strip("/")
             if labels and roms_dir:
-                out[node] = {"labels": labels, "roms_dir": roms_dir, "hub": "pi"}
+                out[node] = {"labels": labels, "roms_dir": roms_dir, "hub": "pi",
+                             "strip": (cfg.get("SD_NAME_STRIP") or "").strip() or None}
         return out
+
+    @staticmethod
+    def _sd_send_dir(cfg, system):
+        """Folder on a card that copies of <system> are written into, relative to the card
+        root. SD_ROMS_DIR says where to READ, which on a card holding several consoles is the
+        root; writing needs one folder per console, so SD_SEND_DIRS maps them:
+
+            SD_SEND_DIRS=mastersystem:ROM A-Z,sg1000:ROM- SG1000 SC3000
+
+        A system that is not listed falls back to SD_ROMS_DIR ("." = the card root)."""
+        for pair in (cfg.get("SD_SEND_DIRS") or "").split(","):
+            if ":" in pair:
+                s, d = pair.split(":", 1)
+                if s.strip() == system:
+                    return d.strip().strip("/")
+        d = (cfg.get("SD_ROMS_DIR") or "").strip().strip("/")
+        return "" if d == "." else d
 
     def _catalogue_admin_nodes(self):
         """Nodes whose games live on a drive only root can read (PS2_HDD_BYTES: the PS2's
@@ -4125,7 +4201,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 host = ((roster.get("pi") or {}).get("CUSTOM_SSH_ALIAS") or "pipc").strip()
                 label = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()][0]
                 mnt = "/mnt/cpc-sd/" + "".join(c for c in label if c.isalnum() or c in "-_")
-                base, sudo = mnt + "/" + (cfg.get("SD_ROMS_DIR") or "").strip().strip("/"), "sudo"
+                base, sudo = mnt + "/" + self._sd_send_dir(cfg, system), "sudo"
 
             def mount():
                 if kind == "sd":
@@ -4353,6 +4429,70 @@ class Handler(http.server.BaseHTTPRequestHandler):
             emit("done", "failed:%s" % exc)
         finally:
             self._catalogue_lock.release()
+
+    # Which nodes have a saves back-up wired (the same engines the node drawer's buttons run):
+    # batocera mirrors /userdata/saves, vmu reads the card through the Pi, and every node with
+    # an SD_LABEL backs its card up when the card is in the hub. Everything else in the roster
+    # honestly has none yet -- see catalogue/TASKS.md.
+    SAVES_NODES = ("batocera", "vmu")
+
+    def _handle_catalogue_saves_stream(self, system):
+        """SSE: back up saved games for ONE console ('*' = every node, everything it holds).
+        Only the nodes that hold that console and have a back-up wired run, so backing up the
+        GBA card does not ask for the other four cards or touch anyone else's saves. Same
+        line/step/done events as the sync stream, so the same console component shows it. The
+        engines also post their summaries to the chat feed, as they do from the node drawer."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self._cors_headers()
+        self.end_headers()
+
+        def emit(event, data):
+            try:
+                self.wfile.write(("event: %s\ndata: %s\n\n" % (event, data)).encode("utf-8"))
+                self.wfile.flush()
+            except Exception:
+                pass
+
+        roster = self.__class__.node_roster or {}
+        only = None if system == "*" else system
+        node_consoles = (self.__class__.consoles_config or {}).get("nodeConsoles") or {}
+
+        def holds(node):
+            cs = node_consoles.get(node) or []
+            return only is None or "*" in cs or only in cs
+
+        jobs = []                      # (node, callable(emit)) in the order they run
+        for node in self.SAVES_NODES:
+            if node not in roster:
+                continue
+            if not holds(node):
+                continue
+            if node == "batocera":
+                jobs.append((node, lambda say: _sync_batocera(roster, say, only)))
+            elif only in (None, _VMU_CONSOLE):
+                jobs.append((node, lambda say: _sync_vmu_to_cloud(roster, say)))
+        for node in sorted(roster):
+            if node in self.SAVES_NODES or not (roster[node].get("SD_LABEL") or "").strip():
+                continue
+            if not holds(node):
+                continue
+            jobs.append((node, lambda say, n=node: _sd_backup(n, roster, self.__class__.consoles_config, say, only)))
+        if not jobs:
+            emit("line", "no node with a saves back-up holds %s yet" % system)
+            emit("done", "ok"); return
+        failed = []
+        for node, run in jobs:
+            emit("step", node)
+            emit("line", "%s: backing up saves to Dropbox" % node)
+            try:
+                run(lambda line, n=node: emit("line", "%s: %s" % (n, line)))
+            except Exception as exc:
+                failed.append(node)
+                emit("line", "WARN %s: back-up failed, skipped (%s)" % (node, exc))
+        emit("done", "ok" if not failed else "failed:%s" % ", ".join(failed))
 
     # ── Translation flow (Batocera fast flow) ──────────────────────────────────
 

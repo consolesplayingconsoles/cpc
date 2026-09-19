@@ -54,6 +54,7 @@ import imgSys_virtualboy from '../assets/avatars/virtualboy.png'
 import imgSys_x68000 from '../assets/avatars/x68000.png'
 import imgSys_naomi from '../assets/avatars/naomi.png'
 import imgSys_ps5 from '../assets/avatars/ps5.png'
+import imgSys_sg1000 from '../assets/avatars/sg1000.png'
 
 export const ICONS: Record<string, string> = {
   wii:       imgWii,
@@ -115,4 +116,5 @@ export const ICONS: Record<string, string> = {
   x68000: imgSys_x68000,
   naomi: imgSys_naomi,
   ps5: imgSys_ps5,
+  sg1000: imgSys_sg1000,
 }

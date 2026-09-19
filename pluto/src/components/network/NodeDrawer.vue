@@ -286,6 +286,18 @@ function postCommand(text: string) {
         </UiActionRow>
       </section>
 
+      <!-- the hub keeps a card mounted while it is in (that is what makes it browsable), so
+           unmounting is a deliberate step before pulling it -->
+      <section v-if="node.sd" class="nd__sec">
+        <p class="nd__lbl">Card</p>
+        <UiActionRow :disabled="!!nativeBusy" @click="nativeAction('unmount-sd')">
+          <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M12 17V9M9 12l3-3 3 3"/></svg>
+          <span>Unmount SD card ({{ node.sd }})</span>
+          <span v-if="nativeBusy === 'unmount-sd'" class="nd__act-note">Unmounting…</span>
+        </UiActionRow>
+        <p v-if="nativeNote" class="nd__hint">{{ nativeNote }}</p>
+      </section>
+
       <!-- Saves: the back-up button shows on every non-cloud node (the "usual"
            pattern); the API runs it for batocera + vmu and honestly reports the
            rest as unbuilt. -->

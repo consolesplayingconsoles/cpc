@@ -72,11 +72,23 @@ def _tags(name):
     return {t.strip().lower() for m in re.findall(r"\(([^()]*)\)", name) for t in m.split(",")}
 
 
+def _squash(key):
+    """A title key with every separator gone: "out-run" and "outrun" both -> "outrun"."""
+    return re.sub(r"[^a-z0-9]", "", key or "")
+
+
 def best_match(game, art_names):
     """Art name with the game's title key, most tags in common with its files; or None."""
     key = names.key(match_title(game))
     # art names carry no extension: add one so parse() doesn't split "L.O.L. - ..." at a dot
     pool = [n for n in art_names if names.key(names.parse(n + ".png")["title"]) == key]
+    if not pool and _squash(key):
+        # Second pass, separators ignored: libretro spells a fair few titles its own way
+        # ("OutRun" for "Out Run", "Space Harrier 3D" for "Space Harrier 3-D", "NewZealand
+        # Story, The"). Squashing only removes punctuation and spaces, so it never pulls in
+        # a different game -- "Wimbledon II" still does not match "Wimbledon".
+        pool = [n for n in art_names
+                if _squash(names.key(names.parse(n + ".png")["title"])) == _squash(key)]
     if not pool:
         return None
     want = _tags(game.get("label") or "")
