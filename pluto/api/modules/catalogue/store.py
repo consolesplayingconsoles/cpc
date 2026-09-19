@@ -48,6 +48,7 @@ Pure stdlib, 3.6-safe, ASCII only.
 """
 import json
 import os
+import re
 
 try:
     from . import names
@@ -105,16 +106,61 @@ def load_credits(root, system):
         return json.load(f)
 
 
-def merge(doc, node, scan, now, scope=None):
+def _stripped(path, strip):
+    """The path a title is read from, with every match of `strip` (a regex) cut out.
+
+    It runs against the WHOLE path, so a rule can name the folder it applies to:
+    "(?<=ROM A-Z/)[0-9]{3}\\s" numbers only the Master System card's own folder and leaves
+    "007 James Bond" in the SG-1000 folder alone.
+    """
+    return re.sub(strip, "", path) if strip else path
+
+
+def _drop_shared_ids(scan, strip=None):
+    """Forget a header ID that this scan hands to more than one game.
+
+    A cartridge header is only worth trusting when it identifies ONE game. Pre-loaded packs
+    are full of placeholder codes -- on the Master System EverDrive card 00000 is shared by
+    16 games and 166665 by 9 -- and grouping on those files Altered Beast under Bomber Raid.
+
+    Only region-named dumps ("Altered Beast (USA, Europe)") count towards a clash. Two of
+    those under one ID means the ID is junk. A hack carries its base game's ID under its own
+    bare name ("Crazy Sonic.zip") ON PURPOSE -- that is how it finds its base -- so bare
+    names never make an ID untrustworthy.
+    """
+    titles = {}
+    for item in scan:
+        gid = (item.get("header") or {}).get("id")
+        if not gid:
+            continue
+        p = names.parse(_stripped(item["path"], strip))
+        if p["variants"] or not names.has_region_tag(p["tags"]):
+            continue                              # a hack shares its base game's ID on purpose
+        titles.setdefault(gid, set()).add(names.key(p["title"]))
+    shared = {gid for gid, ts in titles.items() if len(ts) > 1}
+    if not shared:
+        return scan
+    out = []
+    for item in scan:
+        h = item.get("header") or {}
+        out.append(dict(item, header=dict(h, id=None)) if h.get("id") in shared else item)
+    return out
+
+
+def merge(doc, node, scan, now, scope=None, strip=None):
     """Fold one node's complete scan into doc (in place). -> (counts, warnings, renames).
 
     renames: {old game key: new game key} -- pass to rekey_refs().
     scope: a path prefix ("SAROO2/") when the scan covers only PART of a node, e.g. one of
     several SD cards: only that node's files under the prefix can be marked deleted, so
     scanning one card never deletes the other card's games.
+    strip: a regex cut off the FILE NAME before it is read as a title, for a card that
+    numbers its games ("034 Assault City (Europe).sms"). The stored path is untouched --
+    it is where the file really is -- only the name the title comes from.
 
     scan: [{"path": "...", "header": {"id", "title"} or None}, ...]
     """
+    scan = _drop_shared_ids(scan, strip)
     counts = {"added": 0, "present": 0, "deleted": 0, "restored": 0}
     warnings, renames = [], {}
     have = {}
@@ -127,8 +173,11 @@ def merge(doc, node, scan, now, scope=None):
     # header can create one under the mod's filename title. Among originals, No-Intro style
     # names (with a "(Region)" tag) go before bare names: a bare "Crazy Sonic.zip" hack must
     # not name the retail Sonic it shares a header with.
+    def parse(path):
+        return names.parse(_stripped(path, strip))
+
     def order(i):
-        p = names.parse(i["path"])
+        p = parse(i["path"])
         return (bool(p["variants"]), not names.has_region_tag(p["tags"]), i["path"])
     seen = set()
     for item in sorted(scan, key=order):
@@ -146,7 +195,7 @@ def merge(doc, node, scan, now, scope=None):
                 f["inner"] = item["inner"]
             continue
 
-        p = names.parse(path)
+        p = parse(path)
         gid = header["id"] if header else None
         gk = find_game(doc, p["title"], gid, header["title"] if header else None)
         existing = gk is not None

@@ -159,4 +159,7 @@ export const catalogueApi = {
   sendStreamUrl: (system: string, node: string) => `${BASE}/${enc(system)}/send/stream?node=${enc(node)}&all=1`,
   // SSE, read-only against nodes. '*' = everything Batocera has.
   syncUrl: (system: string) => `${BASE}/sync/stream?system=${enc(system)}`,
+  // SSE. Saved games for ONE console: only the nodes that hold it and have a back-up
+  // wired run ('*' = every node, everything it holds).
+  savesUrl: (system: string) => `${BASE}/saves/stream?system=${enc(system)}`,
 }

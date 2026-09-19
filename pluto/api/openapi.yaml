@@ -128,6 +128,12 @@ paths:
       summary: Sync the local catalogue from the nodes (SSE; read-only against nodes)
       parameters: [{ name: system, in: query, required: false, schema: { type: string, default: '*' } }]
       responses: { '200': { description: text/event-stream of line/done events } }
+  /catalogue/saves/stream:
+    get:
+      tags: [catalogue]
+      summary: "Back up saved games for one console: only the nodes that hold it and have a back-up wired run -- batocera (/userdata/saves/<console>), vmu (dreamcast), and any node with an SD_LABEL (its card, through the Pi hub). system=* backs up every such node, everything it holds. SSE line/step/done events; the engines also post their summaries to the chat feed"
+      parameters: [{ name: system, in: query, required: false, schema: { type: string, default: '*' } }]
+      responses: { '200': { description: text/event-stream of line/step/done events } }
   /catalogue/missing-covers:
     get: { tags: [catalogue], summary: "Present games with no image linked in the catalogue (no upload, no downloaded art), all systems", responses: { '200': { description: "{games: [{system, key, title}]}" } } }
   /catalogue/hardware:

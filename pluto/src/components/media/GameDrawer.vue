@@ -66,7 +66,8 @@ const coverSrc = computed(() => props.game.cover === 'miss' || coverFailed.value
 const fileEl = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const uploadError = ref('')
-// No cover yet: paste an image link and the API downloads it (same store as an upload).
+// Paste an image link and the API downloads it (same store as an upload) -- also the way to
+// REPLACE a cover, so a better link never has to be saved to disk first.
 const coverLink = ref('')
 async function saveCoverLink() {
   const url = coverLink.value.trim()
@@ -238,8 +239,11 @@ async function forget(f: CatalogueFile) {
     <p v-if="labelEditing" class="gd__label-hint">Enter saves · Esc cancels · empty resets to the file name</p>
     <p v-if="labelError" class="gd__upload-err">{{ labelError }}</p>
     <p v-if="game.label && !labelEditing" class="gd__label-hint">Label · files read as {{ game.fileTitle }}</p>
-    <form v-if="!coverSrc" class="gd__label-edit" @submit.prevent="saveCoverLink">
-      <input v-model="coverLink" class="gd__label-input" type="url" :disabled="uploading" placeholder="No cover: paste an image link, Enter" />
+    <!-- Paste a link whether or not there is a cover: replacing one should not force a local
+         file through the picker, a link is the faster way to a better cover. -->
+    <form class="gd__label-edit" @submit.prevent="saveCoverLink">
+      <input v-model="coverLink" class="gd__label-input" type="url" :disabled="uploading"
+             :placeholder="coverSrc ? 'Replace the cover: paste an image link, Enter' : 'No cover: paste an image link, Enter'" />
       <UiSpinner v-if="uploading" :size="14" />
     </form>
     <p v-if="uploadError" class="gd__upload-err">{{ uploadError }}</p>

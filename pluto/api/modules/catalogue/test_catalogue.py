@@ -197,6 +197,44 @@ def test_mod_with_base_header_joins_base_game():
     assert sorted(store.variants(doc["games"]["sonic-the-hedgehog"])) == ["Boss Versus", "original"]
 
 
+def test_placeholder_header_id_shared_by_two_dumps_is_ignored():
+    """A pre-loaded card's junk ID (00000 on 16 Master System games) must not group them."""
+    doc = store.empty("mastersystem")
+    counts, _, _ = store.merge(doc, "sms", [
+        {"path": "Altered Beast (USA, Europe).sms", "header": {"id": "00000", "title": "", "regions": []}},
+        {"path": "Bomber Raid (World).sms", "header": {"id": "00000", "title": "", "regions": []}},
+        {"path": "Micro Machines (Europe).sms", "header": {"id": "00000", "title": "", "regions": []}},
+    ], NOW)
+    assert counts["added"] == 3
+    assert sorted(doc["games"]) == ["altered-beast", "bomber-raid", "micro-machines"]
+    assert all(not g["ids"] for g in doc["games"].values())
+
+
+def test_one_id_two_region_dumps_of_the_same_game_still_groups():
+    doc = store.empty("mastersystem")
+    store.merge(doc, "sms", [
+        {"path": "Fantasy Zone (World) (v1.2).sms", "header": {"id": "05110", "title": "", "regions": []}},
+        {"path": "Fantasy Zone (Japan).sms", "header": {"id": "05110", "title": "", "regions": []}},
+    ], NOW)
+    assert list(doc["games"]) == ["fantasy-zone"]
+    assert doc["games"]["fantasy-zone"]["ids"] == ["05110"]
+
+
+def test_strip_cuts_a_cards_number_prefix_off_the_title_only():
+    """The EverDrive card numbers its games: the path stays, the title loses the number."""
+    doc = store.empty("mastersystem")
+    store.merge(doc, "sms", [
+        {"path": "ROM A-Z/157 Golden Axe Warrior (USA, Europe).sms", "header": None},
+        {"path": "ROM- SG1000 SC3000/007 James Bond (Japan).sg", "header": None},
+    ], NOW, strip=r"(?<=ROM A-Z/)[0-9]{3}\s")
+    # folder-scoped: the numbered card folder loses its number, a game that really starts
+    # with digits, in another folder, keeps them
+    assert sorted(doc["games"]) == ["007-james-bond", "golden-axe-warrior"]
+    f = doc["games"]["golden-axe-warrior"]["files"][0]
+    assert f["path"] == "ROM A-Z/157 Golden Axe Warrior (USA, Europe).sms"
+    assert f["tags"] == ["USA, Europe"]
+
+
 def test_unbracketed_hack_is_a_mod_and_does_not_name_the_game():
     doc = store.empty("megadrive")
     _, warn, _ = store.merge(doc, "batocera", [
@@ -441,10 +479,10 @@ def test_one_bad_system_does_not_stop_the_others():
     found = {"megadrive": {"files": [{"path": "A.md", "header": None}], "gamelist": ""},
              "snes": {"files": [{"path": "B.sfc"}], "gamelist": "<gameList><game><path>./B.sfc"}}
     real_merge = store.merge
-    def flaky(doc, node, scan_, now, scope=None):
+    def flaky(doc, node, scan_, now, scope=None, strip=None):
         if doc["system"] == "megadrive":
             raise IOError("disk hiccup")
-        return real_merge(doc, node, scan_, now, scope)
+        return real_merge(doc, node, scan_, now, scope, strip)
     store.merge = flaky
     try:
         got = service.sync(root, "*", dict(CONFIG, nodeConsoles={"batocera": ["*"]}),
@@ -458,6 +496,18 @@ def test_one_bad_system_does_not_stop_the_others():
 
 
 # -- covers ------------------------------------------------------------------
+
+
+def test_cover_matches_a_differently_spaced_art_name():
+    """libretro writes OutRun, Space Harrier 3D, NewZealand Story: same game, own spelling."""
+    art = ["OutRun (USA, Europe)", "Space Harrier 3D (World)", "NewZealand Story, The (Europe)",
+           "Wimbledon (Europe)"]
+    def game(title):
+        return {"key": names.key(title), "title": title, "files": [], "physical": []}
+    assert covers.best_match(game("Out Run"), art) == "OutRun (USA, Europe)"
+    assert covers.best_match(game("Space Harrier 3-D"), art) == "Space Harrier 3D (World)"
+    assert covers.best_match(game("New Zealand Story, The"), art) == "NewZealand Story, The (Europe)"
+    assert covers.best_match(game("Wimbledon II"), art) is None      # a sequel is another game
 
 class _NotFound(Exception):
     code = 404
