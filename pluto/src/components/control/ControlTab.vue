@@ -40,7 +40,7 @@ function pickHost(h: string) {
 // ── SOURCE — the event producer, scoped to the host (config-driven, shown in full). ──
 const SOURCE_LABELS: Record<string, string> = {
   claude: 'Claude', google: 'Google', capture: 'Capture', keyboard: 'Keyboard only',
-  dreampicoport: 'DreamPicoPort', kinect: 'Kinect', nokia: 'Nokia Phone', dreame: 'Dreame Cloud',
+  gamepad: 'Gaming Controller', kinect: 'Kinect', nokia: 'Nokia Phone', dreame: 'Dreame Cloud',
 }
 const sourceList = computed(() =>
   (curHost.value?.sources || [])
@@ -106,17 +106,21 @@ const target = computed(() => (route.params.target as string) || '')
 
 // ── MAPPING — control scheme for the source (from the API). ──
 const mappings = ref<string[]>([])
+// kind per mapping, from the API. 'drive' = roomba verb scheme, '' = console pad scheme.
+const mappingKinds = ref<Record<string, string>>({})
 const mapping  = computed(() => (route.params.mapping as string) || '')
 async function fetchMappings(src: string) {
   // Clear FIRST so the previous source's list can't be used while the new one loads
   // (a stale mapping would get written into this source's URL and 404 on fetch).
   mappings.value = []
+  mappingKinds.value = {}
   if (!src) return
   try {
     const r = await fetch(`${API}/mappings/${src}`)
     const j = await r.json().catch(() => null)
     mappings.value = (j && Array.isArray(j.targets)) ? j.targets : []
-  } catch { mappings.value = [] }
+    mappingKinds.value = (j && j.kinds) ? j.kinds : {}
+  } catch { mappings.value = []; mappingKinds.value = {} }
 }
 watch(source, (s) => fetchMappings(s), { immediate: true })
 
@@ -139,7 +143,15 @@ const curTarget = computed<FlatTarget>(() => targetOptions.value.find(t => t.id 
 // -> roomba verb) only the roomba sink understands; console mappings drive a pad and have
 // no actions. So the dropdown only offers mappings compatible with the target KIND:
 // roomba schemes for a roomba, console schemes everywhere else.
-function isRoombaMapping(m: string) { return m === 'roomba' || m.startsWith('roomba-') }
+// Classify by the mapping's declared `kind`, not its name: under the gamepad source a
+// mapping is named after the CONTROLLER ('8bitdo', 'dreamcast'), so the old
+// name-starts-with-roomba rule hid them from the roomba target entirely. The name check
+// stays as a fallback for a source whose API response predates `kinds`.
+function isRoombaMapping(m: string) {
+  const kind = mappingKinds.value[m]
+  if (kind) return kind === 'drive'
+  return m === 'roomba' || m.startsWith('roomba-')
+}
 const visibleMappings = computed(() =>
   curTarget.value.kind === 'roomba'
     ? mappings.value.filter(isRoombaMapping)

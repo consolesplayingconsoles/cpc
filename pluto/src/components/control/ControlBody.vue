@@ -6,7 +6,7 @@ import GoogleControl from './GoogleControl.vue'
 import CaptureControl from './CaptureControl.vue'
 import KinectControl from './KinectControl.vue'
 import NokiaControl from './NokiaControl.vue'
-import DreamPicoPortControl from './DreamPicoPortControl.vue'
+import GamepadControl from './GamepadControl.vue'
 import ControlLayout from './ControlLayout.vue'
 
 defineProps<{
@@ -55,7 +55,7 @@ defineEmits<{ 'drive-error': [string] }>()
     :active="active" :nodes="nodes" :target="target" :mapping="mapping"
     :target-dev="targetDev" :roomba-ip="roombaIp"
     @drive-error="$emit('drive-error', $event)" />
-  <DreamPicoPortControl v-else-if="source === 'dreampicoport'" :key="source"
+  <GamepadControl v-else-if="source === 'gamepad'" :key="source"
     :sub="''" :active="active" :target="target" :mapping="mapping"
     :target-dev="targetDev" :roomba-ip="roombaIp"
     @drive-error="$emit('drive-error', $event)" />

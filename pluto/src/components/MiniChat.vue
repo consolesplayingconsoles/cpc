@@ -89,7 +89,8 @@ const showHead = (i: number) => i === 0 || recent.value[i - 1].sender !== recent
 </template>
 
 <style scoped>
-/* Floating dock, bottom-left on every tab. Quiet glass like the zoom controls. */
+/* Bottom-left dock on every tab. Quiet glass like the zoom controls: docked flush
+   when collapsed, floating when open. */
 .mc {
   position: absolute; left: 16px; bottom: 16px; z-index: 5;
   width: min(380px, calc(100vw - 32px));
@@ -102,6 +103,16 @@ const showHead = (i: number) => i === 0 || recent.value[i - 1].sender !== recent
   overflow: hidden;
 }
 .mc--open { height: min(460px, calc(100% - 32px)); }
+/* Collapsed it is a docked bar, not a floating card: flush into the bottom-left
+   corner, no gap and no shadow, so it stops reading as something hovering over
+   the quad underneath it (the SW quad is bottom-left too). Open, it lifts back
+   off the edge and floats as before. */
+.mc:not(.mc--open) {
+  left: 0; bottom: 0;
+  border-left: 0; border-bottom: 0;
+  border-radius: 0 var(--r-lg) 0 0;
+  box-shadow: none;
+}
 .mc--ping { animation: mc-ping 1.4s ease-out; }
 @keyframes mc-ping {
   0%   { border-color: var(--accent); box-shadow: 0 10px 30px rgba(26, 34, 51, 0.16), 0 0 0 3px var(--accent-soft); }

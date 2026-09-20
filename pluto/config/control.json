@@ -3,13 +3,13 @@
     {
       "id": "lab",
       "label": "Pluto Lab",
-      "sources": ["claude", "google", "capture", "keyboard", "dreampicoport", "dreame"],
+      "sources": ["claude", "google", "capture", "keyboard", "gamepad", "dreame"],
       "targets": ["emulator", "kindle", "roomba"]
     },
     {
       "id": "pi",
       "label": "Raspberry Pi",
-      "sources": ["dreampicoport", "kinect", "nokia", "keyboard"],
+      "sources": ["gamepad", "kinect", "nokia", "keyboard"],
       "targets": ["hid", "megadrive"]
     }
   ]

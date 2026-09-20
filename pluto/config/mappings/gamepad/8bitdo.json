@@ -1,0 +1,188 @@
+{
+  "_comment": "Gaming Controller source, 8BITDO pad (wireless) -> Roomba target. Named after the CONTROLLER, like gamepad/dreamcast.json. Pair on macOS in B MODE (Start+B, D-input): in B mode this pad reports the same indices the Dreamcast pad does for the buttons below. Do NOT pair in X mode -- XInput renumbers everything (2=X,3=Y,dpad 12-15) and none of these keys would match. CONFIRMED indices: buttons 0=A,1=B,3=X,4=Y,11=Start; axis0=left stick X, axis2=left trigger, axis5=right trigger, axis9=dpad(unconfirmed values). Triggers are BUTTONS for forward/back: axis5(+)=drive-forward, axis2(+)=drive-back; turn-left/right uses axis0 sign. NOT YET CONFIRMED, so they appear on the pad and in `colors` but have NO BTN*/AXIS* entries in `actions` and drive nothing: L2, R2, SELECT, LS/RS (stick clicks), STAR, HEART, and the RIGHT STICK axes. Read their real indices off the Gaming Controller inspector and add them -- do not guess, D-input numbering varies by model and the right stick often collides with the trigger axes. Star/Heart frequently do not report at all in D-input.",
+  "controller": "Roomba Rally",
+  "kind": "drive",
+  "controls": {
+    "Enter": "START",
+    "action": "A",
+    "cancel": "B"
+  },
+  "actions": {
+    "A": "horn",
+    "B": "safety",
+    "Y": "dock",
+    "X": "listen",
+    "D_UP": "drive-forward",
+    "D_DOWN": "drive-back",
+    "D_LEFT": "turn-left",
+    "D_RIGHT": "turn-right",
+    "START": "session",
+    "AXIS5+": "drive-forward",
+    "AXIS2+": "drive-back",
+    "AXIS0-": "turn-left",
+    "AXIS0+": "turn-right",
+    "BTN0": "horn",
+    "BTN1": "safety",
+    "BTN4": "dock",
+    "BTN3": "listen",
+    "BTN11": "session"
+  },
+  "combinations": {
+    "D_UP+D_LEFT": "forward-left",
+    "D_UP+D_RIGHT": "forward-right",
+    "D_DOWN+D_LEFT": "back-left",
+    "D_DOWN+D_RIGHT": "back-right"
+  },
+  "keys": {
+    "A": "k",
+    "B": "l",
+    "X": "j",
+    "Y": "i",
+    "D_UP": "w",
+    "D_DOWN": "s",
+    "D_LEFT": "a",
+    "D_RIGHT": "d",
+    "START": "enter",
+    "L2": "1",
+    "R2": "0",
+    "SELECT": "backspace",
+    "STAR": "x",
+    "HEART": "c"
+  },
+  "layout": [
+    {
+      "key": "q",
+      "btn": "L",
+      "label": "L",
+      "col": 2,
+      "row": 1
+    },
+    {
+      "key": "p",
+      "btn": "R",
+      "label": "R",
+      "col": 9,
+      "row": 1
+    },
+    {
+      "key": "w",
+      "btn": "D_UP",
+      "label": "Up",
+      "col": 2,
+      "row": 2
+    },
+    {
+      "key": "a",
+      "btn": "D_LEFT",
+      "label": "Left",
+      "col": 1,
+      "row": 3
+    },
+    {
+      "key": "d",
+      "btn": "D_RIGHT",
+      "label": "Right",
+      "col": 3,
+      "row": 3
+    },
+    {
+      "key": "s",
+      "btn": "D_DOWN",
+      "label": "Down",
+      "col": 2,
+      "row": 4
+    },
+    {
+      "key": "Enter",
+      "btn": "START",
+      "label": "Start",
+      "col": 6,
+      "row": 3
+    },
+    {
+      "key": "i",
+      "btn": "Y",
+      "label": "Dock",
+      "col": 8,
+      "row": 3
+    },
+    {
+      "key": "j",
+      "btn": "X",
+      "label": "Listen",
+      "col": 9,
+      "row": 2
+    },
+    {
+      "key": "l",
+      "btn": "B",
+      "label": "Safe",
+      "col": 9,
+      "row": 4
+    },
+    {
+      "key": "k",
+      "btn": "A",
+      "label": "Honk",
+      "col": 10,
+      "row": 3
+    },
+    {
+      "key": "1",
+      "btn": "L2",
+      "label": "L2",
+      "col": 1,
+      "row": 1
+    },
+    {
+      "key": "0",
+      "btn": "R2",
+      "label": "R2",
+      "col": 10,
+      "row": 1
+    },
+    {
+      "key": "backspace",
+      "btn": "SELECT",
+      "label": "Select",
+      "col": 5,
+      "row": 3
+    },
+    {
+      "key": "x",
+      "btn": "STAR",
+      "label": "Star",
+      "col": 2,
+      "row": 5
+    },
+    {
+      "key": "c",
+      "btn": "HEART",
+      "label": "Heart",
+      "col": 9,
+      "row": 5
+    }
+  ],
+  "colors": {
+    "L": "#000000",
+    "R": "#000000",
+    "D_UP": "#000000",
+    "D_LEFT": "#000000",
+    "D_RIGHT": "#000000",
+    "D_DOWN": "#000000",
+    "START": "#000000",
+    "Y": "#000000",
+    "X": "#000000",
+    "B": "#000000",
+    "A": "#000000",
+    "L2": "#000000",
+    "R2": "#000000",
+    "SELECT": "#000000",
+    "STAR": "#000000",
+    "HEART": "#000000"
+  },
+  "sticks": [
+    "main",
+    "right"
+  ]
+}

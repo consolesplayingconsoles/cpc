@@ -19,6 +19,7 @@ import { resolveDriveVerb } from '../../lib/driveVerb'
 interface LayoutKey { key: string; btn: string; label: string; col: number; row: number }
 interface Mapping {
   controller?: string; layout?: LayoutKey[]; colors?: Record<string, string>
+  sticks?: string[]                         // 'main' | 'right' -- a real pad declares its own
   actions?: Record<string, string>          // btn -> verb
   combinations?: Record<string, string>     // "BTN1+BTN2" -> verb (fires when both held)
 }
@@ -68,13 +69,21 @@ const colors = computed<Record<string, string>>(() => def.value?.colors ?? {})
 const cols = computed(() => Math.max(1, ...layout.value.map(k => k.col)))
 const rows = computed(() => Math.max(1, ...layout.value.map(k => k.row)))
 
-// Analog sticks are a per-CONSOLE UI element (not mapping data): both have a main
-// stick; the GameCube adds the yellow C-stick. Detected from the controller name.
+// Analog sticks were a per-CONSOLE UI element detected from the controller name:
+// both consoles have a main stick, the GameCube adds the yellow C-stick. A real
+// gamepad breaks that, since the name says nothing about how many sticks it has,
+// so a mapping can now DECLARE them (`sticks: ["main","right"]`) and the name
+// heuristic stays as the fallback for the console mappings that predate it.
 const ctrl   = computed(() => (def.value?.controller || props.mapping || '').toLowerCase())
 const isGC   = computed(() => ctrl.value.includes('gamecube'))
 const isDC   = computed(() => ctrl.value.includes('dreamcast'))
-const hasMain = computed(() => isGC.value || isDC.value)
+const sticks  = computed<string[]>(() => def.value?.sticks ?? [])
+const hasMain = computed(() => isGC.value || isDC.value || sticks.value.includes('main'))
 const hasC    = computed(() => isGC.value)
+// The right stick sits in the same bottom-right slot as the GameCube's C-stick.
+// It is display-only for now: the right stick's axis numbers are unconfirmed on
+// the 8BitDo, so wiring it to verbs would be a guess.
+const hasRight = computed(() => !isGC.value && sticks.value.includes('right'))
 // Roomba-style mappings (an `actions` table) get an analog stick too -- it quantises to the
 // SAME drive verbs as the d-pad (up->forward, diagonals->arcs), so you can steer with either.
 const verbMode = computed(() => !!def.value?.actions)
@@ -412,6 +421,15 @@ function capStyle(it: LayoutKey) {
           <span class="cap-key">{{ keyGlyph(it.key) }}</span>
           <span class="cap-btn">{{ it.label }}</span>
         </button>
+      </div>
+
+      <!-- Right stick (grey): bottom-right, same slot as the C-stick. It moves,
+           but sends nothing yet: its axis numbers are unconfirmed on this pad, so
+           there is no verb to send it to. -->
+      <div v-if="hasRight" class="ck-stick cstick">
+        <Joystick :size="stickSize" base-color="#cdd0d4" stick-color="#5b6068" :throttle="80"
+          :disabled="!canDrive" />
+        <span class="ck-stick-tag">R</span>
       </div>
 
       <!-- GameCube C-stick (yellow): bottom-right -->
