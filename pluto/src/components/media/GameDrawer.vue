@@ -347,13 +347,16 @@ async function forget(f: CatalogueFile) {
   background: var(--surface);
   border-left: 1px solid var(--line);
   box-shadow: -8px 0 28px rgba(26, 34, 51, 0.07);
-  padding: 18px 18px 22px;
+  /* no padding at the TOP: the sticky tools bar owns that strip, so nothing scrolls
+     through above it (a sticky box is offset by its own margin, so pulling it up with a
+     negative margin left an 18px gap the cover showed through). */
+  padding: 0 18px 22px;
   font-family: var(--font-sans);
 }
 .gd__tools {
   position: sticky; top: 0; z-index: 3;
   display: flex; gap: 6px; justify-content: flex-end; align-items: center;
-  margin: -18px -18px 4px; padding: 10px 18px 6px;
+  margin: 0 -18px 4px; padding: 14px 18px 8px;
   background: var(--surface);
 }
 .gd__head { display: flex; gap: 12px; align-items: flex-start; }
