@@ -1,11 +1,14 @@
 <script setup lang="ts">
-// DreamPicoPort source: up to 4 Dreamcast controller ports, each surfaced by the browser
-// as a separate HID Gamepad. INSPECTOR-FIRST: different peripherals (a wheel racer vs a
-// regular pad) report DIFFERENT button/axis layouts, so this renders the RAW indices/values
-// live rather than assuming a mapping -- the same "observe real numbers before wiring
-// behavior" approach used for the Roomba telemetry. A real drive mapping (config/mappings/
-// dreampicoport/<target>.json, btn-index -> verb) gets authored once the layout is confirmed
-// here, then a drive-capable child renders in its place (mirrors ControlKeyboard).
+// Gaming Controller source: any pad the browser exposes through the Gamepad API,
+// each one its own entry. INSPECTOR-FIRST: different peripherals (a wheel racer vs a
+// regular pad, an 8BitDo in D-input vs X-input) report DIFFERENT button/axis layouts,
+// so this renders the RAW indices/values live rather than assuming a mapping -- the
+// same "observe real numbers before wiring behavior" approach used for the Roomba
+// telemetry. The drive mapping (config/mappings/gamepad/<target>.json, btn-index ->
+// verb) is authored from what the inspector shows here.
+//
+// Was DreamPicoPortControl: nothing in it was Dreamcast-specific, and the 8BitDo
+// paired in B (D-input) mode reports the same indices the DPP pad did.
 import { ref, computed, watch } from 'vue'
 import { useGamepads } from '../../composables/useGamepads'
 import { useGamepadDrive } from '../../composables/useGamepadDrive'
@@ -37,7 +40,7 @@ useGamepadDrive({
   active: () => props.active,
   canDrive: () => canDrive.value,
   padIndex: () => pads.value[0]?.index ?? null,
-  source: () => 'dreampicoport',
+  source: () => 'gamepad',
   target: () => props.target,
   mapping: () => props.mapping,
   targetDev: () => props.targetDev || '',
@@ -45,14 +48,14 @@ useGamepadDrive({
 })
 
 // Per-port TYPE tag, kept INSIDE this component (not the URL/routing) as the operator asked --
-// each DreamPicoPort port can have a different peripheral plugged in (a wheel racer vs a
+// each pad can be a different peripheral (a wheel racer vs a
 // regular pad), and they report different axis/button layouts. This is display-only for now
 // (labels which peripheral a port is) and will feed the eventual mapping selection once a
 // drive mapping is authored per type. Keyed + persisted by the port's raw HID id string (not
 // the index, since the index can shift across reconnects) via localStorage.
 const TYPES = ['pad', 'wheel'] as const
 type PadType = typeof TYPES[number]
-const TYPE_KEY = 'cpc.dreampicoport.types'
+const TYPE_KEY = 'cpc.gamepad.types'
 const typeMap = ref<Record<string, PadType>>(JSON.parse(localStorage.getItem(TYPE_KEY) || '{}'))
 watch(typeMap, (v) => localStorage.setItem(TYPE_KEY, JSON.stringify(v)), { deep: true })
 function typeOf(id: string): PadType { return typeMap.value[id] || 'unknown' }
@@ -62,19 +65,19 @@ function axisPct(v: number) { return Math.round((v + 1) / 2 * 100) }   // -1..1 
 </script>
 
 <template>
-  <ControlLayout :active="active" map-source="dreampicoport" :target="target" :mapping="mapping" :target-dev="targetDev || ''" :roomba-ip="roombaIp"
+  <ControlLayout :active="active" map-source="gamepad" :target="target" :mapping="mapping" :target-dev="targetDev || ''" :roomba-ip="roombaIp"
     @drive-error="$emit('drive-error', $event)">
     <template #nw>
       <div class="dpp">
         <div v-if="!pads.length" class="dpp__empty mono">
-          No gamepads detected. Plug DreamPicoPort into this Mac (each port shows up as its own
-          controller). Chrome/Firefox only expose gamepads to a document that has FOCUS: click
-          once anywhere on this page, then press a button on the controller.
+          No gamepads detected. Pair or plug in a controller (each shows up separately).
+          Chrome/Firefox only expose gamepads to a document that has FOCUS: click once anywhere
+          on this page, then press a button on the controller.
         </div>
 
         <div v-for="p in shown" :key="p.index" class="dpp__pad">
           <div class="dpp__head">
-            <span class="dpp__port">Port {{ p.index + 1 }}</span>
+            <span class="dpp__port">Pad {{ p.index + 1 }}</span>
             <span class="dpp__id mono">{{ p.id }}</span>
             <span class="dpp__types">
               <button v-for="t in TYPES" :key="t" class="dpp__type" :class="{ on: typeOf(p.id) === t }"

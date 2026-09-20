@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><!--CPC_TITLE--></title>
+<style>
+  /* Firefox OS 1.3 / Gecko 28 on a 3.5" HVGA panel. Absolute positioning rather
+     than flexbox: "strip rather than break" (CLAUDE.md 7.2) -- this layout has to
+     hold on an engine from 2014. */
+  html,body{margin:0;padding:0;height:100%;background:#111;color:#eee;
+    font-family:'Fira Sans','Roboto',sans-serif;overflow:hidden}
+
+  /* The picture IS the page: everything left of the debug rail. */
+  #view{position:absolute;left:0;top:0;right:24%;bottom:0;overflow:hidden;background:#000}
+  /* auto margins on an absolutely positioned box centre it in both axes, without
+     transforms or flexbox. */
+  #face{position:absolute;left:0;top:0;right:0;bottom:0;margin:auto;
+    max-width:100%;max-height:100%;width:auto;height:auto}
+
+  /* Debug rail down the right edge. */
+  #side{position:absolute;right:0;top:0;width:24%;bottom:0;overflow:hidden;
+    border-left:1px solid #333;background:#15171b}
+  #state{font-size:12px;font-weight:bold;letter-spacing:1px;padding:8px 4px;text-align:center}
+  /* The handset can hear the room, so its own screen always says whether it is
+     listening. Someone standing by the roomba should never have to ask Pluto. */
+  .live{background:#FF9500;color:#111}
+  .idle{background:#222;color:#888}
+  #bar{height:6px;background:#222}#lv{height:6px;width:0;background:#FF9500}
+  /* MUTE means the same here as everywhere else: this handset's MIC goes quiet,
+     so the other end stops hearing the room. */
+  #mute{display:block;width:92%;margin:4px auto;padding:8px 0;font-size:11px;font-weight:bold;
+    color:#eee;background:#2a2d33;border:1px solid #444;border-radius:4px}
+  #mute.muted{background:#FF9500;color:#111;border-color:#FF9500}
+  #log{font-family:'Fira Mono',monospace;font-size:9px;line-height:1.35;color:#777;
+    padding:4px;word-wrap:break-word}
+</style>
+</head>
+<body>
+<div id="view">
+  <!-- Chat mode: whoever is at the Pluto end shares their camera and this handset
+       becomes their face. -->
+  <img id="face" src="" alt="">
+</div>
+<div id="side">
+  <div id="state" class="idle">STARTING</div>
+  <div id="bar"><div id="lv"></div></div>
+  <button id="mute" onclick="toggleMute()">MUTE</button>
+  <div id="log"></div>
+</div>
+<audio id="voice"></audio>
+<script>
+/* The handset lies on the roomba, it never stands up, so the page is landscape
+   and stays landscape no matter how the chassis is turned. Firefox OS 1.3 spells
+   this mozLockOrientation; the others are here so the same page still behaves if
+   it is ever opened on something newer. Failing is fine -- the layout works in
+   portrait too, it is just narrower. */
+(function () {
+  var scr = window.screen;
+  if (!scr) { return; }
+  var lock = scr.mozLockOrientation || scr.msLockOrientation || scr.lockOrientation;
+  try {
+    if (lock) { lock.call(scr, 'landscape'); }
+    else if (scr.orientation && scr.orientation.lock) { scr.orientation.lock('landscape'); }
+  } catch (e) { /* not permitted for web content on some builds: carry on */ }
+})();
+
+/* ES5 ONLY. Gecko 28: no arrow functions, no template strings, no fetch, no
+   Promise. Measured on the device, not assumed. */
+var POLL_MS  = 2000;   /* how often we ask Pluto whether the session is live */
+var CHUNK_MS = 1200;   /* one Opus blob per cycle; ~3KB at 19kbit/s */
+/* Chunk length IS the floor on how late the room sounds: nothing can reach the
+   listener before the recording it is in has finished. 3s made conversation
+   impossible. 1.2s keeps the Ogg header overhead tolerable while putting the
+   floor near a second. */
+
+var stream = null, recorder = null, ctx = null, proc = null, src = null, sink = null, lp = null;
+/* 'chat' streams live PCM (a conversation cannot wait for a clip to finish);
+   'ai' uploads finished Opus clips (an agent wants whole utterances). */
+var mode = 'chat';
+var PCM_RATE = 16000;
+var PCM_MS = 128;                  /* one POST per this much audio */
+var pcmBuf = [], pcmCount = 0, pcmInflight = false;
+/* Never more than ONE upload in flight. This handset also holds the face stream,
+   the voice stream and the state poll, and Gecko caps persistent connections per
+   host at six: a POST per block piles up behind the others the moment one takes
+   longer than a block, and the delay then grows without bound. Accumulating
+   while a POST is pending makes the block size adapt to the link instead. */
+var PCM_MAX_BACKLOG = PCM_RATE;      /* 1s: beyond this we drop the OLDEST */
+/* `starting` exists because `capturing` only becomes true inside the
+   getUserMedia callback: without it, two polls 2s apart both get past the
+   guard and each starts its own recorder loop, doubling the upload rate.
+   Measured on the device: 0.70 chunks/s against an expected 0.33. */
+var capturing = false, starting = false, wantStop = false;
+
+function log(msg) {
+  var el = document.getElementById('log');
+  el.innerHTML = msg + '<br>' + el.innerHTML.split('<br>').slice(0, 14).join('<br>');
+}
+function setState(live, txt) {
+  var el = document.getElementById('state');
+  el.className = live ? 'live' : 'idle';
+  el.innerHTML = txt;
+}
+function post(path, body, type, done) {
+  try {
+    var x = new XMLHttpRequest();
+    x.open('POST', path, true);
+    if (type) { x.setRequestHeader('Content-Type', type); }
+    if (done) { x.onreadystatechange = function () { if (x.readyState === 4) { done(x); } }; }
+    x.send(body);
+  } catch (e) { log('post failed: ' + e); }
+}
+
+/* --- capture ------------------------------------------------------------ */
+
+/* MediaRecorder gives Ogg/Opus mono at ~19kbit/s on this build, which is
+   nothing over wifi. Gecko 28 predates reliable timeslice chunking, so instead
+   of one long recording we run a fresh short recording each cycle. Proven on
+   the device; do not "simplify" this to mr.start(CHUNK_MS) without retesting. */
+function recordCycle() {
+  if (!capturing || wantStop || !stream) { return; }
+  var mr;
+  try { mr = new MediaRecorder(stream); }
+  catch (e) { log('MediaRecorder threw: ' + e); stopCapture(); return; }
+  recorder = mr;
+  var chunks = [];
+  mr.ondataavailable = function (ev) { chunks.push(ev.data); };
+  mr.onstop = function () {
+    if (chunks.length) {
+      var blob = new Blob(chunks, { type: chunks[0].type || 'audio/ogg' });
+      post('/roomba-ai/audio', blob, '', function (x) {
+        /* Pluto refuses audio the moment a session stops being live, so a 409
+           is the authoritative "stop", not an error to retry through. */
+        if (x.status === 409) { log('session closed by Pluto'); stopCapture(); }
+      });
+      log('sent ' + blob.size + 'B');
+    }
+    if (capturing && !wantStop && mode === 'ai') { recordCycle(); }
+  };
+  mr.start();
+  setTimeout(function () { try { mr.stop(); } catch (e) {} }, CHUNK_MS);
+}
+
+/* Level meter only. The PCM path is not what we upload, it is what makes the
+   handset's own screen show that the mic is genuinely live. */
+function startMeter() {
+  var AC = window.AudioContext || window.mozAudioContext;
+  if (!AC || !stream) { return; }
+  try {
+    ctx  = new AC();
+    src  = ctx.createMediaStreamSource(stream);
+    /* Anti-alias before decimating to 16k, same reason as the Pluto end: without
+       it everything above 8kHz folds back into the voice band as hash. */
+    lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 7000;
+    proc = ctx.createScriptProcessor(4096, 1, 1);
+    /* A zero-gain sink, NOT ctx.destination: connecting the mic to the speaker
+       on a handset bolted to a roomba is a feedback loop. The graph still needs
+       a path to the destination to be pulled at all. */
+    sink = ctx.createGain(); sink.gain.value = 0;
+    proc.onaudioprocess = function (e) {
+      var d = e.inputBuffer.getChannelData(0), s = 0;
+      for (var i = 0; i < d.length; i++) { s += d[i] * d[i]; }
+      var rms = Math.sqrt(s / d.length);
+      document.getElementById('lv').style.width = Math.min(100, rms * 400) + '%';
+      if (mode === 'chat' && !micMuted) { pcmPush(d, ctx.sampleRate); }
+    };
+    src.connect(lp); lp.connect(proc); proc.connect(sink); sink.connect(ctx.destination);
+  } catch (e) { log('meter failed: ' + e); }
+}
+
+/* Resample to 16k mono s16le and post in small blocks. Linear interpolation is
+   plenty for speech and costs nothing on a 1GHz Cortex-A5; anything fancier
+   would not survive this CPU budget. */
+function pcmPush(samples, rate) {
+  var ratio = rate / PCM_RATE, i, idx, lo, hi, frac, v;
+  var out = Math.floor(samples.length / ratio);
+  for (i = 0; i < out; i++) {
+    idx = i * ratio; lo = Math.floor(idx); hi = lo + 1; frac = idx - lo;
+    v = hi < samples.length ? samples[lo] * (1 - frac) + samples[hi] * frac : samples[lo];
+    if (v > 1) { v = 1; } else if (v < -1) { v = -1; }
+    pcmBuf.push(v < 0 ? v * 32768 : v * 32767);
+  }
+  if (pcmBuf.length > PCM_MAX_BACKLOG) {
+    /* The link cannot keep up. Throw away the oldest: this is a conversation,
+       and audio that arrives late is worth nothing. */
+    pcmBuf = pcmBuf.slice(pcmBuf.length - PCM_MAX_BACKLOG);
+    log('pcm: dropped backlog');
+  }
+  if (!pcmInflight && pcmBuf.length >= PCM_RATE * PCM_MS / 1000) { pcmFlush(); }
+}
+
+function pcmFlush() {
+  if (!pcmBuf.length || pcmInflight) { return; }
+  var n = pcmBuf.length, buf = new ArrayBuffer(n * 2), view = new DataView(buf), i;
+  for (i = 0; i < n; i++) { view.setInt16(i * 2, pcmBuf[i] | 0, true); }
+  pcmBuf = [];
+  pcmCount++;
+  try {
+    var x = new XMLHttpRequest();
+    x.open('POST', '/roomba-ai/audio/pcm', true);
+    x.setRequestHeader('Content-Type', 'application/octet-stream');
+    x.onreadystatechange = function () {
+      if (x.readyState !== 4) { return; }
+      pcmInflight = false;
+      if (x.status === 409) { log('session closed'); stopCapture(); }
+    };
+    pcmInflight = true;
+    x.send(buf);
+  } catch (e) { pcmInflight = false; log('pcm: ' + e); }
+  if (pcmCount % 40 === 0) { log('pcm x' + pcmCount); }
+}
+
+function startCapture() {
+  if (capturing || starting) { return; }
+  var gum = navigator.getUserMedia || navigator.mozGetUserMedia;
+  if (!gum) { setState(false, 'NO MIC API'); return; }
+  wantStop = false;
+  starting = true;
+  gum.call(navigator, { audio: true }, function (s) {
+    /* Held in module scope on purpose: let the stream and the graph fall out of
+       scope and GC collects them mid-run, after which the processor happily
+       reports silence forever. Cost us a probe round to find. */
+    starting = false;
+    stream = s;
+    capturing = true;
+    startMeter();
+    if (mode === 'ai') { recordCycle(); }
+    log('capture: ' + (mode === 'ai' ? 'clips' : 'live pcm'));
+  }, function (err) {
+    starting = false;
+    setState(false, 'MIC DENIED');
+    log('getUserMedia: ' + (err.name || err));
+  });
+}
+
+function stopCapture() {
+  wantStop = true;
+  capturing = false;
+  starting = false;
+  try { if (recorder && recorder.state !== 'inactive') { recorder.stop(); } } catch (e) {}
+  recorder = null;
+  /* Release the tracks, do not just stop recording: the handset's own mic
+     indicator should go out when the session ends. */
+  if (stream) {
+    try {
+      var t = stream.getAudioTracks ? stream.getAudioTracks() : [];
+      for (var i = 0; i < t.length; i++) { t[i].stop(); }
+      if (stream.stop) { stream.stop(); }
+    } catch (e) {}
+    stream = null;
+  }
+  try { if (proc) { proc.disconnect(); } if (lp) { lp.disconnect(); } if (src) { src.disconnect(); } } catch (e) {}
+  proc = null; src = null; sink = null; lp = null;
+  try { if (ctx && ctx.close) { ctx.close(); } } catch (e) {}
+  ctx = null;
+  document.getElementById('lv').style.width = '0';
+  pcmBuf = [];
+  log('capture stopped');
+}
+
+/* --- face --------------------------------------------------------------- */
+
+/* One MJPEG connection for the whole session. The server drops it when the
+   session ends, and onerror reconnects if wifi hiccups, so the panel is never
+   left frozen on a stale frame of somebody's face. */
+var faceOn = false, facePoll = 0, faceGrace = 0, faceLoaded = false;
+
+/* Try the MJPEG stream first, exactly like the Kindle page does. If no frame has
+   painted within FACE_GRACE_MS, fall back to polling single JPEGs: "strip rather
+   than break" (CLAUDE.md 7.2) rather than assume what this engine can hold open.
+   The fallback costs one request per frame instead of one per session, which is
+   why it is the fallback and not the default. */
+var FACE_GRACE_MS = 4000;
+var FACE_POLL_MS  = 250;
+
+function startFace() {
+  if (faceOn) { return; }
+  faceOn = true;
+  faceLoaded = false;
+  var img = document.getElementById('face');
+  img.onload = function () {
+    faceLoaded = true;   /* something painted: the stream is holding */
+  };
+  img.onerror = function () {
+    if (!faceOn) { return; }
+    facePollStart();
+  };
+  img.src = faceSrc + (faceSrc.indexOf('?') === -1 ? '?' : '&') + 'k=' + (new Date()).getTime();
+  log('face: stream');
+  faceGrace = setTimeout(function () {
+    if (faceOn && !faceLoaded) { facePollStart(); }
+  }, FACE_GRACE_MS);
+}
+
+/* Poll the still endpoint. Each load schedules the next, so a slow link slows the
+   rate instead of piling requests up. */
+function facePollStart() {
+  if (!faceOn || facePoll) { return; }
+  facePoll = 1;
+  log('face: polling stills');
+  var img = document.getElementById('face');
+  img.onerror = function () { if (faceOn) { setTimeout(nextStill, 1000); } };
+  img.onload  = function () { if (faceOn) { setTimeout(nextStill, FACE_POLL_MS); } };
+  nextStill();
+}
+function nextStill() {
+  if (!faceOn) { return; }
+  document.getElementById('face').src = '/roomba-ai/face?k=' + (new Date()).getTime();
+}
+
+function stopFace() {
+  if (!faceOn) { return; }
+  faceOn = false;
+  facePoll = 0;
+  faceLoaded = false;
+  if (faceGrace) { clearTimeout(faceGrace); faceGrace = 0; }
+  var img = document.getElementById('face');
+  img.onerror = null;
+  img.onload = null;
+  img.removeAttribute('src');
+}
+
+/* --- voice in (Pluto talking to the room) ------------------------------- */
+
+/* Gecko 28 has no fetch and no ReadableStream, but it does have XHR's
+   moz-chunked-arraybuffer, which hands us each chunk as it arrives. That is the
+   whole reason this can be scheduled properly instead of handed to an <audio>
+   element: an element buffers and then plays its backlog at 1x, so it drifts
+   permanently behind. If the responseType is unsupported we fall back to the
+   element and accept the lag. */
+var faceSrc = '/roomba-ai/face/stream';   /* overridden by state.video */
+var voiceXhr = null, voiceAt = 0, voiceCtx = null, voiceOn = false;
+var VOICE_JITTER = 0.12, VOICE_MAX_AHEAD = 0.6;
+
+function voiceContext() {
+  var AC = window.AudioContext || window.mozAudioContext;
+  if (!AC) { return null; }
+  if (!voiceCtx) { try { voiceCtx = new AC(); } catch (e) { return null; } }
+  return voiceCtx;
+}
+
+function startVoice() {
+  if (voiceOn) { return; }
+  voiceOn = true;
+  var probe = new XMLHttpRequest();
+  var supported = false;
+  try { probe.open('GET', '/roomba-ai/state', true); probe.responseType = 'moz-chunked-arraybuffer';
+        supported = (probe.responseType === 'moz-chunked-arraybuffer'); probe.abort(); } catch (e) {}
+  if (!supported) {
+    log('voice: <audio> fallback');
+    var a = document.getElementById('voice');
+    a.src = '/roomba-ai/voice/live?k=' + (new Date()).getTime();
+    a.play();
+    return;
+  }
+  var ctxv = voiceContext();
+  if (!ctxv) { log('voice: no AudioContext'); return; }
+  voiceAt = 0;
+  var header = false, tail = null;
+  var x = new XMLHttpRequest();
+  voiceXhr = x;
+  x.open('GET', '/roomba-ai/voice/live?k=' + (new Date()).getTime(), true);
+  x.responseType = 'moz-chunked-arraybuffer';
+  x.onprogress = function () {
+    if (!voiceOn || !x.response) { return; }
+    var chunk = new Uint8Array(x.response), buf;
+    if (tail && tail.length) {
+      buf = new Uint8Array(tail.length + chunk.length);
+      buf.set(tail, 0); buf.set(chunk, tail.length);
+    } else { buf = chunk; }
+    if (!header) {
+      if (buf.length < 44) { tail = buf; return; }
+      buf = buf.subarray(44); header = true;
+    }
+    var usable = buf.length - (buf.length % 2);
+    tail = buf.subarray(usable);
+    var n = usable / 2;
+    if (!n) { return; }
+    var view = new DataView(buf.buffer, buf.byteOffset, usable);
+    var ab = ctxv.createBuffer(1, n, PCM_RATE), ch = ab.getChannelData(0), i;
+    for (i = 0; i < n; i++) { ch[i] = view.getInt16(i * 2, true) / 32768; }
+    var node = ctxv.createBufferSource();
+    node.buffer = ab;
+    node.connect(ctxv.destination);
+    var now = ctxv.currentTime;
+    if (voiceAt < now + 0.01 || voiceAt > now + VOICE_MAX_AHEAD) { voiceAt = now + VOICE_JITTER; }
+    node.start(voiceAt);
+    voiceAt += ab.duration;
+  };
+  x.onerror = function () { log('voice: dropped'); };
+  x.send();
+  log('voice: streaming');
+}
+
+function stopVoice() {
+  voiceOn = false;
+  if (voiceXhr) { try { voiceXhr.abort(); } catch (e) {} voiceXhr = null; }
+  var a = document.getElementById('voice');
+  a.pause(); a.removeAttribute('src');
+  voiceAt = 0;
+}
+
+var micMuted = false;
+function toggleMute() {
+  micMuted = !micMuted;
+  var b = document.getElementById('mute');
+  b.innerHTML = micMuted ? 'MUTED' : 'MUTE';
+  b.className = micMuted ? 'muted' : '';
+  if (micMuted) { pcmBuf = []; }
+  log('mic ' + (micMuted ? 'muted' : 'on'));
+}
+
+/* --- session ------------------------------------------------------------ */
+
+/* The handset decides from state(), rather than waiting to be told to stop.
+   If Pluto dies or wifi drops, polling fails, and a failed poll is treated as
+   not-live: the mic switches itself off instead of staying open. */
+function poll() {
+  var x = new XMLHttpRequest();
+  x.open('GET', '/roomba-ai/state?k=' + (new Date()).getTime(), true);
+  x.onreadystatechange = function () {
+    if (x.readyState !== 4) { return; }
+    var live = false, s = null;
+    if (x.status === 200) {
+      try { s = JSON.parse(x.responseText); live = !!s.live; } catch (e) { live = false; }
+    }
+    if (live) {
+      if (s && s.mode) { mode = s.mode; }
+      /* The server says what to show: the Pluto end's camera for a chat, the
+         roomba's own camera for the AR modes. */
+      if (s && s.video && s.video !== faceSrc) { faceSrc = s.video; stopFace(); }
+      setState(true, mode === 'ai' ? 'LISTENING' : 'ON CALL');
+      startCapture();
+      startFace();
+      startVoice();
+    } else {
+      setState(false, x.status === 200 ? 'OFF' : 'NO LINK');
+      if (capturing) { stopCapture(); }
+      stopFace();
+      stopVoice();
+    }
+  };
+  try { x.send(); } catch (e) { setState(false, 'NO LINK'); if (capturing) { stopCapture(); } }
+}
+poll();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>

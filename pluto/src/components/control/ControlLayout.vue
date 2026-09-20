@@ -4,6 +4,7 @@ import ControlKeyboard from './ControlKeyboard.vue'
 import RoombaTelemetry from './RoombaTelemetry.vue'
 import RoombaCamera from './RoombaCamera.vue'
 import KindleOutput from './KindleOutput.vue'
+import RoombaAiControl from './RoombaAiControl.vue'
 
 type Cell = 'nw' | 'ne' | 'sw' | 'se'
 
@@ -48,7 +49,8 @@ const headed = computed(() => ({
 const shouldShowCamera = computed(() =>
   props.target === 'roomba' && !!props.targetDev && !slots['ne'])
 
-// Hold-to-listen: the controller's X (verb 'listen') emits here; we relay it to the camera panel
+// Hold-to-talk: the controller's X (verb 'listen') emits here; we relay it to AI mode,
+// so the handset's mic runs only while X is held. It used to open the camera's audio.
 // so it plays the camera audio while held. Purely local -- never touches the Roomba.
 const listening = ref(false)
 
@@ -151,7 +153,7 @@ function cellStyle(cell: 'nw' | 'ne' | 'sw' | 'se') {
           <svg v-if="maxCell === 'ne'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
           <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
         </button>
-        <slot name="ne"><RoombaCamera v-if="shouldShowCamera" :node="targetDev" :active="active" :listening="listening" /></slot>
+        <slot name="ne"><RoombaCamera v-if="shouldShowCamera" :node="targetDev" :active="active" /></slot>
       </div>
       <div v-if="shouldShowTelemetry || shouldShowKindle" class="quad" :class="{ 'quad--headed': headed.sw }" :style="isNarrow ? undefined : cellStyle('sw')">
         <button v-if="canMax('sw')" class="quad-max" :class="{ on: maxCell === 'sw' }"
@@ -161,7 +163,12 @@ function cellStyle(cell: 'nw' | 'ne' | 'sw' | 'se') {
           <svg v-if="maxCell === 'sw'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
           <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
         </button>
-        <RoombaTelemetry v-if="shouldShowTelemetry" :ip="roombaIp!" :active="active" />
+        <!-- SW for the roomba target is shared: telemetry stays a compact box and AI mode
+             takes the room below it, since a mic switch may yet grow past one button. -->
+        <div v-if="shouldShowTelemetry" class="sw-split">
+          <div class="sw-split__tel"><RoombaTelemetry :ip="roombaIp!" :active="active" /></div>
+          <div class="sw-split__ai"><RoombaAiControl :active="active" :talking="listening" :camera-node="targetDev" /></div>
+        </div>
         <KindleOutput v-else :active="active" />
       </div>
       <div class="quad quad--main" :style="isNarrow ? undefined : cellStyle('se')">
@@ -174,6 +181,11 @@ function cellStyle(cell: 'nw' | 'ne' | 'sw' | 'se') {
 </template>
 
 <style scoped>
+/* Telemetry is capped rather than given a fixed height: it keeps its own scroll
+   when the quad is short, and never crowds out the AI panel below it. */
+.sw-split { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.sw-split__tel { flex: 0 1 auto; max-height: 45%; min-height: 0; overflow: auto; }
+.sw-split__ai { flex: 1 1 auto; min-height: 0; border-top: 1px solid var(--line); }
 .ql {
   display: flex;
   flex-direction: column;

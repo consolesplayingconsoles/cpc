@@ -78,7 +78,10 @@ const sections = computed(() => {
   }))
 })
 
-// ── selection (URL) ───────────────────────────────────────────────────────────
+// ── selection (URL, remembered across tabs) ──────────────────────────────────
+// The URL carries the pick, but leaving the tab drops it, so the last one is kept
+// in localStorage (cpc.<domain>.<leaf>) and reopened when we come back.
+const SELECTED_KEY = 'cpc.homebrew.selected'
 const selectedId = computed(() => {
   if (route.name !== 'homebrew') return null
   const rest = route.params.rest
@@ -95,17 +98,20 @@ function open(it: HomebrewItem, replace = false) {
   if (replace) router.replace(to)
   else router.push(to)
 }
-// Nothing picked (or a stale URL): open the first item in list order.
+// Nothing picked (or a stale URL): reopen the last pick, else the first item in list order.
 watch([sections, selected, () => props.active], () => {
   if (!props.active || !loaded.value || selected.value || route.name !== 'homebrew') return
-  const first = sections.value[0]?.groups[0]?.[1][0]
-  if (first) open(first, true)
+  let last: string | null = null
+  try { last = localStorage.getItem(SELECTED_KEY) } catch { /* ignore */ }
+  const it = items.value.find(i => i.id === last) ?? sections.value[0]?.groups[0]?.[1][0]
+  if (it) open(it, true)
 })
 
 // ── params form ───────────────────────────────────────────────────────────────
 const draft = ref<Record<string, string>>({})
 watch(selected, (it) => {
   draft.value = Object.fromEntries((it?.params ?? []).map(p => [p.key, p.value]))
+  if (it) try { localStorage.setItem(SELECTED_KEY, it.id) } catch { /* ignore */ }
 }, { immediate: true })
 const dirty = computed(() => !!selected.value?.params.some(p => draft.value[p.key] !== p.value))
 const saving = ref(false)
