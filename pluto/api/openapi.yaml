@@ -30,6 +30,27 @@ paths:
     get: { tags: [chat], summary: Barebones retro-console chat page (HTML), responses: { '200': { description: HTML } } }
   /kindle:
     get: { tags: [control], summary: Zero-JS retro capture-frame viewer for e-ink browsers (HTML), responses: { '200': { description: HTML } } }
+  /roomba-ai:
+    get: { tags: [control], summary: Handset page for the roomba AI node (HTML, Gecko 28 safe), responses: { '200': { description: HTML } } }
+  /roomba-ai/state:
+    get: { tags: [control], summary: AI mode session state the handset polls, responses: { '200': { description: Session state } } }
+  /roomba-ai/face:
+    get: { tags: [control], summary: Latest face frame as a plain JPEG (fallback for browsers that cannot hold an MJPEG stream), responses: { '200': { description: Frame }, '204': { description: No frame yet } } }
+    post: { tags: [control], summary: Face frame (JPEG) shown on the handset in chat mode, responses: { '200': { description: Accepted }, '409': { description: No live session }, '413': { description: Frame size out of range } } }
+  /roomba-ai/face/stream:
+    get: { tags: [control], summary: Face frames as MJPEG (multipart/x-mixed-replace) for the handset, responses: { '200': { description: Stream } } }
+  /roomba-ai/voice/pcm:
+    post: { tags: [control], summary: Pluto mic PCM block bound for the handset speaker (16k mono s16le), responses: { '200': { description: Accepted }, '409': { description: No live session }, '413': { description: Block out of range } } }
+  /roomba-ai/voice/live:
+    get: { tags: [control], summary: Pluto's mic as a continuous WAV stream for the handset, responses: { '200': { description: Audio stream } } }
+  /roomba-ai/audio/pcm:
+    post: { tags: [control], summary: Live mic PCM block from the handset (16k mono s16le, chat mode), responses: { '200': { description: Accepted }, '409': { description: No live session }, '413': { description: Block out of range } } }
+  /roomba-ai/audio/live:
+    get: { tags: [control], summary: The handset's mic as a continuous WAV stream, responses: { '200': { description: Audio stream } } }
+  /roomba-ai/audio/next:
+    get: { tags: [control], summary: Oldest captured clip from the handset, consumed on read, responses: { '200': { description: Audio }, '204': { description: Nothing waiting } } }
+  /roomba-ai/audio:
+    post: { tags: [control], summary: Captured audio chunk from the handset (Ogg/Opus), responses: { '200': { description: Accepted }, '409': { description: No live session }, '413': { description: Chunk size out of range } } }
   /dreame:
     get: { tags: [nodes], summary: Dreame vacuum drill-in page (HTML), responses: { '200': { description: HTML } } }
   /nodes:
@@ -90,6 +111,8 @@ paths:
     get: { tags: [control], summary: E-ink render of the latest capture frame (image), responses: { '200': { description: Frame } } }
   /control/frame/kindle/stream:
     get: { tags: [control], summary: E-ink render as MJPEG (multipart/x-mixed-replace), responses: { '200': { description: Stream } } }
+  /control/listen:
+    post: { tags: [control], summary: AI mode session for the roomba handset (enable / keepalive / disable), responses: { '200': { description: Session state }, '400': { description: Unknown action }, '403': { description: Not on the LAN } } }
   /control/google/lens:
     get: { tags: [google], summary: Vision (Lens) OCR state, responses: { '200': { description: State } } }
     post: { tags: [google], summary: Trigger a Lens scan, responses: { '200': { description: OK } } }
@@ -131,7 +154,7 @@ paths:
   /catalogue/saves/stream:
     get:
       tags: [catalogue]
-      summary: "Back up saved games for one console: only the nodes that hold it and have a back-up wired run -- batocera (/userdata/saves/<console>), vmu (dreamcast), and any node with an SD_LABEL (its card, through the Pi hub). system=* backs up every such node, everything it holds. SSE line/step/done events; the engines also post their summaries to the chat feed"
+      summary: "Back up saved games for one console: only the nodes that hold it and have a back-up wired run -- batocera (/userdata/saves/<console>), vmu (dreamcast), ps3 (savedata over webMAN's FTP), and any node with an SD_LABEL (its card, through the Pi hub). system=* backs up every such node, everything it holds. SSE line/step/done events; the engines also post their summaries to the chat feed"
       parameters: [{ name: system, in: query, required: false, schema: { type: string, default: '*' } }]
       responses: { '200': { description: text/event-stream of line/step/done events } }
   /catalogue/missing-covers:
@@ -231,6 +254,12 @@ paths:
       summary: Set or clear ("") a game's label, its Pluto name and art lookup (body {game, label})
       parameters: [{ name: system, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: OK } }
+  /catalogue/{system}/kind:
+    post:
+      tags: [catalogue]
+      summary: "File a game as a tool or back as a game (body {game, kind: game|tool}); tools have their own tab in the Media page, and the kind is keyed by game so a physical tool and its digital copy move together"
+      parameters: [{ name: system, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: "{ok, kind}" }, '400': { description: unknown kind } }
   /native/{node}/{action}:
     post:
       tags: [nodes]
@@ -309,10 +338,10 @@ paths:
   /homebrew/stream:
     get:
       tags: [homebrew]
-      summary: "SSE: build, publish to Lab + sync (catalogue games), and with node send it there ('line', 'step', 'media', 'done')"
+      summary: "SSE: build, publish to Lab + sync (catalogue games), and with node send it there; a send reuses the last build if its output still exists ('line', 'step', 'media', 'done')"
       parameters:
         - { name: id, in: query, required: true, schema: { type: string }, description: 'item id, e.g. megadrive/mods/sonic1/vanilla' }
-        - { name: node, in: query, required: false, schema: { type: string }, description: 'a sendTargets id; omit to build and sync only' }
+        - { name: node, in: query, required: false, schema: { type: string }, description: 'a sendTargets id; omit to build and sync only. With it, the build step is skipped when the last output is still on disk' }
       responses: { '200': { description: text/event-stream }, '404': { description: no such item } }
   /homebrew/params:
     put:

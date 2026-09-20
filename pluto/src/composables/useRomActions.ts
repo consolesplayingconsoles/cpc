@@ -33,14 +33,17 @@ export function useRomActions(system: Ref<string>, nodes: Ref<NodeMap>) {
     return key ? (consolesConfig.emulators as Record<string, { name: string }>)[key] ?? null : null
   })
 
-  const REMOTE_BOOT = ['batocera']
+  // Nodes Pluto can boot a game on: Batocera through EmulationStation's web API, the PS3
+  // through webMAN. Never ping-gated -- press it and let the API say why not.
+  const REMOTE_BOOT = ['batocera', 'ps3']
   const canPlay = (f: CatalogueFile) => f.status === 'present' &&
     ((f.node === 'lab' && !!emulator.value) || REMOTE_BOOT.includes(f.node))
   const playTitle = (f: CatalogueFile) => f.node === 'lab' ? 'Play in ' + (emulator.value?.name ?? 'emulator') : 'Play on ' + (nodes.value[f.node]?.name ?? f.node)
   const canOpen = (f: CatalogueFile) => f.status === 'present' && (f.node === 'lab' || !!smbUrl(f))
 
-  // Quit: stop whatever game is running on the node (Batocera), e.g. before testing a rebuild.
-  const canQuit = (f: CatalogueFile) => f.status === 'present' && REMOTE_BOOT.includes(f.node)
+  // Quit: stop whatever game is running on the node (Batocera), e.g. before testing a
+  // rebuild. Only Batocera can be told to quit; a PS3 game ends from the console.
+  const canQuit = (f: CatalogueFile) => f.status === 'present' && f.node === 'batocera'
   function quit(f: CatalogueFile) {
     actionError.value = ''
     fetch(`${API_BASE}/native/${f.node}/quit-game`, { method: 'POST' })

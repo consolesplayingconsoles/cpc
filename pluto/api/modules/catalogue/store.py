@@ -158,6 +158,11 @@ def merge(doc, node, scan, now, scope=None, strip=None):
     numbers its games ("034 Assault City (Europe).sms"). The stored path is untouched --
     it is where the file really is -- only the name the title comes from.
 
+    A scan item may also carry "name": the name to read the title from when the path does
+    not hold one. A PS3 install is a folder called BLES00107 and its real title lives in
+    PARAM.SFO, so the scanner passes "SEGA Rally (Europe).ps3" while the path stays the
+    folder it can actually be read from.
+
     scan: [{"path": "...", "header": {"id", "title"} or None}, ...]
     """
     scan = _drop_shared_ids(scan, strip)
@@ -176,8 +181,11 @@ def merge(doc, node, scan, now, scope=None, strip=None):
     def parse(path):
         return names.parse(_stripped(path, strip))
 
+    def parse_item(i):
+        return names.parse(i["name"]) if i.get("name") else parse(i["path"])
+
     def order(i):
-        p = parse(i["path"])
+        p = parse_item(i)
         return (bool(p["variants"]), not names.has_region_tag(p["tags"]), i["path"])
     seen = set()
     for item in sorted(scan, key=order):
@@ -195,7 +203,7 @@ def merge(doc, node, scan, now, scope=None, strip=None):
                 f["inner"] = item["inner"]
             continue
 
-        p = parse(path)
+        p = parse_item(item)
         gid = header["id"] if header else None
         gk = find_game(doc, p["title"], gid, header["title"] if header else None)
         existing = gk is not None
@@ -253,6 +261,9 @@ def merge(doc, node, scan, now, scope=None, strip=None):
             "regions": header["regions"] if header else [], "variants": p["variants"],
             "id": gid, "headerTitle": header["title"] if header else None, "inner": item.get("inner"),
             "card": item.get("card"),              # SD card label, for games on a console's cards
+            # What the thing IS, when its platform says so (a PS3's PARAM.SFO CATEGORY):
+            # HG boots on its own, GD is the install half of a disc game and cannot.
+            "category": item.get("category") or None,
             "status": "present", "firstSeen": now, "lastSeen": now,
         })
         counts["added"] += 1
@@ -317,6 +328,16 @@ def load_kinds(root):
         return {}
     with open(p) as f:
         return json.load(f)
+
+
+def save_kinds(root, kinds):
+    """Write kinds.json back (see load_kinds), dropping systems left with nothing."""
+    p = os.path.join(root, "kinds.json")
+    body = {s: v for s, v in sorted(kinds.items()) if v}
+    with open(p + ".tmp", "w") as f:
+        json.dump(body, f, indent=2, ensure_ascii=False, sort_keys=True)
+        f.write("\n")
+    os.replace(p + ".tmp", p)
 
 
 def load_hardware(root):

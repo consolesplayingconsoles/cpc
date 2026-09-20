@@ -6,6 +6,7 @@ import { ICONS } from '../../composables/useIcons'
 import UiClose from '../ui/UiClose.vue'
 import AdminCommand from './AdminCommand.vue'
 import UiIconButton from '../ui/UiIconButton.vue'
+import UiButton from '../ui/UiButton.vue'
 import UiPill from '../ui/UiPill.vue'
 import UiSpinner from '../ui/UiSpinner.vue'
 import MetadataCard, { type GameMeta } from '../MetadataCard.vue'
@@ -146,6 +147,24 @@ const labelBusy = ref(false)
 const labelError = ref('')
 watch(() => props.game.key, () => { labelEditing.value = false })
 function editLabel() { labelEditing.value = !labelEditing.value; labelText.value = props.game.label || props.game.title; labelError.value = '' }
+// Tool or game, from the drawer: what a thing IS gets decided while you are looking at it,
+// not by hand-editing kinds.json. Tools (boot discs, loaders, a console's homebrew menu)
+// move to the Tools tab.
+const kindBusy = ref(false)
+const kindError = ref('')
+async function toggleKind() {
+  kindBusy.value = true
+  kindError.value = ''
+  try {
+    await catalogueApi.setKind(props.system, props.game.key, props.game.kind === 'tool' ? 'game' : 'tool')
+    emit('changed')
+  } catch (e) {
+    kindError.value = (e as Error).message
+  } finally {
+    kindBusy.value = false
+  }
+}
+
 async function saveLabel() {
   const text = labelText.value.trim() === (props.game.fileTitle ?? props.game.title) ? '' : labelText.value.trim()
   if (text === (props.game.label || '')) { labelEditing.value = false; return }
@@ -203,6 +222,18 @@ async function forget(f: CatalogueFile) {
 
 <template>
   <aside ref="drawerEl" class="gd" @click.stop>
+    <!-- Label / favourite / close ride at the top of the DRAWER, not inside the header:
+         a cover can be 40vh tall, so after a scroll the close button would be gone. -->
+    <div class="gd__tools">
+      <UiIconButton variant="ghost" :active="!!game.label" :title="game.label ? 'Edit label' : 'Set label'" @click="editLabel">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 12.5V4a1 1 0 0 1 1-1h8.5l8.5 8.5-9.5 9.5z"/><circle cx="7.5" cy="7.5" r="1.3" fill="currentColor"/></svg>
+      </UiIconButton>
+      <UiIconButton variant="ghost" :active="game.favourite" :title="game.favourite ? 'Unfavourite' : 'Favourite'"
+                    @click="emit('favourite', !game.favourite)">
+        <svg width="16" height="16" viewBox="0 0 24 24" :fill="game.favourite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
+      </UiIconButton>
+      <UiClose title="Close (Esc)" @click="emit('close')" />
+    </div>
     <header class="gd__head">
       <button class="gd__cover" :class="{ 'gd__cover--art': coverSrc }" :title="game.cover === 'custom' ? 'Replace cover' : 'Upload cover'" :disabled="uploading" @click="fileEl?.click()">
         <template v-if="coverSrc">
@@ -219,16 +250,6 @@ async function forget(f: CatalogueFile) {
         <span v-if="game.meta?.genre" class="gd__genre">{{ game.meta.genre }}</span>
       </div>
 
-      <div class="gd__tools">
-        <UiIconButton variant="ghost" :active="!!game.label" :title="game.label ? 'Edit label' : 'Set label'" @click="editLabel">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 12.5V4a1 1 0 0 1 1-1h8.5l8.5 8.5-9.5 9.5z"/><circle cx="7.5" cy="7.5" r="1.3" fill="currentColor"/></svg>
-        </UiIconButton>
-        <UiIconButton variant="ghost" :active="game.favourite" :title="game.favourite ? 'Unfavourite' : 'Favourite'"
-                      @click="emit('favourite', !game.favourite)">
-          <svg width="16" height="16" viewBox="0 0 24 24" :fill="game.favourite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
-        </UiIconButton>
-        <UiClose title="Close (Esc)" @click="emit('close')" />
-      </div>
     </header>
 
     <form v-if="labelEditing" class="gd__label-edit" @submit.prevent="saveLabel">
@@ -247,6 +268,15 @@ async function forget(f: CatalogueFile) {
       <UiSpinner v-if="uploading" :size="14" />
     </form>
     <p v-if="uploadError" class="gd__upload-err">{{ uploadError }}</p>
+    <div class="gd__kind">
+      <UiButton :disabled="kindBusy" :title="game.kind === 'tool' ? 'Count this as a game again' : 'A boot disc, loader or menu: file it under Tools'"
+                @click="toggleKind()">
+        {{ game.kind === 'tool' ? 'Move to games' : 'Move to tools' }}
+      </UiButton>
+      <UiSpinner v-if="kindBusy" :size="14" />
+      <span v-if="game.kind === 'tool'" class="gd__label-hint">Listed under Tools</span>
+    </div>
+    <p v-if="kindError" class="gd__upload-err">{{ kindError }}</p>
     <p v-if="actionError && !active" class="gd__upload-err">{{ actionError }}</p>
     <AdminCommand v-if="sendCommand" title="Send to the PS2 drive from Terminal" :commands="[sendCommand]" @close="sendCommand = ''" />
 
@@ -320,6 +350,12 @@ async function forget(f: CatalogueFile) {
   padding: 18px 18px 22px;
   font-family: var(--font-sans);
 }
+.gd__tools {
+  position: sticky; top: 0; z-index: 3;
+  display: flex; gap: 6px; justify-content: flex-end; align-items: center;
+  margin: -18px -18px 4px; padding: 10px 18px 6px;
+  background: var(--surface);
+}
 .gd__head { display: flex; gap: 12px; align-items: flex-start; }
 /* Cover: libretro box art, lettered placeholder when none matched. */
 .gd__cover img { width: 100%; height: 100%; object-fit: contain; }
@@ -330,6 +366,7 @@ async function forget(f: CatalogueFile) {
   opacity: 0; transition: opacity 0.12s;
 }
 .gd__cover:hover .gd__cover-edit, .gd__cover:disabled .gd__cover-edit { opacity: 1; }
+.gd__kind { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); margin: var(--sp-2) 0; }
 .gd__upload-err { margin: 8px 0 0; font-size: 12px; color: var(--bad); }
 .gd__cover img.is-loading { visibility: hidden; position: absolute; }
 .gd__cover-spin { position: absolute; top: 50%; left: 50%; margin: -10px 0 0 -10px; }
@@ -349,7 +386,6 @@ async function forget(f: CatalogueFile) {
 .gd__genre { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-hover); }
 /* same badge as MetadataCard's region */
 .gd__region { font-family: var(--font-sans); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 1px 6px; }
-.gd__tools { display: flex; gap: 2px; flex: 0 0 auto; }
 
 .gd__sec { margin-top: 18px; }
 .gd__group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }

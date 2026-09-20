@@ -23,12 +23,13 @@ Pure stdlib, 3.6-safe, ASCII only.
 """
 import json
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 try:
-    from . import covers, gamelist, metadata, names, scan, store
+    from . import covers, gamelist, metadata, names, scan, sfo, store
 except ImportError:
-    import covers, gamelist, metadata, names, scan, store
+    import covers, gamelist, metadata, names, scan, sfo, store
 
 BATOCERA_ROMS = "/userdata/roms"
 _LIST_MARK = "--CPC-GAMELIST--"
@@ -160,7 +161,12 @@ def cover(root, system, game_key, consoles_config, read_node_file=None):
     cfg = (consoles_config.get("systems") or {}).get(system) or {}
     # thumbnailsFallback: another system's art when this one's repo lacks the game (Naomi -> Dreamcast)
     repo = [r for r in [cfg.get("thumbnails")] + list(cfg.get("thumbnailsFallback") or []) if r]
-    return covers.fetch(root, system, game, repo)
+    got = covers.fetch(root, system, game, repo)
+    if got:
+        return got
+    # Last resort, free: the same game's art under another system (an arcade title also
+    # owned as a PS3 PKG, a port). Only an exact game-key match counts.
+    return covers.from_other_system(root, system, game["key"])
 
 
 def missing_covers(root):
@@ -233,6 +239,27 @@ def set_label(root, system, game_key, label):
         mine.pop(game_key, None)
     store.save_labels(root, labels)
     covers.forget(root, system, game_key)
+
+
+KINDS = ("game", "tool")
+
+
+def set_kind(root, system, game_key, kind):
+    """File a game as a tool, or put it back ("game"). Tools are the discs and loaders that
+    are not games -- Dreamkey, DreamShell, a console's homebrew menu -- and the Media tab
+    lists them in their own tab. Keyed by game, so a physical tool and its digital copy
+    move together. -> the kind now stored."""
+    kind = (kind or "game").strip().lower()
+    if kind not in KINDS:
+        raise ValueError("kind must be one of %s" % ", ".join(KINDS))
+    kinds = store.load_kinds(root)
+    mine = kinds.setdefault(system, {})
+    if kind == "game":
+        mine.pop(game_key, None)
+    else:
+        mine[game_key] = kind
+    store.save_kinds(root, kinds)
+    return kind
 
 
 def set_system_favourite(root, system, on):
@@ -339,13 +366,85 @@ def _scan_sd(run_ssh, hub_node, labels, roms_dir, fmt, skip):
     return out
 
 
+# A PS3 serial: what Sony stamps on a disc or a PSN title. Anything else in
+# /dev_hdd0/game is homebrew -- the HEN tools, and arcade games someone wrapped in a PKG.
+# Everything gets catalogued either way, because a title has to be IN the catalogue to be
+# booted from Pluto; what changes is only whether it is worth copying off the drive.
+PS3_SERIAL = re.compile(r"^(?:B[CLE][EAJKU]S|NP[EUJHK][ABGMWXZ])[0-9]{5}", re.I)
+# Region off the serial's 3rd letter, the only place a PS3 title states it: BLES/BCES/NPEB
+# are Europe, BLUS/BCUS/NPUB USA, BLJM/BCJS/NPJB Japan, BLAS/BCAS Asia, BLKS/BCKS Korea.
+PS3_REGIONS = {"E": "Europe", "U": "USA", "J": "Japan", "A": "Asia", "K": "Korea"}
+
+
+def ps3_region(serial):
+    """Region tag for a PS3 serial, or "" when its shape says nothing (homebrew ids)."""
+    s = (serial or "").upper()
+    if PS3_SERIAL.match(s):
+        return PS3_REGIONS.get(s[2] if s[:2] != "NP" else s[2], "")
+    return ""
+
+
+def _scan_ftp(client, host, dirs):
+    """One node's drive over FTP -> [{"path", "size", "inner", "header"}].
+
+    No shell on the far side, so this walks what the plugin exposes: an ISO folder, and
+    installed/folder titles whose PARAM.SFO gives the serial and the name a header would
+    give elsewhere. client = {"list": (host, path) -> [(name, is_dir, size)],
+    "read": (host, path) -> bytes}; dirs = [(remote dir, kind)] where kind is "iso"
+    (files are games), "installed" (<dir>/PARAM.SFO) or "folder" (<dir>/PS3_GAME/PARAM.SFO).
+    """
+    out = []
+    for base, kind in dirs:
+        try:
+            entries = client["list"](host, base)
+        except Exception:
+            continue                      # a folder the plugin does not expose: not a failure
+        for name, is_dir, size in entries:
+            if name in (".", ".."):
+                continue
+            rel = "%s/%s" % (base.strip("/").split("/")[-1], name)
+            if kind == "iso":
+                if is_dir or os.path.splitext(name)[1].lower() not in (".iso", ".bin", ".img"):
+                    continue
+                out.append({"path": rel, "size": size, "inner": None, "header": None})
+                continue
+            if not is_dir:
+                continue
+            sub = "PARAM.SFO" if kind == "installed" else "PS3_GAME/PARAM.SFO"
+            try:
+                serial, label, category = sfo.title(client["read"](host, "%s/%s/%s" % (base.rstrip("/"), name, sub)))
+            except Exception:
+                serial, label, category = "", "", ""
+            # The FOLDER name wins when it is a real serial: a disc install is named after
+            # its serial, while PARAM.SFO can carry a dev placeholder (SEGA Rally on this
+            # drive says TITLE_ID=SR12345 inside BLES00107).
+            sid = (name if PS3_SERIAL.match(name) else (serial or name)).upper()
+            region = ps3_region(sid)
+            # The title comes from PARAM.SFO, not from a folder called BLES00107, so hand
+            # merge the name to read it from; the path stays the folder on the drive.
+            # A title is free text: a slash ("PKG/ROM Launcher") would read as a directory
+            # and lose everything before it, and a trademark sign ends up inside the game
+            # key ("SEGA Rally(tm)" -> sega-rallytm), so neither survives into the name.
+            display = (label or sid).strip().replace("/", "-")
+            for junk in ("\u2122", "\u00ae", "\u00a9"):
+                display = display.replace(junk, "")
+            display = " ".join(display.split())
+            out.append({"path": rel, "size": size, "inner": None, "category": category,
+                        "name": "%s%s.ps3" % (display, " (%s)" % region if region else ""),
+                        "header": {"id": sid, "title": label,
+                                   "regions": [region] if region else []}})
+    return out
+
+
 def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=BATOCERA_ROMS, lab_roms=None, sd_nodes=None,
-         admin_nodes=None, only=None):
+         admin_nodes=None, only=None, ftp_nodes=None, ftp_client=None):
     """Sync one system ('*' = everything). emit(line) streams progress.
     consoles_config = config/consoles.json (nodeConsoles for hosts, systems for headers).
 
     run_ssh(node, argv, stdin=None) -> (rc, output); saves_lookup(system) -> {stem: [nodes]} or None.
     lab_roms = this machine's ROMS_PATH (None = no lab source).
+    ftp_nodes = {node: {"host": "192.168.68.69", "dirs": [(remote dir, kind), ...]}} for a
+    drive reachable only over FTP (the PS3), read with ftp_client -- see _scan_ftp.
     sd_nodes = {node: {"labels": [...], "roms_dir": "SAROO/ISO", "hub": "pi", "strip": regex}}
     for consoles whose games live on SD cards read through the Pi hub (node .env SD_LABEL /
     SD_ROMS_DIR / SD_NAME_STRIP -- the last one for a card that numbers its game files).
@@ -381,6 +480,17 @@ def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=B
                 fmt = {ext: formats.get(s) for ext, s in route.items()} if len(systems_of) > 1 else formats.get(systems_of[0])
                 jobs[node] = (lambda sd=sd, route=route, fmt=fmt:
                               {"__sd__": route, "cards": _scan_sd(run_ssh, sd.get("hub", "pi"), sd["labels"], sd["roms_dir"], fmt, skip)})
+    # Nodes whose games sit on a drive Pluto can only reach over FTP (the PS3 through
+    # webMAN: no shell there, so this is a read, not a remote scan program).
+    ftp_nodes = ftp_nodes or {}
+    for node in hosts:
+        f = ftp_nodes.get(node)
+        if f and f.get("host") and f.get("dirs") and ftp_client:
+            systems_of = [c for c in (node_consoles.get(node) or []) if c != "*"]
+            target = systems_of[0] if systems_of else None
+            if target and (system == "*" or system == target):
+                jobs[node] = (lambda f=f, target=target:
+                              {target: {"files": _scan_ftp(ftp_client, f["host"], f["dirs"]), "gamelist": ""}})
     admin_nodes = admin_nodes or {}
     for node in hosts:
         if node in admin_nodes:

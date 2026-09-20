@@ -22,7 +22,8 @@ local, batocera and sd share _files: one file per game, or a disc folder for .gd
 descriptor as <name>.gdi plus the track files it lists, in <name>/), written
 beside the target as .part, size-checked, renamed; then the target is rescanned. Arcade systems
 keep the source file name (romsets are looked up by it).
-  ftp   FTP_PATH        a PS3's webMAN FTP                     -- not built yet
+  ftp   FTP_PATH        a PS3's webMAN FTP: ISOs into /dev_hdd0/PS3ISO, where webMAN
+                          mounts them from (there is no shell on a PS3)
 The caller (the API) never branches on the kind: it hands the plan to STRATEGIES.
 
 Pure stdlib, 3.6-safe, ASCII only.
@@ -194,4 +195,6 @@ def _not_built(kind):
     return run
 
 
-STRATEGIES = {"local": _files, "batocera": _files, "sd": _files, "hdd": _hdd, "ftp": _not_built("ftp")}
+# ftp joins _files: the API's card for it speaks the same mount/exists/put/finish words
+# over FTP that the others speak over SSH, so the copy loop does not change.
+STRATEGIES = {"local": _files, "batocera": _files, "sd": _files, "hdd": _hdd, "ftp": _files}
