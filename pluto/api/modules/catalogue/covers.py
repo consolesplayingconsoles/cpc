@@ -178,6 +178,33 @@ def save_cached(root, system, key, data):
     return path
 
 
+def from_other_system(root, system, key, skip=()):
+    """Art the catalogue ALREADY holds for this game under another system -> cached path.
+
+    The same game turns up on several systems: an arcade title bought again as a PS3 PKG,
+    a Naomi port of a Dreamcast game. When nothing publishes art for it here, a copy we
+    already fetched there is better than a blank tile, and it costs no network. Matching is
+    by game key, so it never guesses -- "snowbros" on the PS3 is "snowbros" in MAME.
+    """
+    if not key or not os.path.isdir(root):
+        return None
+    for other in sorted(os.listdir(root)):
+        if other == system or other in skip or not os.path.isdir(os.path.join(root, other)):
+            continue
+        src = custom(root, other, key) or cached(root, other, key)
+        if not src or src == "miss":
+            continue
+        try:
+            with open(src, "rb") as f:
+                data = f.read()
+        except Exception:
+            continue
+        path = save_cached(root, system, key, data)
+        if path:
+            return path
+    return None
+
+
 def forget(root, system, key):
     """Drop the cached art (or miss) for one game so the next view looks it up again."""
     d = _dir(root, system)

@@ -44,6 +44,7 @@ from modules.vmu import vmufs
 from modules.catalogue import service as catalogue
 from modules.catalogue import send as catalogue_send
 from modules.homebrew import service as homebrew
+from modules.fxos import listen as fxos_listen
 
 
 def open_path(path):
@@ -62,6 +63,7 @@ PORT = 7700
 # Cache retro.html path at module load (resolves once, survives dev reloads)
 _RETRO_HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "retro.html")
 _KINDLE_HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kindle.html")
+_ROOMBA_AI_HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "roomba-ai.html")
 # Default seconds between /kindle reloads. Low enough to feel live, high enough that
 # an e-ink panel finishes its refresh before the next one lands. Override per-device
 # with /kindle?r=N (clamped below) -- the Kindle's own bookmark carries the value, so
@@ -1007,6 +1009,109 @@ def _sd_backup(node_id, roster, consoles_cfg, emit=None, only=None):
     if skipped_old: msg += ", %d not newer than the cloud" % skipped_old
     if notes:       msg += " -- " + "; ".join(notes)
     say(msg + ".")
+
+
+# Where a PS3 keeps its saves: one folder per title under the user profile. 00000001 is
+# the first profile; a second one would be 00000002.
+_PS3_SAVES = "/dev_hdd0/home/%s/savedata"
+_PS3_SAVE_SKIP = ("ICON0.PNG", "PIC1.PNG", "ICON1.PAM")   # the save's artwork, not progress
+
+
+def _sync_ps3(roster, emit=None, only=None, client=None, profile="00000001"):
+    """BACKUP a PS3's saves -> Dropbox /saves/ps3/<title>/<file>. Upload only.
+
+    There is no shell on a PS3, so this reads savedata over webMAN's FTP and does the
+    checksum/ledger work here, the way the VMU backup does with the image the Pi hands
+    over. Artwork inside a save (ICON0.PNG, PIC1.PNG) is skipped: it is dressing that
+    never changes, and it is most of the bytes.
+
+    only: a console key, so the Media page's per-console button backs up just this one.
+    """
+    sender = "dropbox"
+
+    def say(msg):
+        _new_message(sender, msg)
+        if emit:
+            emit(msg)
+
+    if only not in (None, "ps3"):
+        say("backup: %s holds no %s saves." % ("ps3", only)); return
+    cfg = (roster or {}).get("ps3") or {}
+    host = (cfg.get("FTP_PATH") or "").strip().split("://", 1)[-1].strip("/").split("/")[0]
+    if not host:
+        say("backup: the ps3 node has no FTP_PATH."); return
+    try:
+        token = _dropbox_access_token(roster)
+    except DropboxAuthError as exc:
+        say("backup: %s." % exc); return
+    if not token:
+        say("backup: no Dropbox credentials -- set the refresh trio (or DROPBOX_TOKEN) in nodes/cloud/dropbox/.env."); return
+    if client is None:
+        say("backup: no FTP client given."); return
+
+    root = _PS3_SAVES % profile
+    try:
+        titles = [n for n, is_dir, _sz in client["list"](host, root) if is_dir and n not in (".", "..")]
+    except Exception as exc:
+        _sync_audit(event="read_failed", node="ps3", error=str(exc))
+        say("backup: couldn't read the PS3's saves (%s). Is HEN loaded?" % exc); return
+
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamp = now.replace(":", "").replace("-", "")
+    ledger_path = "%s/ps3/%s" % (_SAVES_ROOT, _LEDGER_NAME)
+    prev = _load_ledger(token, ledger_path)
+    new_l = dict(prev)
+    up = unchanged = skipped_old = 0
+    _sync_audit(event="sync_start", node="ps3")
+
+    for title in sorted(titles):
+        try:
+            files = client["list"](host, "%s/%s" % (root, title))
+        except Exception as exc:
+            say("backup: couldn't read %s (%s)" % (title, exc)); continue
+        for name, is_dir, _sz in sorted(files):
+            if is_dir or name in (".", "..") or name.upper() in _PS3_SAVE_SKIP:
+                continue
+            rel = "%s/%s" % (title, name)
+            try:
+                data = client["read"](host, "%s/%s/%s" % (root, title, name))
+            except Exception as exc:
+                say("backup: couldn't read %s (%s)" % (rel, exc)); continue
+            summ = format(zlib.crc32(data) & 0xffffffff, "08x")
+            verdict, saved = _sync_verdict("ps3", summ, "", prev.get(rel), now)
+            if verdict == "unchanged":
+                unchanged += 1; new_l[rel] = _with_seen(prev.get(rel), "ps3", summ); continue
+            if verdict == "skip":
+                skipped_old += 1; new_l[rel] = _with_seen(prev.get(rel), "ps3", summ)
+                _sync_audit(event="not_newer", console="ps3", file=rel, node="ps3"); continue
+            cloud_path = "%s/ps3/%s" % (_SAVES_ROOT, rel)
+            if prev.get(rel):
+                try:
+                    _dropbox_copy(token, cloud_path, "/backups%s@%s" % (cloud_path, stamp))
+                except Exception as exc:
+                    _sync_audit(event="backup_failed", console="ps3", file=rel, error=str(exc))
+            try:
+                _dropbox_upload(token, cloud_path, data)
+            except Exception as exc:
+                _sync_audit(event="upload_failed", console="ps3", file=rel, error=str(exc))
+                say("backup: upload failed for %s (%s)" % (rel, exc)); continue
+            up += 1
+            _sync_audit(event="upload", console="ps3", file=rel, sum=summ, node="ps3", cls="save")
+            names = dict((prev.get(rel) or {}).get("names", {})); names["ps3"] = rel
+            new_l[rel] = _with_seen({"name": rel, "updated": now, "saved": saved, "node": "ps3",
+                                     "sum": summ, "class": "save", "names": names,
+                                     "seen": (prev.get(rel) or {}).get("seen")}, "ps3", summ)
+
+    if new_l and new_l != prev:
+        try:
+            _dropbox_upload(token, ledger_path, json.dumps({"console": "ps3", "saves": new_l}, indent=2).encode())
+        except Exception as exc:
+            say("backup: ledger write failed (%s)" % exc)
+    _sync_audit(event="sync_done", node="ps3", uploaded=up, unchanged=unchanged)
+    msg = "ps3 backup: %d uploaded, %d unchanged" % (up, unchanged)
+    if skipped_old:
+        msg += ", %d not newer than the cloud" % skipped_old
+    say(msg + " (%d title%s)." % (len(titles), "" if len(titles) == 1 else "s"))
 
 
 def _pi_sd_collect(roster, label, patterns):
@@ -2288,6 +2393,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/control/signal"), ("GET", "/control/capture"), ("GET", "/control/log"),
         ("GET", "/control/frame"), ("GET", "/control/frame/processed"),
         ("GET", "/control/frame/kindle"), ("GET", "/control/frame/kindle/stream"),
+        ("GET", "/roomba-ai"), ("GET", "/roomba-ai/state"),
+        ("GET", "/roomba-ai/face/stream"), ("GET", "/roomba-ai/face"),
+        ("GET", "/roomba-ai/audio/next"), ("GET", "/roomba-ai/audio/live"),
+        ("GET", "/roomba-ai/voice/live"),
         ("GET", "/control/google/lens"), ("GET", "/control/google/config"),
         ("GET", "/control/google/latest"),
         ("GET", "/translate/projects"), ("GET", "/translate/systems"), ("GET", "/translate/games"),
@@ -2300,10 +2409,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/homebrew"), ("GET", "/homebrew/stream"), ("PUT", "/homebrew/params"), ("POST", "/homebrew/stop"), ("POST", "/homebrew/open"), ("POST", "/homebrew/start"),
         ("POST", "/messages"), ("POST", "/dreame/login"), ("POST", "/dreame/logout"),
         ("POST", "/control/signal"), ("POST", "/control/capture"),
+        ("POST", "/control/listen"), ("POST", "/roomba-ai/audio"),
+        ("POST", "/roomba-ai/face"), ("POST", "/roomba-ai/audio/pcm"),
+        ("POST", "/roomba-ai/voice/pcm"),
         ("POST", "/control/capture/grab"), ("POST", "/control/google/lens"),
         ("POST", "/control/google/translate"), ("POST", "/control/google/translate-last"),
         ("POST", "/workspace/{node}"), ("POST", "/config/open"), ("POST", "/native/{node}/{action}"),
-        ("POST", "/sd/{node}"), ("POST", "/catalogue/{system}/favourite"), ("POST", "/catalogue/{system}/favourite-system"), ("POST", "/catalogue/{system}/label"), ("POST", "/catalogue/{system}/open"),
+        ("POST", "/sd/{node}"), ("POST", "/catalogue/{system}/favourite"), ("POST", "/catalogue/{system}/favourite-system"), ("POST", "/catalogue/{system}/label"), ("POST", "/catalogue/{system}/kind"), ("POST", "/catalogue/{system}/open"),
         ("POST", "/catalogue/{system}/cover/{game}"), ("POST", "/catalogue/{system}/play"),
         ("POST", "/catalogue/{system}/send"), ("POST", "/catalogue/{system}/scan/{node}"), ("POST", "/catalogue/{system}/forget"), ("POST", "/catalogue/{system}/delete"),
         ("POST", "/translate/run"), ("POST", "/translate/open"), ("POST", "/translate/delete"),
@@ -2321,6 +2433,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/kindle":
 
             self._serve_kindle(parsed.query)
+
+        # Typed by hand on a phone keyboard, so tolerate the trailing slash a
+        # browser adds. The rest of the API is exact-match and stays that way.
+        elif parsed.path in ("/roomba-ai", "/roomba-ai/"):
+            self._serve_roomba_ai()
+
+        elif parsed.path == "/roomba-ai/face":
+            self._handle_roomba_ai_face_still()
+
+        elif parsed.path == "/roomba-ai/face/stream":
+            self._handle_roomba_ai_face_stream(parsed.query)
+
+        elif parsed.path == "/roomba-ai/voice/live":
+            self._handle_roomba_ai_voice_live()
+
+        elif parsed.path == "/roomba-ai/audio/live":
+            self._handle_roomba_ai_audio_live()
+
+        elif parsed.path == "/roomba-ai/audio/next":
+            self._handle_roomba_ai_audio_next(parsed.query)
+
+        elif parsed.path in ("/roomba-ai/state", "/roomba-ai/state/"):
+            self._send(200, fxos_listen.state())
 
         elif parsed.path == "/dreame":
             self._serve_dreame()
@@ -2458,7 +2593,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """RESTful mapping store, organised by event-source dir -- the dir IS the
         filter (no query params, no DB). Mappings are reusable engine config:
           GET /mappings                   -> {source: [targets]}   (overview)
-          GET /mappings/<source>          -> {"source":..., "targets":[...]}
+          GET /mappings/<source>          -> {"source":..., "targets":[...], "kinds":{t: kind}}
           GET /mappings/<source>/<target> -> the mapping JSON
         """
         try:
@@ -2469,7 +2604,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if len(parts) == 1:
             self._send(200, {s: controller.list_targets(s) for s in controller.list_sources()})
         elif len(parts) == 2:
-            self._send(200, {"source": parts[1], "targets": controller.list_targets(parts[1])})
+            # `kinds` lets a caller tell a drive scheme (roomba verbs) from a pad scheme
+            # without guessing from the filename. Under the gamepad source a mapping is
+            # named after the CONTROLLER ("8bitdo", "dreamcast"), so the old
+            # name-starts-with-roomba convention cannot classify them.
+            targets = controller.list_targets(parts[1])
+            kinds = {}
+            for t in targets:
+                try:
+                    kinds[t] = controller.load_mapping(parts[1], t).get("kind") or ""
+                except Exception:
+                    kinds[t] = ""
+            self._send(200, {"source": parts[1], "targets": targets, "kinds": kinds})
         else:
             try:
                 self._send(200, controller.load_mapping(parts[1], parts[2]))
@@ -2482,6 +2628,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if parsed.path == "/messages":
             self._handle_post_message()
+        elif parsed.path == "/control/listen":
+            self._handle_control_listen()
+        elif parsed.path == "/roomba-ai/audio":
+            self._handle_roomba_ai_audio()
+        elif parsed.path == "/roomba-ai/face":
+            self._handle_roomba_ai_face()
+        elif parsed.path == "/roomba-ai/audio/pcm":
+            self._handle_roomba_ai_pcm()
+        elif parsed.path == "/roomba-ai/voice/pcm":
+            self._handle_roomba_ai_voice()
         elif parsed.path == "/dreame/login":
             self._handle_dreame_login()
         elif parsed.path == "/dreame/logout":
@@ -2559,6 +2715,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if body is not None:
                 catalogue.set_label(self._catalogue_root(), parts[1], str(body.get("game", "")), str(body.get("label") or ""))
                 self._send(200, {"ok": True})
+        elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "kind":
+            body = self._read_json_body()
+            if body is not None:
+                try:
+                    kind = catalogue.set_kind(self._catalogue_root(), parts[1],
+                                              str(body.get("game", "")), str(body.get("kind") or "game"))
+                except ValueError as exc:
+                    self._send(400, {"ok": False, "error": str(exc)}); return
+                self._send(200, {"ok": True, "kind": kind})
         elif len(parts) == 3 and parts[0] == "catalogue" and parts[2] == "favourite-system":
             body = self._read_json_body()
             if body is not None:
@@ -2751,9 +2916,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_sync(self, node_id):
         """Sync button (node drawer). Two nodes are wired, both Pluto-orchestrated and
-        both reporting to chat: batocera (mirror of /userdata/saves -> Dropbox + ledger)
-        and vmu (BACKUP ONLY -- reads the card via the Pi hub and uploads its saves; it
-        never writes to the VMU). Every other node honestly reports it's not built yet --
+        both reporting to chat: batocera (mirror of /userdata/saves -> Dropbox + ledger),
+        ps3 (savedata over webMAN's FTP) and vmu (BACKUP ONLY -- reads the card via the Pi
+        hub and uploads its saves; it never writes to the VMU). Others report not built --
         the button shows everywhere, the API gates per node."""
         if node_id == "batocera":
             # Immediate echo so the click has feedback in the feed (the mirror runs in
@@ -2762,6 +2927,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             threading.Thread(target=_sync_batocera, args=(self.__class__.node_roster,),
                              daemon=True).start()
             self._send(200, {"ok": True, "message": "batocera backup started -- watch the chat feed."})
+        elif node_id == "ps3":
+            _new_message("dropbox", "reading the PS3's saves over FTP and backing them up...")
+            threading.Thread(target=_sync_ps3,
+                             args=(self.__class__.node_roster, None, None, self._ftp_client(timeout=120)),
+                             daemon=True).start()
+            self._send(200, {"ok": True, "message": "ps3 backup started -- watch the chat feed."})
         elif node_id == "vmu":
             # Same shape as batocera: echo now, the backup posts its summary when done.
             _new_message("dropbox", "reading the VMU and backing it up to cloud...")
@@ -3019,6 +3190,287 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._cors_headers()
         self.end_headers()
         self.wfile.write(data)
+
+    def _serve_roomba_ai(self):
+        """GET /roomba-ai -> the page the handset on the roomba holds open.
+
+        Targets Firefox OS 1.3 / Gecko 28, so it is ES5 with no fetch and no
+        Promise. The page polls /roomba-ai/state and captures only while a
+        session is live; it decides that for itself rather than waiting to be
+        told to stop, so a dead Pluto ends the session instead of leaving a mic
+        open (see modules/fxos/listen.py)."""
+        try:
+            with open(_ROOMBA_AI_HTML_PATH, "r") as f:
+                page = f.read()
+        except Exception:
+            self._send(500, {"error": "roomba-ai.html missing"})
+            return
+        cfg = self.__class__.config
+        brand = cfg.get("NODE_NAME", "CPC") + (" Lab" if self.__class__.is_lab else " C2")
+        page = page.replace("<!--CPC_TITLE-->", html.escape(brand + " - Roomba AI"))
+        body = page.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self._cors_headers()
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_control_listen(self):
+        """POST /control/listen {action: enable|keepalive|disable} -> session state.
+
+        AI mode is the explicit intent and the keepalive is the safety net: the
+        session is live only while BOTH hold, so closing the tab, crashing Pluto
+        or dropping wifi all end it without anyone having to switch it off. Same
+        verb shape as /control/drive in pluto-drive/engine.py.
+
+        LAN-gated like the other controls: anything that can turn a microphone
+        on does not answer to the open internet."""
+        if not _is_lan_ip(self.client_address[0]):
+            self._send(403, {"error": "AI mode is controllable only from your local network"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body   = json.loads(self.rfile.read(length)) if length else {}
+        except (ValueError, json.JSONDecodeError):
+            self._send(400, {"error": "invalid json"})
+            return
+
+        action = (body or {}).get("action")
+        if action == "enable":
+            # Worth a line in the log every time: this is the moment a device in
+            # the room starts listening.
+            print("  [listen] AI MODE ON from %s" % self.client_address[0])
+            self._send(200, fxos_listen.enable(source=self.client_address[0],
+                                               timeout=body.get("timeout"),
+                                               mode=body.get("mode"),
+                                               video=body.get("video")))
+        elif action == "disable":
+            print("  [listen] AI MODE OFF from %s" % self.client_address[0])
+            self._send(200, fxos_listen.disable())
+        elif action == "keepalive":
+            self._send(200, fxos_listen.keepalive())
+        elif action == "state":
+            self._send(200, fxos_listen.state())
+        else:
+            self._send(400, {"error": "unknown action"})
+
+    def _handle_roomba_ai_audio(self):
+        """POST /roomba-ai/audio (raw Ogg/Opus body) -> accepted or refused.
+
+        409 is the authoritative stop signal for the handset: the session check
+        lives here, not only in the page, so audio cannot be posted in by
+        anything that simply ignores /roomba-ai/state."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            self._send(400, {"error": "bad content-length"})
+            return
+        # One cycle is ~7KB of Opus. A megabyte is already absurd for this, and
+        # caps what an unauthenticated LAN poster can push into memory.
+        if length <= 0 or length > 1048576:
+            self._send(413, {"error": "chunk size out of range"})
+            return
+        data = self.rfile.read(length)
+        seq = fxos_listen.push_chunk(data, self.headers.get("Content-Type") or "audio/ogg")
+        if seq is None:
+            self._send(409, {"error": "no live session", "live": False})
+            return
+        self._send(200, {"ok": True, "seq": seq, "bytes": len(data)})
+
+    def _handle_roomba_ai_face(self):
+        """POST /roomba-ai/face (raw JPEG) -> the frame the handset shows.
+
+        Chat mode: somebody at the Pluto end shares their camera, and the handset
+        on the roomba becomes their face. Frames are held in memory only and go
+        when the session does -- a video call between two boxes on one LAN, not
+        something to leave on disk."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            self._send(400, {"error": "bad content-length"})
+            return
+        if length <= 0 or length > 2097152:
+            self._send(413, {"error": "frame size out of range"})
+            return
+        seq = fxos_listen.push_face(self.rfile.read(length))
+        if seq is None:
+            self._send(409, {"error": "no live session", "live": False})
+            return
+        self._send(200, {"ok": True, "seq": seq})
+
+    def _handle_roomba_ai_face_still(self):
+        """GET /roomba-ai/face -> the latest face frame as a plain JPEG.
+
+        The fallback path for a browser that will not hold a
+        multipart/x-mixed-replace stream in an <img>. Gecko 28 on the handset is
+        exactly that case, so the page tries the stream first and drops to
+        polling this when no frame arrives. 204 when there is nothing yet."""
+        data, seq, _at = fxos_listen.face()
+        if not data:
+            self.send_response(204)
+            self._cors_headers()
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-Face-Seq", str(seq))
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self._cors_headers()
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _handle_roomba_ai_face_stream(self, query=""):
+        """GET /roomba-ai/face/stream -> the face as MJPEG (multipart/x-mixed-replace).
+
+        Same mechanism as the Kindle and camera streams: the handset holds ONE
+        connection and frames are pushed into a single <img>, so a 3.5" Gecko 28
+        panel never reloads or re-lays-out. A frame is pushed only when it
+        actually changed, and the stream ends when the session does."""
+        qs = urllib.parse.parse_qs(query or "")
+        try:
+            fps = max(1.0, min(15.0, float(qs.get("fps", ["8"])[0])))
+        except (TypeError, ValueError):
+            fps = 8.0
+        boundary = "frame"
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=%s" % boundary)
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self._cors_headers()
+        self.end_headers()
+        interval, last_seq = 1.0 / fps, -1
+        try:
+            while True:
+                if not fxos_listen.is_live():
+                    return          # session over: drop the connection, handset re-polls
+                data, seq, _at = fxos_listen.face()
+                if data and seq != last_seq:
+                    self.wfile.write(b"--%s\r\n" % boundary.encode())
+                    self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                    self.wfile.write(b"Content-Length: %d\r\n\r\n" % len(data))
+                    self.wfile.write(data)
+                    self.wfile.write(b"\r\n")
+                    self.wfile.flush()
+                    last_seq = seq
+                time.sleep(interval)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass   # handset navigated away, slept, or lost wifi
+
+    def _handle_roomba_ai_pcm(self):
+        """POST /roomba-ai/audio/pcm (raw 16k mono s16le) -> live chat audio.
+
+        Chat mode streams instead of uploading clips: the clip length is a hard
+        floor on latency, and a backlog of clips plays out in real time so the
+        listener never catches up. The handset posts a small block every ~128ms."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            self._send(400, {"error": "bad content-length"})
+            return
+        if length <= 0 or length > 262144:
+            self._send(413, {"error": "pcm block out of range"})
+            return
+        if not fxos_listen.push_pcm(self.rfile.read(length)):
+            self._send(409, {"error": "no live session", "live": False})
+            return
+        self._send(200, {"ok": True})
+
+    def _handle_roomba_ai_voice(self):
+        """POST /roomba-ai/voice/pcm (raw 16k mono s16le) -> the handset's speaker.
+
+        The downlink: you talking into the room. Mirrors the uplink exactly."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            self._send(400, {"error": "bad content-length"})
+            return
+        if length <= 0 or length > 262144:
+            self._send(413, {"error": "pcm block out of range"})
+            return
+        if not fxos_listen.push_voice(self.rfile.read(length)):
+            self._send(409, {"error": "no live session", "live": False})
+            return
+        self._send(200, {"ok": True})
+
+    def _handle_roomba_ai_voice_live(self):
+        """GET /roomba-ai/voice/live -> Pluto's mic as a continuous WAV, for the
+        handset to play. Same endless-WAV trick as the uplink."""
+        self.send_response(200)
+        self.send_header("Content-Type", "audio/wav")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self._cors_headers()
+        self.end_headers()
+        queue = fxos_listen.add_voice_reader()
+        try:
+            self.wfile.write(fxos_listen.wav_header())
+            self.wfile.flush()
+            while fxos_listen.is_live():
+                if queue:
+                    self.wfile.write(queue.popleft())
+                    self.wfile.flush()
+                else:
+                    time.sleep(0.02)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            fxos_listen.drop_voice_reader(queue)
+
+    def _handle_roomba_ai_audio_live(self):
+        """GET /roomba-ai/audio/live -> the handset's mic as a continuous WAV.
+
+        A WAV header with an absurd declared length, then PCM forever: every
+        player reads an over-long size as "keep going", so a plain <audio
+        src=...> plays the room live with no decoding work on our side. Ends when
+        the session does."""
+        self.send_response(200)
+        self.send_header("Content-Type", "audio/wav")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self._cors_headers()
+        self.end_headers()
+        queue = fxos_listen.add_pcm_reader()
+        try:
+            self.wfile.write(fxos_listen.wav_header())
+            self.wfile.flush()
+            while fxos_listen.is_live():
+                if queue:
+                    self.wfile.write(queue.popleft())
+                    self.wfile.flush()
+                else:
+                    time.sleep(0.02)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            fxos_listen.drop_pcm_reader(queue)
+
+    def _handle_roomba_ai_audio_next(self, query=""):
+        """GET /roomba-ai/audio/next -> the oldest captured clip, or 204 when there
+        is none. Consuming it removes it: this is the Pluto end listening to the
+        room, not an archive.
+
+        ?stale=<seconds> drops clips older than that instead of handing them over,
+        so a listener that falls behind skips forward to live rather than playing
+        a growing backlog in real time."""
+        qs = urllib.parse.parse_qs(query or "")
+        try:
+            stale = float(qs.get("stale", [0])[0]) or None
+        except (TypeError, ValueError):
+            stale = None
+        chunk = fxos_listen.pop_chunk(max_stale=stale)
+        if chunk is None:
+            self.send_response(204)
+            self._cors_headers()
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", chunk["type"])
+        self.send_header("Content-Length", str(len(chunk["data"])))
+        self.send_header("X-Chunk-Seq", str(chunk["seq"]))
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self._cors_headers()
+        self.end_headers()
+        self.wfile.write(chunk["data"])
 
     def _handle_control_frame_kindle(self):
         """GET /control/frame/kindle -> the e-ink render of the current frame (what the
@@ -3766,8 +4218,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_homebrew_stream(self, qs):
         """GET /homebrew/stream?id=<item>[&node=<node>] -> SSE. Build, then (for a game in the
-        catalogue) publish to Lab and sync; with node, send it there too. Events: 'line',
-        'step', 'media' (the game's Media path, after a send), 'done' ok | failed."""
+        catalogue) publish to Lab and sync; with node, send it there too. A send skips the
+        build when the item's last output is still on disk. Events: 'line', 'step', 'media'
+        (the game's Media path, after a send), 'done' ok | failed."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -3797,7 +4250,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         print("  [HOMEBREW] %s%s" % (item["id"], " -> " + node if node else ""))
         try:
             emit("step", "build")
-            if not self._homebrew_script(item, "build", emit):
+            # A send reuses the last build if its output is still on disk: the Build button is
+            # how you ask for a fresh one, and rebuilding a 1.2 GB disc to copy it is a waste.
+            last = homebrew.last_output(item["id"])
+            if node and last:
+                emit("line", "using the last build (%s)" % last["at"].replace("T", " "))
+            elif not self._homebrew_script(item, "build", emit):
                 emit("done", "failed:build"); return
             game = item.get("game")
             listed = bool(game and game.get("listed"))
@@ -3938,12 +4396,66 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(502, {"error": "batocera did not launch it: %s" % (out.strip()[-200:] or "rc %d" % rc)}); return
             print("  [PLAY:batocera] %s" % rom)
             self._send(200, {"ok": True}); return
+        cfg = (self.__class__.node_roster or {}).get(node) or {}
+        if node != "lab" and catalogue_send.strategy_for(cfg, node) == "ftp":
+            self._send(*self._play_webman(node, cfg, rel)); return
         if node != "lab":
             self._send(400, {"error": "remote boot is not available on %s yet" % node}); return
         path = self._lab_rom(system, rel)
         if not path:
             self._send(400, {"error": "not a lab ROM"}); return
         self._send(*self._launch_desktop(system, path))
+
+    def _play_webman(self, node, cfg, rel):
+        """Boot a title on a PS3 through webMAN. -> (status, body) for _send.
+
+        webMAN's vocabulary, read off this build (unknown verbs answer 501, these answer
+        200): `/mount.ps3<path>` only INSERTS the disc -- it reports "cargado" and the XMB
+        sits there waiting for someone to press X -- while `/play.ps3<path>` mounts and
+        launches, which is what a boot from Pluto has to mean. The path is the full one on
+        the console, so an ISO we sent and an installed title go the same way. A disc game
+        installed on the drive still wants its disc in the tray; the console says so, not us.
+        """
+        host = (cfg.get("FTP_PATH") or "").strip().split("://", 1)[-1].strip("/").split("/")[0]
+        if not host:
+            return 400, {"error": "%s has no FTP_PATH to reach webMAN on" % node}
+        rel = (rel or "").strip("/")
+        if not rel or ".." in rel.split("/"):
+            return 400, {"error": "bad path"}
+        what = "/dev_hdd0/" + rel
+        # An install (PARAM.SFO CATEGORY=GD) is the disc's data, not a bootable title:
+        # webMAN mounts it and the console sits on "loaded". Say so rather than pretend.
+        cat = self._ps3_category(node, rel)
+        if cat == "GD":
+            return 409, {"error": "this is an install (CATEGORY GD), not a bootable title: "
+                                  "the PS3 needs the game's disc in the tray"}
+        url = "http://%s/play.ps3%s" % (host, urllib.parse.quote(what))
+        if not self._boot_lock.acquire(blocking=False):
+            return 409, {"error": "a boot is already in progress"}
+        try:
+            body = urlopen(Request(url, headers={"User-Agent": "cpc-pluto"}), timeout=20).read()
+        except Exception as exc:
+            return 502, {"error": "webMAN on %s did not take it (%s)" % (node, exc)}
+        finally:
+            self._boot_lock.release()
+        print("  [PLAY:%s] %s" % (node, what))
+        # webMAN answers with its own page either way; a refusal says so in the text.
+        text = body.decode("utf-8", "replace").lower()
+        if "not found" in text or "no such" in text:
+            return 502, {"error": "webMAN could not find %s" % what}
+        return 200, {"ok": True, "launched": what}
+
+    def _ps3_category(self, node, rel):
+        """PARAM.SFO CATEGORY the scan recorded for this copy ("" when unknown)."""
+        try:
+            doc = catalogue.store.load(self._catalogue_root(), "ps3")
+        except Exception:
+            return ""
+        for g in doc["games"].values():
+            for f in g["files"]:
+                if f["node"] == node and f["path"] == rel:
+                    return (f.get("category") or "").upper()
+        return ""
 
     def _launch_desktop(self, system, path):
         """Open a ROM in the system's associated desktop emulator on this Mac (config/consoles.json
@@ -4009,6 +4521,114 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return d.strip().strip("/")
         d = (cfg.get("SD_ROMS_DIR") or "").strip().strip("/")
         return "" if d == "." else d
+
+    # Where a PS3's games live, in the order the catalogue reads them: ISOs webMAN can
+    # mount, folder games, and titles already installed on the drive (arcade PKGs and the
+    # HEN tools included -- a title has to be catalogued to be bootable from Pluto).
+    PS3_DIRS = [("/dev_hdd0/PS3ISO", "iso"), ("/dev_hdd0/GAMES", "folder"),
+                ("/dev_hdd0/game", "installed")]
+
+    def _catalogue_ftp_nodes(self):
+        """Nodes whose games sit on a drive reachable only over FTP: FTP_PATH (the PS3,
+        through webMAN -- there is no shell on it, so no remote scan program either)."""
+        out = {}
+        for node, cfg in (self.__class__.node_roster or {}).items():
+            url = (cfg.get("FTP_PATH") or "").strip()
+            if not url or (cfg.get("SD_LABEL") or "").strip():
+                continue
+            host = url.split("://", 1)[-1].strip("/").split("/")[0]
+            if host:
+                out[node] = {"host": host, "dirs": self.PS3_DIRS}
+        return out
+
+    @staticmethod
+    def _ftp_client(timeout=30):
+        """{"list", "read"} over plain FTP, anonymous (webMAN wants no login). LIST is
+        parsed for name/dir/size; read() pulls a whole small file (PARAM.SFO)."""
+        import ftplib
+
+        def connect(host):
+            f = ftplib.FTP()
+            # The PS3 answers LIST with raw 8-bit bytes (a title in Latin-1 or Shift-JIS
+            # is enough), and ftplib decodes the control channel as UTF-8 by default,
+            # which raises instead of listing. latin-1 maps every byte to a character.
+            f.encoding = "latin-1"
+            f.connect(host, 21, timeout=timeout)
+            f.login()
+            return f
+
+        def list_dir(host, path):
+            f = connect(host)
+            try:
+                lines = []
+                f.retrlines("LIST " + path, lines.append)
+            finally:
+                try: f.quit()
+                except Exception: f.close()
+            out = []
+            for line in lines:
+                parts = line.split(None, 8)
+                if len(parts) < 9:
+                    continue
+                out.append((parts[8], line[:1] == "d", int(parts[4]) if parts[4].isdigit() else 0))
+            return out
+
+        def read(host, path):
+            f = connect(host)
+            try:
+                chunks = []
+                f.retrbinary("RETR " + path, chunks.append)
+                return b"".join(chunks)
+            finally:
+                try: f.quit()
+                except Exception: f.close()
+
+        def put(host, path, local):
+            """Upload as <name>.part, size-check, then rename -- the same contract the SSH
+            copies keep, so an interrupted transfer never looks like a finished game."""
+            part = path + ".part"
+            f = connect(host)
+            try:
+                with open(local, "rb") as stream:
+                    f.storbinary("STOR " + part, stream)
+                want = os.path.getsize(local)
+                got = f.size(part)
+                if got is not None and got != want:
+                    f.delete(part)
+                    raise IOError("size mismatch: %s wrote %s of %s bytes" % (path, got, want))
+                try:
+                    f.delete(path)              # replacing: FTP rename will not overwrite
+                except Exception:
+                    pass
+                f.rename(part, path)
+            finally:
+                try: f.quit()
+                except Exception: f.close()
+
+        def remove(host, path):
+            """Delete a file, or a directory and everything under it (an installed title)."""
+            f = connect(host)
+            try:
+                def rm(p):
+                    try:
+                        f.delete(p)
+                        return
+                    except Exception:
+                        pass
+                    lines = []
+                    f.retrlines("LIST " + p, lines.append)
+                    for line in lines:
+                        parts = line.split(None, 8)
+                        if len(parts) < 9 or parts[8] in (".", ".."):
+                            continue
+                        rm(p + "/" + parts[8])
+                    f.rmd(p)
+                rm(path)
+            finally:
+                try: f.quit()
+                except Exception: f.close()
+
+        return {"list": list_dir, "read": read, "put": put, "remove": remove}
 
     def _catalogue_admin_nodes(self):
         """Nodes whose games live on a drive only root can read (PS2_HDD_BYTES: the PS2's
@@ -4192,6 +4812,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             def finish():
                 return rescan("lab", lab_roms=(self.__class__.config.get("ROMS_PATH") or "").strip())
+
+        elif kind == "ftp":
+            # A PS3 through webMAN: no shell, so the same words (mount/exists/put/finish/
+            # remove) are spoken over FTP. ISOs land in /dev_hdd0/PS3ISO, which is where
+            # webMAN mounts them from; installed titles are not written this way.
+            host = ((cfg.get("FTP_PATH") or "").strip().split("://", 1)[-1].strip("/").split("/")[0])
+            client = self._ftp_client(timeout=120)
+            base = "/dev_hdd0/PS3ISO"
+
+            def mount():
+                if not host:
+                    raise catalogue_send.NotAvailable("%s has no FTP_PATH" % node)
+                try:
+                    entries = client["list"](host, base)
+                except Exception as exc:
+                    raise catalogue_send.NotAvailable("could not reach %s over FTP (%s)" % (node, exc))
+                state["have"] = {n for n, is_dir, _sz in entries if not is_dir and n not in (".", "..")}
+
+            def put(src, name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    local = fetch(src, tmp, False)
+                    try:
+                        client["put"](host, base + "/" + name, local)
+                    except Exception as exc:
+                        raise catalogue_send.NotAvailable("copy failed for %s: %s" % (name, exc))
+                state["have"].add(name)
+
+            def finish():
+                return rescan(node, ftp_nodes=self._catalogue_ftp_nodes(), ftp_client=client)
+
+            def remove(rel):
+                """Delete a file, or a whole installed title, under /dev_hdd0."""
+                try:
+                    client["remove"](host, "/dev_hdd0/" + rel.strip("/"))
+                except Exception as exc:
+                    raise catalogue_send.NotAvailable("could not delete %s on %s: %s" % (rel, node, exc))
 
         else:
             if kind == "batocera":
@@ -4421,7 +5077,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 lambda node, argv, stdin=None: self._node_ssh(node, argv, timeout=600, connect_timeout=10, stdin=stdin),
                 self._catalogue_saves, lambda line: emit("line", line), now,
                 lab_roms=(self.__class__.config.get("ROMS_PATH") or "").strip() or None,
-                sd_nodes=self._catalogue_sd_nodes(),
+                sd_nodes=self._catalogue_sd_nodes(), ftp_nodes=self._catalogue_ftp_nodes(),
+                ftp_client=self._ftp_client(),
                 admin_nodes={n: self._admin_command(n, ["sync"]) for n in self._catalogue_admin_nodes()})
             emit("done", "ok")          # per-node / per-system failures are WARN lines above
         except Exception as exc:
@@ -4434,7 +5091,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # batocera mirrors /userdata/saves, vmu reads the card through the Pi, and every node with
     # an SD_LABEL backs its card up when the card is in the hub. Everything else in the roster
     # honestly has none yet -- see catalogue/TASKS.md.
-    SAVES_NODES = ("batocera", "vmu")
+    SAVES_NODES = ("batocera", "vmu", "ps3")
 
     def _handle_catalogue_saves_stream(self, system):
         """SSE: back up saved games for ONE console ('*' = every node, everything it holds).
@@ -4472,6 +5129,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 continue
             if node == "batocera":
                 jobs.append((node, lambda say: _sync_batocera(roster, say, only)))
+            elif node == "ps3":
+                jobs.append((node, lambda say: _sync_ps3(roster, say, only, self._ftp_client(timeout=120))))
             elif only in (None, _VMU_CONSOLE):
                 jobs.append((node, lambda say: _sync_vmu_to_cloud(roster, say)))
         for node in sorted(roster):

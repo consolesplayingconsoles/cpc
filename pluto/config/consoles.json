@@ -45,7 +45,7 @@
     "wswan":          { "brand": "Bandai", "name": "WonderSwan", "icon": "ws", "thumbnails": "Bandai_-_WonderSwan" },
     "wswanc":         { "brand": "Bandai", "name": "WonderSwan Color", "icon": "ws", "thumbnails": "Bandai_-_WonderSwan_Color" },
     "wii":            { "brand": "Nintendo", "name": "Wii", "icon": "wii", "thumbnails": "Nintendo_-_Wii", "emulator": "dolphin" },
-    "ps3":            { "brand": "Sony", "name": "PlayStation 3", "icon": "ps3", "thumbnails": "Sony_-_PlayStation_3" },
+    "ps3":            { "brand": "Sony", "name": "PlayStation 3", "icon": "ps3", "thumbnails": "Sony_-_PlayStation_3", "thumbnailsFallback": ["SNK_-_Neo_Geo"] },
     "ps4":            { "brand": "Sony", "name": "PlayStation 4" },
     "ps5":            { "brand": "Sony", "name": "PlayStation 5", "icon": "ps5" },
     "naomi":          { "brand": "Sega", "name": "Naomi", "icon": "naomi", "thumbnails": "Sega_-_Naomi", "thumbnailsFallback": ["Sega_-_Dreamcast"] },

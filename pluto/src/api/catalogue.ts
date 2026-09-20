@@ -99,6 +99,14 @@ export const catalogueApi = {
     })
     if (!r.ok) throw new Error(`label ${system}/${game} -> ${r.status}`)
   },
+  // Tool or game: tools (boot discs, loaders, a console's homebrew menu) get their own tab
+  // in the Media page. Keyed by game, so a physical tool and its digital copy move together.
+  setKind: async (system: string, game: string, kind: 'game' | 'tool') => {
+    const r = await fetch(`${BASE}/${enc(system)}/kind`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game, kind }),
+    })
+    if (!r.ok) throw new Error(`kind ${system}/${game} -> ${r.status}`)
+  },
   // node 'lab' = desktop emulator on the API host; 'batocera' = remote boot on the box.
   play: async (system: string, path: string, node = 'lab') => {
     const r = await fetch(`${BASE}/${enc(system)}/play`, {

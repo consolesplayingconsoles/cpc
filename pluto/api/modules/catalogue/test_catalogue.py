@@ -22,6 +22,7 @@ import names
 import scan
 import send
 import service
+import sfo
 import shutil
 import store
 import subprocess
@@ -495,7 +496,102 @@ def test_one_bad_system_does_not_stop_the_others():
     assert store.load(root, "snes")["games"]
 
 
+def _sfo(serial, name, category="HG"):
+    """A PARAM.SFO carrying CATEGORY + TITLE + TITLE_ID, as the PS3 writes one."""
+    import struct
+    keys, vals, idx = b"", b"", b""
+    entries = [("CATEGORY", category), ("TITLE", name), ("TITLE_ID", serial)]
+    for k, v in entries:
+        kb, vb = k.encode() + b"\0", v.encode() + b"\0"
+        idx += struct.pack("<HHIII", len(keys), 0x0204, len(vb), len(vb), len(vals))
+        keys += kb; vals += vb
+    head = b"\x00PSF" + struct.pack("<I", 0x101)
+    key_off = len(head) + 12 + len(idx)
+    return head + struct.pack("<III", key_off, key_off + len(keys), len(entries)) + idx + keys + vals
+
+
+def test_set_kind_files_a_game_as_a_tool_and_back():
+    """From the drawer: what a thing IS is decided while looking at it, not in a JSON file."""
+    root = tempfile.mkdtemp()
+    assert service.set_kind(root, "ps3", "pkgi-ps3", "tool") == "tool"
+    assert store.load_kinds(root)["ps3"] == {"pkgi-ps3": "tool"}
+    assert service.set_kind(root, "ps3", "pkgi-ps3", "game") == "game"
+    assert store.load_kinds(root).get("ps3") in ({}, None)      # empty system, not a stray key
+    try:
+        service.set_kind(root, "ps3", "pkgi-ps3", "gadget")
+        raise AssertionError("an unknown kind must be refused")
+    except ValueError:
+        pass
+    shutil.rmtree(root)
+
+
+def test_sfo_reads_a_ps3_title_and_ignores_a_short_read():
+    assert sfo.title(_sfo("BLES00107", "SEGA Rally", "GD")) == ("BLES00107", "SEGA Rally", "GD")
+    assert sfo.title(_sfo("BLES00107", "SEGA Rally")[:24]) == ("", "", "")
+    assert sfo.title(b"not a sfo at all") == ("", "", "")
+    # GD is the install half of a disc game: mounting it boots nothing
+    assert "HG" in sfo.BOOTABLE and "GD" not in sfo.BOOTABLE
+
+
+def test_scan_ftp_reads_isos_and_installed_titles():
+    """The PS3 has no shell: games come off it as an ISO listing plus PARAM.SFO reads."""
+    tree = {
+        "/dev_hdd0/PS3ISO": [("Sonic Unleashed (Europe).iso", False, 4096), ("notes.txt", False, 10)],
+        "/dev_hdd0/GAMES": [("BLES00229-[GTA IV]", True, 0)],
+        "/dev_hdd0/game": [("BLES00107", True, 0), ("RXMSL0212", True, 0), ("PS3XPLOIT", True, 0)],
+    }
+    sfos = {
+        "/dev_hdd0/GAMES/BLES00229-[GTA IV]/PS3_GAME/PARAM.SFO": _sfo("BLES00229", "Grand Theft Auto IV"),
+        # a real install: the folder is the serial, PARAM.SFO carries a dev placeholder
+        "/dev_hdd0/game/BLES00107/PARAM.SFO": _sfo("SR12345", "SEGA Rally\u2122", "GD"),
+        "/dev_hdd0/game/RXMSL0212/PARAM.SFO": _sfo("", "Metal Slug 5"),
+        "/dev_hdd0/game/PS3XPLOIT/PARAM.SFO": _sfo("", "PKG/ROM Launcher"),
+    }
+    client = {"list": lambda h, p: tree.get(p, []), "read": lambda h, p: sfos[p]}
+    got = service._scan_ftp(client, "ps3.lan", [("/dev_hdd0/PS3ISO", "iso"),
+                                                ("/dev_hdd0/GAMES", "folder"),
+                                                ("/dev_hdd0/game", "installed")])
+    by = {g["path"]: g for g in got}
+    assert sorted(by) == ["GAMES/BLES00229-[GTA IV]", "PS3ISO/Sonic Unleashed (Europe).iso",
+                          "game/BLES00107", "game/PS3XPLOIT", "game/RXMSL0212"]
+    assert by["PS3ISO/Sonic Unleashed (Europe).iso"]["header"] is None        # name says it all
+    assert by["game/BLES00107"]["header"]["id"] == "BLES00107"   # folder name, not the SFO
+    assert by["game/BLES00107"]["header"]["title"] == "SEGA Rally\u2122"   # header keeps it raw
+    # an arcade PKG and a HEN tool have no Sony serial, but they still come through: a
+    # title has to be in the catalogue to be booted from Pluto
+    assert by["game/RXMSL0212"]["header"]["id"] == "RXMSL0212"
+    # the name merge reads the title from, not the folder: PARAM.SFO's TITLE plus the
+    # region the serial implies, with a slash in a title kept out of the path
+    assert by["game/BLES00107"]["name"] == "SEGA Rally (Europe).ps3"   # (tm) dropped
+    assert by["game/RXMSL0212"]["name"] == "Metal Slug 5.ps3"
+    assert by["game/PS3XPLOIT"]["name"] == "PKG-ROM Launcher.ps3"
+    assert service.ps3_region("BLUS30068") == "USA" and service.ps3_region("RXMSL0212") == ""
+    assert service.PS3_SERIAL.match("BLES00107") and not service.PS3_SERIAL.match("RXMSL0212")
+    # the category travels with the file, so a boot can refuse an install honestly
+    assert by["game/BLES00107"]["category"] == "GD" and by["game/RXMSL0212"]["category"] == "HG"
+
+
+def test_scan_ftp_survives_a_folder_the_plugin_hides():
+    client = {"list": lambda h, p: (_ for _ in ()).throw(IOError("550 no access")),
+              "read": lambda h, p: b""}
+    assert service._scan_ftp(client, "ps3.lan", [("/dev_hdd0/PS3ISO", "iso")]) == []
+
+
 # -- covers ------------------------------------------------------------------
+
+
+def test_cover_falls_back_to_the_same_game_under_another_system():
+    """An arcade title bought again as a PS3 PKG: use the art we already hold for MAME."""
+    root = tempfile.mkdtemp()
+    os.makedirs(os.path.join(root, "mame", "covers"))
+    os.makedirs(os.path.join(root, "ps3", "covers"))
+    with open(os.path.join(root, "mame", "covers", "snowbros.png"), "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\nsnowbros art")
+    got = covers.from_other_system(root, "ps3", "snowbros")
+    assert got and got.endswith("ps3/covers/snowbros.png")
+    assert open(got, "rb").read().endswith(b"snowbros art")
+    assert covers.from_other_system(root, "ps3", "a-game-nobody-has") is None
+    shutil.rmtree(root)
 
 
 def test_cover_matches_a_differently_spaced_art_name():
