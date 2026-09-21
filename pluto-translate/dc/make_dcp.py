@@ -32,6 +32,16 @@ def sha256(path):
     return h.hexdigest()
 
 
+# Encode flags. `-A -n` is NOT optional: without them xdelta3 writes a VCD_APPHEADER carrying a
+# BLAKE3 hash of the source plus a VCD_ADLER32 window checksum, and Universal Dreamcast Patcher
+# rejects the result -- it reports "not the right version or region" on 1ST_READ.BIN, which is
+# merely the alphabetically first entry, so it looks like a boot-binary or version problem when in
+# fact every file would fail. UDP's own Build Patch output has neither field (verified against the
+# v0.6-Beta release with `xdelta3 printhdr`). The integrity guarantee is not lost: every delta is
+# decoded back and sha256-compared below, which is a stronger check than the one we drop here.
+ENC_FLAGS = ["-e", "-f", "-9", "-A", "-n", "-S", "lzma"]
+
+
 def xdelta(args):
     r = subprocess.run([XDELTA] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if r.returncode != 0:
@@ -113,7 +123,7 @@ def main():
                 d = os.path.join(work, "deltas", rel + ".xdelta")
                 os.makedirs(os.path.dirname(d), exist_ok=True)
                 w = window(os.path.getsize(o))
-                xdelta(["-e", "-f", "-9", "-S", "lzma", "-B", w, "-s", o, p, d])
+                xdelta(ENC_FLAGS + ["-B", w, "-s", o, p, d])
                 back = d + ".check"
                 xdelta(["-d", "-f", "-B", w, "-s", o, d, back])
                 if sha256(back) != want:

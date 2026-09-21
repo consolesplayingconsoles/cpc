@@ -26,7 +26,7 @@ LABELS = [
     ((32, 10, 224, 52),  "OPCIONS",     G, ARIAL,  0.95),
     ((3, 65, 122, 87),   "SO",          Y, ARIAL,  0.90),
     ((130, 65, 253, 87), "VEL.",        Y, ARIAL,  0.90),
-    ((2, 87, 122, 109),  "PAG.",        Y, ARIAL,  0.85),
+    ((2, 87, 122, 109),  "AUTO.",       Y, ARIAL,  0.85),   # was PAG.: a player read it as "page", not "advance the dialogue automatically"
     ((130, 87, 254, 109),"VEUS",        Y, ARIAL,  0.90),
     ((2, 113, 126, 132), "MÚSICA",      Y, ARIAL,  0.95),   # smaller box -> smaller font so the Ú accent fits inside its cell (no overflow, no bottom cut)
     ((128, 110, 254, 135),"EFECTES",    Y, ARIAL,  0.95),

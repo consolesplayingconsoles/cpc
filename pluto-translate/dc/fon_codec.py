@@ -98,6 +98,58 @@ def _apos_r(g, sq):             # BOLD apostrophe, RIGHT edge. ALWAYS squeeze th
                  (2,16),(2,17),(2,18),(3,17),(4,16)):
         if 0 <= c < W: g[r][c] = 3
     return g
+# ── right-edge one-cell marks ──────────────────────────────────────────────
+# A trailing mark in its own cell costs 2B. Hung off the preceding letter it costs nothing.
+# Every mark below uses the SAME geometry: the letter is moved left to end by col 13 (see
+# `_mark_r`), leaving cols 14-15 blank and 16-18 for the mark. Because the letter is moved and
+# never scaled, even a full-height mark like `!` fits without touching a stroke.
+# All pixels are level 3 (solid): the game's 2bpp blit eats thin or anti-aliased marks.
+_PX_DOT   = [(r, c) for r in (16, 17, 18) for c in (16, 17, 18)]
+_PX_COMMA = ([(r, c) for r in (14, 15, 16) for c in (16, 17, 18)]
+             + [(17, 15), (17, 16), (17, 17), (18, 15), (18, 16)])        # body + descending tail
+_PX_BANG  = ([(r, c) for r in range(3, 14) for c in (16, 17, 18)]
+             + [(r, c) for r in (16, 17, 18) for c in (16, 17, 18)])      # stem, gap at 14-15, dot
+_MARKS = {".": _PX_DOT, ",": _PX_COMMA, "!": _PX_BANG}
+
+
+def _period_r(g, px=None):
+    """BOLD mark, RIGHT edge -- MOVING the letter instead of scaling it. `px` picks the mark
+    (default the period); see `_MARKS`.
+
+    A terminal "." is the commonest thing at the end of a line in both languages, and as its own
+    cell it costs 2B. Hung off the preceding letter it costs nothing, so punctuation stops competing
+    with the box budget.
+
+    `_apos_r` squeezes 20->14 because an ascender can reach the top-right corner where its mark
+    goes. A BASELINE dot has no such problem, and lowercase glyphs are only 10-12 px wide inside a
+    20 px cell (7-8 px of left bearing), so shifting the whole cell left clears the dot with every
+    stroke intact. The operator's hardware-QA read of the squeezed version -- b badly damaged, c/n/u
+    visibly so -- is exactly the 0.7x downscale merging 2 px strokes into 1, the same failure that
+    needed the o/e fudge. Moving instead of scaling removes the cause, so there is no fudge here.
+
+    Only `m` (14 px) and `w` (full 20 px) are too wide to move without touching the left edge; they
+    fall back to the proven squeeze. The letter always ends by col 13, leaving cols 14-15 blank and
+    the dot in 16-18: the same clearance the shipped apostrophe combos use.
+    """
+    cols = [c for c in range(W) if any(g[r][c] for r in range(ROWS))]
+    lo, hi = (min(cols), max(cols)) if cols else (0, W - 1)
+    shift = hi - 13
+    if shift <= 0:
+        pass                                            # already clear of the dot
+    elif lo - shift >= 1:                               # room to move: strokes untouched
+        g = [row[shift:] + [0] * shift for row in g]
+    else:                                               # m / w: must scale, as the apostrophe does
+        g = _squeeze(g, 14)
+        if any(g[r][0] for r in range(ROWS)) and not any(g[r][1] or g[r][2] for r in range(ROWS)):
+            for r in range(ROWS): g[r][0] = 0           # same orphan-serif drop as _apos_r
+    for r, c in (px or _PX_DOT):
+        g[r][c] = 3
+    return g
+
+
+_mark_r = _period_r        # the general name; `_period_r` is kept for the tests that use it
+
+
 def _basejis(ch):
     up = ch.isupper(); o = ord(ch)
     return (0x23, (0x41 if up else 0x61) + o - (ord('A') if up else ord('a')))
@@ -201,6 +253,77 @@ _CLEAN = [
 ]
 _CLSLOT = {seq: _FREE[len(_CSPEC) + len(_COMPOSE) + i]
            for i, (seq, _, _) in enumerate(_CLEAN)}
+
+# ── <letter>. combos: the terminal period, free ─────────────────────────────────
+# Both scripts were budget-stripped of terminal periods (en 2,299 restored by hand, ca ~2,500 still
+# missing) because a "." costs its own 2B cell. Hung off the preceding letter with the proven
+# `_apos_r` geometry it costs NOTHING, and every period already placed gives 2B back.
+#
+# Slots come from kana. Census (2026-09-20, both projects): of the 169 kana slots, 30 appear in NO
+# Japanese that still renders after the build -- i.e. only in `jp` we replace with our own text.
+# Re-run the census before adding any more; a slot that some surviving menu still uses would render
+# a Latin letter inside Japanese text.
+_KANA_FREE = [0x8344, 0x834D, 0x835D, 0x8363, 0x8364, 0x836B, 0x8371, 0x8388, 0x8392, 0x8396,
+              0x829F, 0x82A1, 0x82A3, 0x82A5, 0x82A7, 0x82B0, 0x82B4, 0x82BA, 0x82BC, 0x82C0,
+              0x82C3, 0x82CA, 0x82D2, 0x82D5, 0x82D8, 0x82DB, 0x82E1, 0x82EC, 0x82EE, 0x82EF]
+# A SECOND kana pool for the comma and `!` marks (49 more cells per language). The first census
+# was too strict: it counted Japanese in the DP*/Dream Passport files, which are drawn by the DP
+# font, NOT S18RM04.FON (see packers/lines.py), so kana appearing only there reserves nothing here.
+# Counting only the GAME-font sources leaves 163 kana that never reach the screen after a build.
+# Taking the maximum would be reckless -- nullsplit keeps a line JAPANESE if it does not fit, so a
+# future edit that pushes a line out would render Latin letters inside it. These are the RAREST
+# candidates instead (none exceeds ~190 occurrences in the whole script), which keeps that failure
+# mode both unlikely and cosmetic. Re-run the census (see the memory note) before taking more.
+_KANA_FREE2 = [
+    0x8346, 0x8355, 0x82c0, 0x82d5, 0x835d, 0x82a1, 0x82d8, 0x8340, 0x82a7, 0x82db,
+    0x82d2, 0x8342, 0x835b, 0x82a3, 0x8378, 0x8386, 0x8348, 0x837c, 0x8347, 0x8384,
+    0x82c3, 0x8382, 0x835c, 0x8353, 0x835a, 0x836d, 0x8377, 0x837a, 0x8372, 0x8373,
+    0x8354, 0x8387, 0x8369, 0x8345, 0x8351, 0x8385, 0x836a, 0x82b4, 0x8366, 0x82ca,
+    0x82e4, 0x8365, 0x82ac, 0x8379, 0x82e3, 0x838f, 0x8375, 0x834f, 0x836e, 0x8359,
+    0x8374, 0x8370, 0x8350, 0x8376, 0x8349, 0x8352, 0x834c, 0x82ba, 0x834b, 0x82a5,
+]
+
+# t/i/l are NOT here: `t.` `i.` `l.` already exist as _CLEAN composed pairs, tested on hardware.
+# Re-authoring them would burn three slots to replace proven glyphs. `t!` `i!` `l!` exist too, so
+# the `!` set skips them for the same reason; the comma has no prior pairs, so it covers a-z.
+_PERIOD_SKIP = set("til")
+_PERIOD_LETTERS = [c for c in "abcdefghijklmnopqrstuvwxyz" if c not in _PERIOD_SKIP]
+# One kind for every letter: `_period_r` decides per glyph whether it can be moved or must be
+# squeezed. No o/e special case -- that fudge existed to survive the squeeze this avoids.
+_ALPHABET = "abcdefghijklmnopqrstuvwxyz"
+# (sequence, base letter, mark) for every one-cell letter+mark combo. The comma covers the whole
+# alphabet -- a comma that hugs some letters and not others reads as sloppy spacing, so partial
+# coverage is worse than none. `.` and `!` skip t/i/l, which already have tested composed pairs.
+_PSPEC = ([(c + ".", c, ".") for c in _PERIOD_LETTERS]
+          + [(c + ",", c, ",") for c in _ALPHABET]
+          + [(c + "!", c, "!") for c in _PERIOD_LETTERS])
+# 0x83D1 is NOT free: `_author_middot` draws the l·l geminate dot there. It sits at index 29, the
+# first slot the periods would take, and nothing proven lives past it, so dropping it here moves
+# only the new mark glyphs. (Same class of bug as the 0x83CA/'il' clash that killed l·l once.)
+_FREE = [c for c in _FREE if c != 0x83D1] + _KANA_FREE + _KANA_FREE2
+
+
+def _alloc(free, taken, specs):
+    """Hand each spec the next free slot no one else holds. Index arithmetic (`free[base + i]`)
+    silently collides the moment a set above grows; this cannot."""
+    seen = set(taken)                 # the pools overlap (the 2nd census re-lists the 1st's kana),
+    out, it = {}, iter(free)          # so dedupe here or two combos silently share one glyph
+    for seq, _, _ in specs:
+        for code in it:
+            if code not in seen:
+                seen.add(code); out[seq] = code; break
+        else:
+            raise RuntimeError("out of free glyph slots at %r (%d of %d allocated)"
+                               % (seq, len(out), len(specs)))
+    return out
+
+
+# (_ACCENTS is built further down, so reserve the accent codes from ACCENT_SPEC itself.)
+_ACCENT_CODES = {(shi << 8) | slo for _, _, _, _, shi, slo in ACCENT_SPEC.values()}
+_PSLOT = _alloc(_FREE, set(_CSLOT.values()) | set(_OSLOT.values()) | set(_CLSLOT.values())
+                | _ACCENT_CODES | {0x83C9, 0x83D1, 0x8394}, _PSPEC)
+_CSPEC = _CSPEC + _PSPEC              # authored by the same engine loop as the apostrophe combos
+_CSLOT.update(_PSLOT)                 # and probed by the same 2-char encoder branch
 
 # ── bespoke-bitmap extras (glyphs drawn from scratch, not composed) -- per profile ──
 def _author_hyphen(data):
@@ -323,6 +446,17 @@ _EN_CLSLOT = {seq: _EN_FREE[len(_EN_CSPEC) + len(_EN_COMPOSE) + i]
 # It rides in cslot (which `_encode` probes for 3-char sequences first) and is drawn by an extra.
 _EN_TRI = {"it'": _EN_FREE[len(_EN_CSPEC) + len(_EN_COMPOSE) + len(_CLEAN)]}
 _EN_CSLOT.update(_EN_TRI)
+# `<letter>.` combos, same set and same technique as Catalan (see _PSPEC). English has 2,299 periods
+# already placed that stop costing a cell, plus ~1,000 lines that can now take one for free.
+# 0x83D1 is reserved in BOTH profiles. English authors no middot today, so the slot is technically
+# free here -- but keeping the reservation language-wide means adding the middot to en later can
+# never silently overwrite a period. It sits past every proven en slot, so only periods shift.
+_EN_FREE = [c for c in _EN_FREE if c != 0x83D1] + _KANA_FREE + _KANA_FREE2
+_EN_PSLOT = _alloc(_EN_FREE, set(_EN_CSLOT.values()) | set(_EN_OSLOT.values())
+                   | set(_EN_CLSLOT.values()) | set(_EN_ACCENTS.values())
+                   | {0x83C9, 0x83D1, 0x8394}, _PSPEC)
+_EN_CSPEC = _EN_CSPEC + _PSPEC
+_EN_CSLOT.update(_EN_PSLOT)
 
 _EN = _Profile({}, _EN_CSPEC, _EN_CSLOT, _EN_COMPOSE, _EN_OSLOT, _CLEAN, _EN_CLSLOT,
                _EN_ACCENTS, [_author_hyphen, _author_ellipsis, _author_it_apos], 0x8394)
@@ -354,6 +488,7 @@ def _build(src_bytes, prof):
         if   kind == 'r':  g = _apos_r(g, False)
         elif kind == 'rq': g = _apos_r(g, True)
         elif kind == 'r1': g = _apos_r([[0] + row[:W - 1] for row in g], False)   # letter 1 col right
+        elif kind in _MARKS: g = _mark_r(g, _MARKS[kind])
         rec = bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE])   # borrow base header
         rec[BMP:BMP+ROWS*BPR] = encode(g)
         code = prof.cslot[seq]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
@@ -389,7 +524,9 @@ def _encode(s, prof):
         if three in prof.cslot:     # 3-char one-cell glyph (en `it'`); ca has none, so ca is untouched
             o += prof.cslot[three].to_bytes(2,"big"); i += 3; continue
         two = s[i:i+2]
-        if two in prof.cslot:       # contraction or ?! combo -> one glyph, 2B not 4B
+        if two in prof.cslot and not (two[1] == "." and s[i+2:i+3] == "."):
+            # contraction / `<letter>.` / ?! combo -> one glyph, 2B not 4B. NOT when another dot
+            # follows: "a..." must stay `a` + the ellipsis glyph, never `a.` + "..".
             o += prof.cslot[two].to_bytes(2,"big"); i += 2; continue
         if two in prof.clslot and not (two[1] == "." and s[i+2:i+3] == ".") \
                 and not (s[i+2:i+3] in ("'", "\u2019") and (two[1] + "'") in prof.cslot):
