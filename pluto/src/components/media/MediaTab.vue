@@ -80,18 +80,34 @@ watch(() => props.active, (a) => { if (a) load() }, { immediate: true })
 //   missing:  games with no image linked in the catalogue (local only)
 //   physical: games you own on a shelf with no digital copy on any node
 //   hardware: your consoles and peripherals (rows open the system's page)
-type ListMode = 'missing' | 'physical' | 'hardware' | 'favourites'
-const listMode = ref<ListMode | ''>('')
+type ListMode = 'missing' | 'physical' | 'hardware'
+// 'hardware' is a VIEW of its own; the game lists are three FILTERS that stack (AND): each
+// one keeps only the games in its list, so Physical only + Missing covers = shelf games
+// with no digital copy AND no art, and Favourites narrows either.
+const listMode = ref<'hardware' | ''>('')
+const physOnly = ref(false)
+const missingOnly = ref(false)
+const favGames = ref(false)
+const gameListOpen = computed(() => physOnly.value || missingOnly.value || favGames.value)
 // A search wins over the list views (Favourites, Physical only, Missing covers) the same way
 // it already ignores the grid filters: typing shows every match, clearing it brings the list
 // you were in straight back.
-const missingOpen = computed(() => listMode.value !== '' && !systemFilter.value.trim())
-const lists = ref<Record<ListMode, MissingCover[] | null>>({ missing: null, physical: null, hardware: null, favourites: null })
-const missing = computed(() => listMode.value ? lists.value[listMode.value] : null)
+const missingOpen = computed(() => (listMode.value === 'hardware' || gameListOpen.value) && !systemFilter.value.trim())
+const lists = ref<Record<ListMode | 'favourites', MissingCover[] | null>>({ missing: null, physical: null, hardware: null, favourites: null })
+const missing = computed<MissingCover[] | null>(() => {
+  if (listMode.value === 'hardware') return lists.value.hardware
+  const parts: (MissingCover[] | null)[] = []
+  if (physOnly.value) parts.push(lists.value.physical)
+  if (missingOnly.value) parts.push(lists.value.missing)
+  if (favGames.value) parts.push(lists.value.favourites)
+  if (!parts.length || parts.some(p => !p)) return null          // off, or still loading
+  const [first, ...rest] = parts as MissingCover[][]
+  const keep = rest.map(l => new Set(l.map(m => m.system + '/' + m.key)))
+  return first.filter(m => keep.every(k => k.has(m.system + '/' + m.key)))
+})
 const missingLoading = ref(false)
-async function toggleList(mode: ListMode) {
-  listMode.value = listMode.value === mode ? '' : mode
-  if (!listMode.value || missingLoading.value) return
+async function loadList(mode: ListMode | 'favourites') {
+  if (missingLoading.value) return
   missingLoading.value = true
   try {
     const r = mode === 'missing' ? await catalogueApi.missingCovers()
@@ -105,9 +121,25 @@ async function toggleList(mode: ListMode) {
     missingLoading.value = false
   }
 }
+// One toggle for each game filter; switching one on leaves the Hardware view.
+async function toggleGameFilter(which: 'physical' | 'missing' | 'favourites') {
+  const flag = which === 'physical' ? physOnly : which === 'missing' ? missingOnly : favGames
+  flag.value = !flag.value
+  if (flag.value) {
+    listMode.value = ''
+    favSystemsOnly.value = ownedOnly.value = false       // a game list: the console filters go
+    await loadList(which)
+  }
+}
+const toggleFavGames = () => toggleGameFilter('favourites')
+function clearGameFilters() { physOnly.value = missingOnly.value = favGames.value = false }
+async function toggleList(mode: 'hardware') {
+  listMode.value = listMode.value === mode ? '' : mode
+  if (listMode.value) { clearGameFilters(); await loadList(mode) }
+}
 function setGridView(v: 'consoles' | 'hardware') {
   if (v === 'hardware' && listMode.value !== 'hardware') toggleList('hardware')
-  if (v === 'consoles' && listMode.value) listMode.value = ''
+  if (v === 'consoles' && (listMode.value || gameListOpen.value)) { listMode.value = ''; clearGameFilters() }
 }
 // Per-system sections fold; big ones (MAME) start folded so the list stays scannable.
 const missingFolded = ref<Record<string, boolean>>({})
@@ -117,7 +149,7 @@ const missingBySystem = computed(() => {
   const by = new Map<string, MissingCover[]>()
   for (const m of missing.value ?? []) if (!m.system || matchesSystem(m.system)) by.set(m.system, [...(by.get(m.system) ?? []), m])
   // general-purpose hardware (system "") goes last
-  return [...by.entries()].sort(([a], [b]) => (a ? 0 : 1) - (b ? 0 : 1) || systemName(a).localeCompare(systemName(b)))
+  return [...by.entries()].sort(([a], [b]) => (a ? 0 : 1) - (b ? 0 : 1) || systemOrder(a, b))
 })
 
 // Grid filter: system name, brand or folder key ("sega", "dreamcast", "ngpc"). It stays
@@ -173,15 +205,19 @@ const hitsBySystem = computed(() => {
   return [...by.entries()].sort(([a], [b]) => systemOrder(a, b))
 })
 
-// Grid toggles: ★ starred systems, Owned consoles. Both on = either one (the ones you own
-// plus the ones you starred); neither = all.
+// Grid toggles: ★ starred systems, Owned consoles. Like every filter they narrow: both on =
+// the ones you own AND starred; neither = all.
 const favSystemsOnly = ref(false)
 const ownedOnly = ref(true)                   // on by default: your own consoles first
-const gridFilters = computed(() => [favSystemsOnly.value, ownedOnly.value].filter(Boolean).length)
+const gridFilters = computed(() => [favSystemsOnly.value, ownedOnly.value,
+  physOnly.value, missingOnly.value, favGames.value].filter(Boolean).length)
 const gridFilterOpen = ref(false)
+// ...and a console filter switched on clears the game lists, back to the grid.
+watch([favSystemsOnly, ownedOnly], ([f, o], [pf, po]) => { if ((f && !pf) || (o && !po)) clearGameFilters() })
+
 function keepSystem(s: SystemSummary) {
-  if (!favSystemsOnly.value && !ownedOnly.value) return true
-  return (favSystemsOnly.value && s.favourite) || (ownedOnly.value && s.owned)
+  // filters narrow, so both on = consoles you own AND starred
+  return (!favSystemsOnly.value || !!s.favourite) && (!ownedOnly.value || !!s.owned)
 }
 async function toggleSystemFav(s: SystemSummary) {
   s.favourite = !s.favourite
@@ -299,7 +335,8 @@ const games = computed<Game[]>(() => {
     (!onlySaved.value || g.saves.length > 0) &&
     (!deletedOnly.value || onlyDeleted(g)) &&
     (!noCoverOnly.value || (g.cover !== 'custom' && g.cover !== 'cached')) &&
-    (!nodeFilter.value.length || g.nodes.some(n => nodeFilter.value.includes(n))))
+    // like every filter, ticked nodes narrow: a game must be on ALL of them
+    (!nodeFilter.value.length || nodeFilter.value.every(n => g.nodes.includes(n))))
   return q ? all.filter(g => g.title.toLowerCase().includes(q) || g.files.some(f => f.path.toLowerCase().includes(q))
                           || Object.values(g.meta ?? {}).some(v => v.toLowerCase().includes(q))) : all
 })
@@ -351,7 +388,7 @@ async function reloadPeek() {
 async function togglePeekFavourite(g: Game, on: boolean) {
   g.favourite = on
   try { await catalogueApi.setFavourite(peek.value!.system, g.key, on) } catch { g.favourite = !on; return }
-  if (listMode.value === 'favourites') lists.value.favourites = (await catalogueApi.favourites()).games
+  if (favGames.value) lists.value.favourites = (await catalogueApi.favourites()).games
 }
 watch(system, v => { if (v) peek.value = null })                // entering a console closes it
 
@@ -474,21 +511,30 @@ const termStyle = computed(() => ({
       <!-- view toolbar, same look as a system page: search takes the room left -->
       <div class="md__toolbar md__toolbar--grid">
         <input v-model="systemFilter" class="md__filter md__search" type="search" placeholder="Search systems and games" />
-        <!-- Favourite GAMES across every console: its own button, not buried in Filter
-             (Filter's Favourites is favourite CONSOLES, and stays there) -->
-        <UiIconButton variant="ghost" :active="listMode === 'favourites'"
-                      :title="listMode === 'favourites' ? 'Back to all systems' : 'Favourite games, every console'"
-                      @click="toggleList('favourites')">
-          <svg width="16" height="16" viewBox="0 0 24 24" :fill="listMode === 'favourites' ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
+        <!-- the page's own star: favourite CONSOLES, mirroring the games page's star for favourite
+             games (those stay in Filter > Games). Greyed like its menu twin while a game list is
+             open, since game lists ignore it. -->
+        <UiIconButton variant="ghost" :active="favSystemsOnly"
+                      :title="favSystemsOnly ? 'Every console again' : 'Favourite consoles'"
+                      @click="favSystemsOnly = !favSystemsOnly">
+          <svg width="16" height="16" viewBox="0 0 24 24" :fill="favSystemsOnly ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
         </UiIconButton>
         <!-- same Filter menu + pills pattern as a system page -->
-        <span v-if="!missingOpen" class="md__filter-menu">
+        <span class="md__filter-menu">
           <UiButton :class="{ 'is-on': gridFilters }" @click.stop="gridFilterOpen = !gridFilterOpen">
             Filter<template v-if="gridFilters"> · {{ gridFilters }}</template> ▾
           </UiButton>
+          <!-- two groups: what narrows the CONSOLES grid, and the GAME lists across all of them -->
           <div v-if="gridFilterOpen" class="md__menu md__menu--right" role="menu">
+            <!-- two groups that never mix: ticking one side clears the other (the consoles grid
+                 and a game list are different views); inside a group filters stack -->
+            <span class="md__menu-sep">Consoles</span>
             <label><input v-model="favSystemsOnly" type="checkbox" /> Favourites</label>
-            <label><input v-model="ownedOnly" type="checkbox" /> Owned consoles</label>
+            <label><input v-model="ownedOnly" type="checkbox" /> Owned</label>
+            <span class="md__menu-sep">Games</span>
+            <label><input :checked="favGames" type="checkbox" @change="toggleFavGames()" /> Favourites</label>
+            <label><input :checked="physOnly" type="checkbox" @change="toggleGameFilter('physical')" /> Physical only</label>
+            <label><input :checked="missingOnly" type="checkbox" @change="toggleGameFilter('missing')" /> Missing covers<template v-if="lists.missing"> ({{ lists.missing.length }})</template></label>
           </div>
         </span>
         <!-- what the grid shows: consoles or your hardware, a select like a system page's Cards/List -->
@@ -498,42 +544,38 @@ const termStyle = computed(() => ({
             <option value="hardware">Hardware</option>
           </UiSelect>
         </span>
-        <UiButton class="md__action" :class="{ 'is-on': listMode === 'physical' }" @click="toggleList('physical')">
-          {{ listMode === 'physical' ? 'All systems' : 'Physical only' }}
-        </UiButton>
-        <UiButton class="md__action" :class="{ 'is-on': listMode === 'missing' }" @click="toggleList('missing')">
-          {{ listMode === 'missing' ? 'All systems' : 'Missing covers' }}<template v-if="lists.missing && listMode !== 'missing'"> ({{ lists.missing.length }})</template>
-        </UiButton>
-        <UiButton class="md__action" variant="primary" :loading="syncing" loading-text="Syncing…" @click="sync('*')">Sync all</UiButton>
-        <!-- Physical only shows covers too: same Cards/List choice as a system page -->
-        <span v-if="listMode === 'physical' || listMode === 'favourites'" class="md__layout">
-          <UiIconButton variant="ghost" :active="layout === 'cards'" title="Cards" @click="setLayout('cards')">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
-          </UiIconButton>
-          <UiIconButton variant="ghost" :active="layout === 'list'" title="List" @click="setLayout('list')">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 6h14M5 12h14M5 18h14"/></svg>
-          </UiIconButton>
+        <!-- same Cards/List select, in the same place, as a system page; only while a list
+             with covers is open (the consoles grid has one layout) -->
+        <span v-if="(physOnly || favGames) && !missingOnly" class="md__view">
+          <UiSelect :model-value="layout" @update:model-value="setLayout($event as 'cards' | 'list')">
+            <option value="cards">Cards</option>
+            <option value="list">List</option>
+          </UiSelect>
         </span>
+        <UiButton class="md__action" variant="primary" :loading="syncing" loading-text="Syncing…" @click="sync('*')">Sync all</UiButton>
       </div>
       <!-- stage: the non-scrolling frame the peek drawer pins to, as on a system page -->
       <div class="md__stage">
       <div class="md__body" @click="peek = null">
         <p v-if="systems.length" class="md__stats">{{ stats.join(' · ') }}</p>
-        <span v-if="!missingOpen && gridFilters" class="md__pills md__pills--grid">
-          <button v-if="favSystemsOnly" class="md__pill" @click="favSystemsOnly = false">Favourites ✕</button>
+        <span v-if="gridFilters" class="md__pills md__pills--grid">
+          <button v-if="favSystemsOnly" class="md__pill" @click="favSystemsOnly = false">Favourite consoles ✕</button>
           <button v-if="ownedOnly" class="md__pill" @click="ownedOnly = false">Owned consoles ✕</button>
-          <button class="md__pill-clear" @click="favSystemsOnly = ownedOnly = false">Clear all</button>
+          <button v-if="favGames" class="md__pill" @click="toggleFavGames()">Favourite games ✕</button>
+          <button v-if="physOnly" class="md__pill" @click="toggleGameFilter('physical')">Physical only ✕</button>
+          <button v-if="missingOnly" class="md__pill" @click="toggleGameFilter('missing')">Missing covers ✕</button>
+          <button class="md__pill-clear" @click="favSystemsOnly = ownedOnly = false; clearGameFilters()">Clear all</button>
         </span>
         <template v-if="missingOpen">
           <UiState v-if="missingLoading" loading>Loading…</UiState>
-          <UiState v-else-if="missing && !missing.length">{{ listMode === 'missing' ? 'Every game has a cover.' : listMode === 'hardware' ? 'No hardware recorded.' : listMode === 'favourites' ? 'No favourite games yet.' : 'Every physical game has a digital copy.' }}</UiState>
+          <UiState v-else-if="missing && !missing.length">{{ listMode === 'hardware' ? 'No hardware recorded.' : [physOnly, missingOnly, favGames].filter(Boolean).length > 1 ? 'No results for these filters.' : favGames ? 'No favourite games yet.' : missingOnly ? 'Every game has a cover.' : 'Every physical game has a digital copy.' }}</UiState>
           <section v-for="[sys, list] in missingBySystem" :key="sys" class="md__missing">
             <button class="md__section md__fold" :aria-expanded="!isFolded(sys, list.length)" @click="toggleFold(sys, list.length)">
               <svg class="md__fold-chev" :class="{ 'is-open': !isFolded(sys, list.length) }" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
               <img v-if="systemIcon(sys) || ICONS[sys]" :src="systemIcon(sys) || ICONS[sys]" class="md__missing-ic" alt="" />
               {{ !sys ? 'General purpose' : SYSTEMS[sys] ? systemName(sys) : nodeName(sys) }} <span>{{ list.length }}</span>
             </button>
-            <div v-if="!isFolded(sys, list.length) && (listMode === 'physical' || listMode === 'favourites') && layout === 'cards'" class="md__cards md__cards--mini">
+            <div v-if="!isFolded(sys, list.length) && (physOnly || favGames) && !missingOnly && layout === 'cards'" class="md__cards md__cards--mini">
               <div v-for="m in list" :key="m.key" class="md__card" role="button" tabindex="0" @click.stop="openPeek(m.system, m.key)" @keydown.enter="openPeek(m.system, m.key)">
                 <span class="md__cover">
                   <img :src="catalogueApi.coverUrl(m.system, m.key)" alt="" loading="lazy" />
@@ -661,7 +703,7 @@ const termStyle = computed(() => ({
             <label><input v-model="onlyDigital" type="checkbox" /> Digital copies</label>
             <label><input v-model="favOnly" type="checkbox" /> Favourites</label>
             <label><input v-model="onlySaved" type="checkbox" /> Has a save</label>
-            <label><input v-model="noCoverOnly" type="checkbox" /> No cover</label>
+            <label><input v-model="noCoverOnly" type="checkbox" /> Missing cover</label>
             <label><input v-model="onlyPhysical" type="checkbox" /> Physical copies</label>
             <span v-if="view?.hosts.length" class="md__menu-sep">Nodes</span>
             <label v-for="n in view?.hosts ?? []" :key="n">
@@ -697,7 +739,7 @@ const termStyle = computed(() => ({
           <button v-if="onlyDigital" class="md__pill" @click="onlyDigital = false">Digital copies ✕</button>
           <button v-if="favOnly" class="md__pill" @click="favOnly = false">Favourites ✕</button>
           <button v-if="onlySaved" class="md__pill" @click="onlySaved = false">Has a save ✕</button>
-          <button v-if="noCoverOnly" class="md__pill" @click="noCoverOnly = false">No cover ✕</button>
+          <button v-if="noCoverOnly" class="md__pill" @click="noCoverOnly = false">Missing cover ✕</button>
           <button v-if="onlyPhysical" class="md__pill" @click="onlyPhysical = false">Physical copies ✕</button>
           <button v-for="n in nodeFilter" :key="n" class="md__pill" @click="toggleNode(n)">{{ nodeName(n) }} ✕</button>
           <button class="md__pill-clear" @click="onlyDigital = onlyPhysical = favOnly = onlySaved = deletedOnly = noCoverOnly = false; nodeFilter = []">Clear all</button>
@@ -732,7 +774,10 @@ const termStyle = computed(() => ({
                 <span v-for="r in g.regions" :key="r" class="md__cover-chip" :title="r">{{ regionCode(r) }}</span>
               </span>
               <span class="md__cover-tr">
-                <span v-if="g.favourite" class="md__cover-badge is-star" title="Favourite">★</span>
+                <!-- a toggle, like the star on a console tile: always shown, filled when starred,
+                     and it never opens the drawer -->
+                <button class="md__cover-badge is-star md__fav" :class="{ 'is-on': g.favourite }"
+                        :title="g.favourite ? 'Unfavourite' : 'Favourite'" @click.stop="toggleFavourite(g, !g.favourite)">{{ g.favourite ? '★' : '☆' }}</button>
                 <span v-if="g.saves.length" class="md__cover-badge" :title="'Save on ' + g.saves.map(nodeName).join(', ')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg>
                 </span>
@@ -755,7 +800,9 @@ const termStyle = computed(() => ({
           <li v-for="g in sec.games" :id="'media-row-' + g.key" :key="g.key"
               class="md__row" :class="{ 'is-open': g.key === gameKey, 'is-gone': onlyDeleted(g) }"
               @click.stop="kindTab !== 'hardware' && go(system, g.key)">
-            <span class="md__star" :class="{ 'is-on': g.favourite }">{{ g.favourite ? '★' : '' }}</span>
+            <button v-if="kindTab !== 'hardware'" class="md__star md__fav" :class="{ 'is-on': g.favourite }"
+                    :title="g.favourite ? 'Unfavourite' : 'Favourite'" @click.stop="toggleFavourite(g, !g.favourite)">{{ g.favourite ? '★' : '☆' }}</button>
+            <span v-else class="md__star"></span>
             <span class="md__title">{{ g.title }}</span>
             <span class="md__variants">{{ variantSummary(g) }}</span>
             <span class="md__badges">
@@ -860,6 +907,7 @@ const termStyle = computed(() => ({
 .md__menu label:hover, .md__menu-item:hover { background: var(--surface-2); }
 .md__menu--right { left: auto; right: 0; }
 .md__menu-sep { margin: 4px 0 0; padding: 4px 6px 0; border-top: 1px solid var(--line); font-size: 11px; font-weight: 600; color: var(--text-faint); }
+.md__menu-sep:first-child { margin-top: 0; padding-top: 0; border-top: 0; }   /* a leading heading needs no rule above it */
 .md__menu-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font: inherit; font-size: 13px; color: var(--text); text-align: left; background: none; border: 0; border-radius: var(--r-sm); cursor: pointer; white-space: nowrap; }
 .md__menu-item img { width: 20px; height: 20px; object-fit: contain; }
 .md__body--list .ui-state { padding: var(--sp-4) var(--sp-5); margin: 0; }
@@ -886,6 +934,10 @@ const termStyle = computed(() => ({
 .md__row.is-open { background: var(--accent-soft); }
 .md__row.is-gone .md__title { color: var(--text-faint); text-decoration: line-through; }
 .md__star { width: 12px; flex: 0 0 auto; color: var(--accent); font-size: 12px; }
+/* favourite toggle on a game card / row: always there, like the star on a console tile */
+.md__fav { border: 0; background: transparent; padding: 0; font: inherit; line-height: 1; cursor: pointer; color: var(--accent); }
+.md__cover-badge.md__fav { background: var(--surface); border: 1px solid var(--line); }
+.md__fav:not(.is-on) { color: var(--text-faint); }
 .md__title { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .md__variants { font-size: 12px; color: var(--text-faint); white-space: nowrap; }
 .md__badges { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }

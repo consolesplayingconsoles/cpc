@@ -36,8 +36,8 @@
   "_systemsComment": "Per-SYSTEM facts shared by every feature (saves, SD backup, the Media catalogue). Keys are Batocera folder names, same namespace as `consoles`. brand = manufacturer, the grid groups families by it; name = display name; icon = avatar key in pluto/src/composables/useIcons.ts (omit = lettered tile); header = which ROM header reader identifies its games (pluto/api/modules/catalogue/headers.py formats: megadrive, sms, gba, saturn, dreamcast; omit = match by filename only); thumbnails = libretro-thumbnails repo for box art (github.com/libretro-thumbnails); emulator = key into `emulators` overriding `defaultEmulator` for this system. Several systems can share a format (mastersystem + gamegear both read the SMS header).",
   "systems": {
     "megadrive":      { "brand": "Sega", "name": "Mega Drive", "icon": "megadrive", "header": "megadrive", "thumbnails": "Sega_-_Mega_Drive_-_Genesis" },
-    "mastersystem":   { "brand": "Sega", "name": "Master System", "icon": "sms", "header": "sms", "thumbnails": "Sega_-_Master_System_-_Mark_III", "extensions": [".sms"] },
-    "sg1000":         { "brand": "Sega", "name": "SG-1000", "icon": "sg1000", "thumbnails": "Sega_-_SG-1000", "extensions": [".sg", ".sc"] },
+    "mastersystem":   { "brand": "Sega", "name": "Master System", "icon": "sms", "header": "sms", "thumbnails": "Sega_-_Master_System_-_Mark_III", "thumbnailsFallback": ["Sega_-_Game_Gear", "Sega_-_Mega_Drive_-_Genesis"], "extensions": [".sms"] },
+    "sg1000":         { "brand": "Sega", "name": "SG-1000", "icon": "sg1000", "thumbnails": "Sega_-_SG-1000", "thumbnailsFallback": ["Microsoft_-_MSX"], "extensions": [".sg", ".sc"] },
     "gamegear":       { "brand": "Sega", "name": "Game Gear", "icon": "gamegear", "header": "sms", "thumbnails": "Sega_-_Game_Gear" },
     "saturn":         { "brand": "Sega", "name": "Saturn", "icon": "saturn", "header": "saturn", "thumbnails": "Sega_-_Saturn" },
     "dreamcast":      { "brand": "Sega", "name": "Dreamcast", "icon": "dc", "header": "dreamcast", "thumbnails": "Sega_-_Dreamcast", "emulator": "flycast" },

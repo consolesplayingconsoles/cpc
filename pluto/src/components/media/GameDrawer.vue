@@ -264,7 +264,7 @@ async function forget(f: CatalogueFile) {
          file through the picker, a link is the faster way to a better cover. -->
     <form class="gd__label-edit" @submit.prevent="saveCoverLink">
       <input v-model="coverLink" class="gd__label-input" type="url" :disabled="uploading"
-             :placeholder="coverSrc ? 'Replace the cover: paste an image link, Enter' : 'No cover: paste an image link, Enter'" />
+             :placeholder="coverSrc ? 'Replace the cover: paste an image link, Enter' : 'Missing cover: paste an image link, Enter'" />
       <UiSpinner v-if="uploading" :size="14" />
     </form>
     <p v-if="uploadError" class="gd__upload-err">{{ uploadError }}</p>
