@@ -151,8 +151,15 @@ def test_enclitic_via_vowel_right_apostrophe():
 # altered the Catalan font/encoder bytes -- which the Catalan release (in maintenance) forbids.
 import hashlib
 
-_GOLDEN_FONT = "3c41616c88a2620b92ab766fdc0c2220"
-_GOLDEN_FW = "24a0b531ec002af7044f77e1b8fadf02"
+# RE-BASELINED 2026-09-20, twice. Original: 3c41616c88a2620b92ab766fdc0c2220 / 24a0b531ec002af704
+# 4f77e1b8fadf02. Both languages gained the one-cell `<letter>.` `<letter>,` `<letter>!` combos, so
+# the Catalan font gains 72 glyphs AND -- unlike the first pass -- _GOLDEN_FW moved too: any Catalan
+# string containing a comma or an exclamation now encodes SHORTER (that is the point: it buys back
+# the byte budget the punctuation was costing). The accent/contraction/digraph slots are untouched.
+# These goldens now lock the DEV font, which is NOT byte-identical to the shipped v1.0 patch and is
+# UNTESTED ON HARDWARE -- do not cut a release from it until the operator has seen it on a Dreamcast.
+_GOLDEN_FONT = "33861fbb6e1a9c91f69fbf5d779f702e"
+_GOLDEN_FW = "94b1fe65627afd46ecad6a212966fab4"
 _FW_CORPUS = ["Doraemon", "Pa de la memòria", "Canvia't", "col·lecció", "Ves-te'n", "l'altre",
               "d'un", "Sí", "No", "què vols?", "tres...", "100%", "Gegant", "Això",
               "Nobita, l'amic", "de l'illa", "el tifó", "mig"]
@@ -223,9 +230,10 @@ def test_en_font_builds_and_places_every_combo_distinctly():
     assert len(data) == len(_raw)
     slots = list(f._EN_CSLOT.values())
     assert len(slots) == len(set(slots)), "en combo slot collision"
-    assert len(f._EN_CSPEC) == 27, "expected 26 lowercase + I' = 27 combos"
+    assert len(f._EN_CSPEC) == 27 + len(f._PSPEC), "expected 26 lowercase + I' apostrophes, plus the marks"
+    allowed = set(f._KANA_FREE) | set(f._KANA_FREE2) | {0x838e, 0x8390, 0x8391, 0x8395, 0x8361}
     for code in slots:
-        assert 0x839F <= code <= 0x83D6 or code in (0x838e, 0x8390, 0x8391, 0x8395, 0x8361)
+        assert 0x839F <= code <= 0x83D6 or code in allowed, "%04X is outside the reserved slots" % code
 
 
 def test_en_combos_dont_collide_with_hyphen_or_ellipsis():
@@ -268,6 +276,82 @@ def test_en_multi_punctuation_is_one_cell():
     slots = [f._EN_CSLOT[s] for s in ("?!", "!?", "!!")]
     assert len(set(slots)) == 3, "en punctuation combos must not share a slot"
     f.build_patched_font(_raw, "en")   # builds without error (glyphs composed)
+
+
+def test_period_combo_makes_the_terminal_dot_free():
+    """A `<letter>.` is ONE cell in both languages, so a terminal period costs nothing -- the whole
+    point of the glyph set (both scripts were budget-stripped of their periods)."""
+    for lang in ("ca", "en"):
+        for word in ("sleep", "Mom", "now", "va", "here"):
+            bare, dotted = f.fw(word, lang), f.fw(word + ".", lang)
+            assert len(dotted) == len(bare), "%s: %r. costs more than %r" % (lang, word, word)
+
+
+def test_period_combo_never_eats_an_ellipsis():
+    """"a..." must stay `a` + the ellipsis glyph. If the `a.` combo fired it would leave ".." behind,
+    rendering as "a. .." -- the same class of bug the apostrophe guard exists for."""
+    for lang in ("ca", "en"):
+        prof = f._PROFILES[lang]
+        assert f.fw("a...", lang) == f.fw("a", lang) + prof.ellipsis_code.to_bytes(2, "big")
+        assert len(f.fw("no..", lang)) // 2 == 4, "'..' must stay two separate dots"
+
+
+def test_period_slots_miss_every_authored_extra():
+    """The periods take the next free slots, which in ca runs straight into the l·l middot (0x83D1)
+    and, unguarded, into the hyphen/ellipsis. A clash here renders a letter inside Japanese text."""
+    for lang in ("ca", "en"):
+        pslots = {f._PROFILES[lang].cslot[seq] for seq, _, _ in f._PSPEC}
+        for code, what in ((0x83C9, "hyphen"), (0x83D1, "middot"), (0x8394, "ellipsis")):
+            assert code not in pslots, "%s: a period landed on the %s slot" % (lang, what)
+        assert len(pslots) == len(f._PSPEC), "%s: two periods share a slot" % lang
+    assert f.fw("l·l", "ca")[2:4] == (0x83D1).to_bytes(2, "big"), "the middot stopped rendering"
+
+
+def test_period_glyph_sits_at_the_baseline_right():
+    """The dot must be drawn bottom-right, clear of the squeezed letter (two blank columns), the
+    same clearance the proven right-apostrophe uses -- just at the baseline instead of the cap."""
+    data = f.build_patched_font(_raw, "en")
+    for seq, _, _ in f._PSPEC[:6]:
+        code = f._EN_CSLOT[seq]
+        off = _idx(code) * f.STRIDE
+        g = f.decode(bytearray(data[off:off + f.STRIDE]))
+        assert any(g[r][c] for r in (16, 17, 18) for c in (16, 17, 18)), "%s: no dot at baseline right" % seq
+        assert not any(g[r][c] for r in range(f.ROWS) for c in (14, 15)), "%s: letter crowds the dot" % seq
+
+
+def test_every_mark_is_one_cell_in_both_languages():
+    """`,` and `!` ride the preceding letter exactly as `.` does, so punctuation is free."""
+    for lang in ("ca", "en"):
+        for word, mark in (("adeu", ","), ("prou", "!"), ("sleep", "."),
+                           ("a", ","), ("hi", "!"), ("mom", ".")):
+            assert len(f.fw(word + mark, lang)) == len(f.fw(word, lang)), \
+                "%s: %r%s is not free" % (lang, word, mark)
+
+
+def test_marks_never_swallow_a_doubled_punctuation():
+    """`!!` and `..` must stay two cells: the combo may only take a SINGLE trailing mark, or
+    "Ja!!" would render as `a!` + `!` -- right glyph count, wrong shape."""
+    for lang in ("ca", "en"):
+        assert len(f.fw("Ja!!", lang)) // 2 == 3, "!! collapsed wrongly"   # J + a! + !
+        assert len(f.fw("no..", lang)) // 2 == 4, ".. collapsed wrongly"
+
+
+def test_comma_covers_the_whole_alphabet():
+    """Partial coverage is worse than none: a comma that hugs some letters and not others reads
+    as broken spacing. Every a-z carries one (unlike . and !, which reuse the tested t/i/l pairs)."""
+    for lang in ("ca", "en"):
+        missing = [c for c in "abcdefghijklmnopqrstuvwxyz" if (c + ",") not in f._PROFILES[lang].cslot]
+        assert not missing, "%s: no comma combo for %s" % (lang, missing)
+
+
+def test_bang_glyph_clears_the_letter_vertically():
+    """`!` is full height, unlike the dot. It still must not touch the letter: the letter ends by
+    col 13 and the mark owns 16-18, so cols 14-15 stay empty at EVERY row."""
+    data = f.build_patched_font(_raw, "en")
+    for seq in ("a!", "g!", "m!", "w!"):
+        g = f.decode(bytearray(data[_idx(f._EN_CSLOT[seq]) * f.STRIDE:][:f.STRIDE]))
+        assert any(g[r][17] for r in range(3, 14)), "%s: no stem" % seq
+        assert not any(g[r][c] for r in range(f.ROWS) for c in (14, 15)), "%s: letter touches the mark" % seq
 
 
 def test_en_does_not_perturb_ca():

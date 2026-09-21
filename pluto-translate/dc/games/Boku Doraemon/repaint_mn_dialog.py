@@ -22,7 +22,7 @@ WHITE = (245, 245, 245)
 # Speech bubbles: file -> [ (chunk, (text_x0, text_x1), [(cy, "line"), ...]) ]. cy = measured band centre.
 BUBBLES = {
     "MN1.PVM": [
-        (3, (166, 484), [(142, "Que bé, Doraemon!"), (174, "Fas molt bon massatge"), (206, "Menja molts pastissets")]),
+        (3, (166, 484), [(142, "Que bé, Doraemon!"), (174, "Fas molt bons massatges,"), (206, "Menja molts pastissets!")]),
         (3, (166, 484), [(380, "Gràcies, Doraemon"), (412, "Té, pastissets per a tu")]),
         (4, (166, 484), [(366, "Escolta, Doraemon…"), (399, "No t'esforces?"), (433, "Doncs res de pastissets!")]),
     ],
