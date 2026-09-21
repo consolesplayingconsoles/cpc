@@ -32,6 +32,8 @@ except ImportError:
     import covers, gamelist, metadata, names, scan, sfo, store
 
 BATOCERA_ROMS = "/userdata/roms"
+# Systems whose files are named by romset, so their titles come from the scraper instead.
+ROMSET_SYSTEMS = ("mame",)
 _LIST_MARK = "--CPC-GAMELIST--"
 
 
@@ -122,6 +124,19 @@ def system_view(root, system):
         g["label"] = labels.get(g["key"])
         if g["label"]:
             g["fileTitle"], g["title"] = g["title"], g["label"]
+        elif system in ROMSET_SYSTEMS:
+            # An arcade file is named after its ROMSET ("mslug2", "3wonders"), which is how
+            # the emulator finds it, not what the game is called. Batocera's scraper already
+            # stored the real name on the file, so show that -- the key stays the romset, so
+            # covers, favourites, labels and cross-system art still line up.
+            real = next((f["scraped"]["name"] for f in g["files"]
+                         if (f.get("scraped") or {}).get("name")), None)
+            # the scraper tacks tags onto some names -- "Atomic Punk (Bomberman)", "Return
+            # of the Jedi (Star Wars)", "(2008)" -- so read it like a file name and keep the
+            # title part only
+            real = names.parse(real + ".x")["title"] if real else real
+            if real and real != g["title"]:
+                g["fileTitle"], g["title"] = g["title"], real
         c = covers.custom(root, system, g["key"]) and "custom" or covers.cached(root, system, g["key"])
         g["cover"] = c if c in ("custom", "miss") else ("cached" if c else None)
         out.append(g)
@@ -223,6 +238,21 @@ def physical_only(root):
         system = s["system"]
         for g in system_view(root, system)["games"]:
             if g["physical"] and not g["nodes"]:
+                out.append({"system": system, "key": g["key"], "title": g["title"]})
+    return {"games": out}
+
+
+def favourite_games(root):
+    """Every game starred on any system, as one list: favourites are how you say "these
+    are the ones I play", so they deserve a view that does not care which console. Only
+    systems that HAVE favourites are opened, and a star left on a game that no longer
+    exists is skipped rather than listed with no title."""
+    favs = (store.load_favourites(root).get("games") or {})
+    out = []
+    for system in sorted(s for s, keys in favs.items() if keys):
+        wanted = set(favs[system])
+        for g in system_view(root, system)["games"]:
+            if g["key"] in wanted:
                 out.append({"system": system, "key": g["key"], "title": g["title"]})
     return {"games": out}
 

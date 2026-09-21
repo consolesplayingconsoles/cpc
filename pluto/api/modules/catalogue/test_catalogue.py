@@ -510,6 +510,32 @@ def _sfo(serial, name, category="HG"):
     return head + struct.pack("<III", key_off, key_off + len(keys), len(entries)) + idx + keys + vals
 
 
+def test_favourite_games_lists_every_system_and_skips_stale_stars():
+    root = tempfile.mkdtemp()
+    doc = store.empty("psx")
+    store.merge(doc, "batocera", [{"path": "Oddworld - Abe's Oddysee (Europe).chd", "header": None}], NOW)
+    store.save(root, doc)
+    store.save_favourites(root, {"games": {"psx": ["oddworld-abe-s-oddysee", "a-game-long-gone"]},
+                                 "imported": {}})
+    got = service.favourite_games(root)["games"]
+    assert got == [{"system": "psx", "key": "oddworld-abe-s-oddysee", "title": "Oddworld - Abe's Oddysee"}]
+    shutil.rmtree(root)
+
+
+def test_mame_titles_come_from_the_scrape_not_the_romset():
+    """mslug2 is how MAME finds the file, not what the game is called."""
+    root = tempfile.mkdtemp()
+    doc = store.empty("mame")
+    store.merge(doc, "batocera", [{"path": "mslug2.zip", "header": None}], NOW)
+    # the scraper's tag in brackets is not part of the name
+    store.apply_scraped(doc, "batocera", {"mslug2.zip": {"name": "Metal Slug 2 (Neo-Geo)", "image": "", "thumbnail": ""}})
+    store.save(root, doc)
+    g = service.system_view(root, "mame")["games"][0]
+    assert g["title"] == "Metal Slug 2" and g["fileTitle"] == "mslug2"
+    assert g["key"] == "mslug2"                    # covers, favourites, labels still key on it
+    shutil.rmtree(root)
+
+
 def test_set_kind_files_a_game_as_a_tool_and_back():
     """From the drawer: what a thing IS is decided while looking at it, not in a JSON file."""
     root = tempfile.mkdtemp()

@@ -161,6 +161,11 @@ paths:
     get: { tags: [catalogue], summary: "Present games with no image linked in the catalogue (no upload, no downloaded art), all systems", responses: { '200': { description: "{games: [{system, key, title}]}" } } }
   /catalogue/hardware:
     get: { tags: [catalogue], summary: "Your consoles and peripherals (catalogue/hardware.json) as rows for the grid's Hardware list; system \"\" = general purpose", responses: { '200': { description: "{games: [{system, key, title, info}]}" } } }
+  /catalogue/favourites:
+    get:
+      tags: [catalogue]
+      summary: "Every favourite game across all systems, as {games: [{system, key, title}]} -- the Media page's Favourites view"
+      responses: { '200': { description: "{games: [...]}" } }
   /catalogue/physical-only:
     get: { tags: [catalogue], summary: "Games with a physical copy and no digital copy on any node, all systems", responses: { '200': { description: "{games: [{system, key, title}]}" } } }
   /catalogue/{system}:

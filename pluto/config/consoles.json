@@ -65,7 +65,7 @@
     "sufami":         { "brand": "Bandai", "name": "SuFami Turbo", "icon": "sufami", "thumbnails": "Nintendo_-_Sufami_Turbo" },
     "ngpc":           { "brand": "SNK", "name": "Neo Geo Pocket Color", "icon": "ngpc", "thumbnails": "SNK_-_Neo_Geo_Pocket_Color" },
     "ngp":            { "brand": "SNK", "name": "Neo Geo Pocket", "icon": "ngp", "thumbnails": "SNK_-_Neo_Geo_Pocket" },
-    "mame":           { "name": "Arcade (MAME)", "icon": "mame", "thumbnails": "MAME" },
+    "mame":           { "brand": "Arcade", "name": "MAME", "icon": "mame", "thumbnails": "MAME" },
     "3ds":            { "brand": "Nintendo", "name": "Nintendo 3DS", "icon": "3ds", "thumbnails": "Nintendo_-_Nintendo_3DS" },
     "c64":            { "brand": "Commodore", "name": "Commodore 64", "icon": "c64", "thumbnails": "Commodore_-_64" },
     "dos":            { "name": "MS-DOS", "icon": "dos", "thumbnails": "DOS" },
