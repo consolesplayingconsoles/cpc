@@ -536,6 +536,48 @@ def test_mame_titles_come_from_the_scrape_not_the_romset():
     shutil.rmtree(root)
 
 
+def test_send_writes_a_tool_into_the_kind_folder_and_games_where_they_were():
+    """SD_SEND_DIRS=tool:Mega Drive/Tools: a tool lands in Tools/, a game still in the root."""
+    put, have = [], set()
+    card = {"mount": lambda: None, "exists": lambda n: n in have,
+            "put": lambda src, name: put.append(name), "finish": lambda: []}
+    plan = {"copies": [
+        {"game": "sonic", "name": "Sonic The Hedgehog (USA, Europe)", "kind": "game",
+         "source": {"node": "lab", "path": "Sonic.md"}},
+        {"game": "md-test", "name": "MD Test Cart", "kind": "tool",
+         "source": {"node": "lab", "path": "MD Test Cart.bin"}},
+    ], "skipped": []}
+    ctx = {"target": "megadrive", "system": "megadrive", "locate": lambda src: "/lab/" + src["path"],
+           "emit": None, "rom_ext": lambda src: "." + src["path"].rsplit(".", 1)[-1], "unpack": False,
+           "card": card, "members": None, "kind_dirs": {"tool": "Tools"}}
+    send._files(plan, ctx)
+    assert put == ["Sonic The Hedgehog (USA, Europe).md", "Tools/MD Test Cart.bin"]
+    # no kind folder configured: everything where it always went (backwards compatible)
+    put.clear()
+    send._files(plan, dict(ctx, kind_dirs={}))
+    assert put == ["Sonic The Hedgehog (USA, Europe).md", "MD Test Cart.bin"]
+
+
+def test_a_file_in_a_cards_tools_folder_is_filed_as_a_tool_unless_you_said_otherwise():
+    root = tempfile.mkdtemp()
+    doc = store.empty("megadrive")
+    store.merge(doc, "megadrive", [
+        {"path": "EDMD/Tools/MD Test Cart.bin", "header": None},
+        {"path": "EDMD/Sonic The Hedgehog (USA, Europe).md", "header": None},
+        {"path": "EDMD/Tools/Controller Test.bin", "header": None},
+    ], NOW, scope="EDMD/")
+    store.save(root, doc)
+    service.set_kind(root, "megadrive", "controller-test", "game")    # a choice made in the drawer...
+    kinds = store.load_kinds(root); kinds.setdefault("megadrive", {})["controller-test"] = "game"
+    store.save_kinds(root, kinds)
+    service._mark_kind_dirs(root, "megadrive", "megadrive", "EDMD", {"tool": "Tools"})
+    k = store.load_kinds(root)["megadrive"]
+    assert k["md-test-cart"] == "tool"
+    assert "sonic-the-hedgehog" not in k
+    assert k["controller-test"] == "game"                              # ...is never overridden
+    shutil.rmtree(root)
+
+
 def test_set_kind_files_a_game_as_a_tool_and_back():
     """From the drawer: what a thing IS is decided while looking at it, not in a JSON file."""
     root = tempfile.mkdtemp()

@@ -4504,25 +4504,46 @@ class Handler(http.server.BaseHTTPRequestHandler):
             roms_dir = (cfg.get("SD_ROMS_DIR") or "").strip().strip("/")
             if labels and roms_dir:
                 out[node] = {"labels": labels, "roms_dir": roms_dir, "hub": "pi",
-                             "strip": (cfg.get("SD_NAME_STRIP") or "").strip() or None}
+                             "strip": (cfg.get("SD_NAME_STRIP") or "").strip() or None,
+                             # sub-folders of roms_dir whose files are a kind of their own
+                             "kind_dirs": self._sd_scan_kind_dirs(cfg, roms_dir)}
         return out
 
     @staticmethod
-    def _sd_send_dir(cfg, system):
+    def _sd_send_dir(cfg, system, kind=None):
         """Folder on a card that copies of <system> are written into, relative to the card
         root. SD_ROMS_DIR says where to READ, which on a card holding several consoles is the
-        root; writing needs one folder per console, so SD_SEND_DIRS maps them:
+        root; writing needs one folder per console, so SD_SEND_DIRS maps them -- and a KIND
+        can have its own folder too (the Mega EverDrive keeps tools apart from games):
 
             SD_SEND_DIRS=mastersystem:ROM A-Z,sg1000:ROM- SG1000 SC3000
+            SD_SEND_DIRS=tool:Mega Drive/Tools
 
-        A system that is not listed falls back to SD_ROMS_DIR ("." = the card root)."""
-        for pair in (cfg.get("SD_SEND_DIRS") or "").split(","):
-            if ":" in pair:
-                s, d = pair.split(":", 1)
-                if s.strip() == system:
-                    return d.strip().strip("/")
+        A kind entry wins, then a system entry; neither falls back to SD_ROMS_DIR ("." = the
+        card root). Games need no entry, so a card set up before kinds existed is unchanged."""
+        pairs = [p.split(":", 1) for p in (cfg.get("SD_SEND_DIRS") or "").split(",") if ":" in p]
+        dirs = {k.strip(): d.strip().strip("/") for k, d in pairs}
+        if kind and kind != "game" and kind in dirs:
+            return dirs[kind]
+        if system in dirs:
+            return dirs[system]
         d = (cfg.get("SD_ROMS_DIR") or "").strip().strip("/")
         return "" if d == "." else d
+
+    def _send_kind_dirs(self, kind, cfg, system):
+        """{kind: sub-folder under the games folder} for a card whose SD_SEND_DIRS gives a
+        kind its own folder -- e.g. {"tool": "Tools"} when games go to "Mega Drive" and tools
+        to "Mega Drive/Tools". The copy loop writes <sub>/<name>, which keeps "already there"
+        checks and the rescan working unchanged."""
+        if kind != "sd":
+            return {}
+        base = self._sd_send_dir(cfg, system)
+        out = {}
+        for k in ("tool",):
+            d = self._sd_send_dir(cfg, system, k)
+            if d and d != base:
+                out[k] = os.path.relpath(d, base or ".")
+        return out
 
     # Where a PS3's games live, in the order the catalogue reads them: ISOs webMAN can
     # mount, folder games, and titles already installed on the drive (arcade PKGs and the
@@ -4632,6 +4653,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         return {"list": list_dir, "read": read, "put": put, "remove": remove}
 
+    def _sd_scan_kind_dirs(self, cfg, roms_dir):
+        """{kind: path under roms_dir} for the kind folders SD_SEND_DIRS names inside the
+        scanned folder (a folder outside it is not scanned, so it cannot mark anything)."""
+        out = {}
+        for k in ("tool",):
+            pairs = dict(p.split(":", 1) for p in (cfg.get("SD_SEND_DIRS") or "").split(",") if ":" in p)
+            d = (pairs.get(k) or "").strip().strip("/")
+            if not d:
+                continue
+            root = "" if roms_dir in (".", "") else roms_dir + "/"
+            if not root or d.startswith(root):
+                out[k] = d[len(root):]
+        return out
+
     def _catalogue_admin_nodes(self):
         """Nodes whose games live on a drive only root can read (PS2_HDD_BYTES: the PS2's
         APA HDD on this Mac). Pluto never reads it: it hands out a Terminal command
@@ -4721,8 +4756,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ctx = {"target": target, "system": system, "locate": locate, "emit": emit,
                "command": lambda args: self._admin_command(target, args),
                "rom_ext": lambda src: os.path.splitext(src.get("inner") or src["path"])[1], "unpack": kind == "sd",
-               "card": self._send_dest(kind, target, target_cfg, system) if kind in ("local", "batocera", "sd") else None,
-               "members": self._send_members}
+               "card": self._send_dest(kind, target, target_cfg, system) if kind in ("local", "batocera", "sd", "ftp") else None,
+               "members": self._send_members,
+               # a kind with its own folder on the target (a card's Tools/): its copies go there
+               "kind_dirs": self._send_kind_dirs(kind, target_cfg, system)}
         try:
             result = catalogue_send.STRATEGIES[kind](plan, ctx)
         finally:
@@ -4866,7 +4903,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     rc, out = ssh_sh(host, 'D=/dev/disk/by-label/$1; [ -e "$D" ] || { echo "no card labelled $1 in the hub"; exit 2; }; '
                                            'if mountpoint -q "$2"; then sudo mount -o remount,rw "$2" && echo reused; '
                                            'else sudo mkdir -p "$2" && sudo mount "$D" "$2" && echo mounted; fi; '
-                                           'sudo mkdir -p "$3" && ls -1 "$3"', label, mnt, base)
+                                           'sudo mkdir -p "$3" && ls -1 "$3"; b=$3; shift 3; '
+                                           'for s in "$@"; do [ -d "$b/$s" ] && ls -1 "$b/$s" | sed "s|^|$s/|"; done',
+                                           label, mnt, base, *self._send_kind_dirs("sd", cfg, system).values())
                 else:
                     rc, out = ssh_sh(host, 'mkdir -p "$1" && echo reused && ls -1 "$1"', base)
                 if rc != 0:
