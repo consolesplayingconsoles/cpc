@@ -569,6 +569,7 @@ def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=B
                         _merge_system(root, s, node, {"files": prefixed, "gamelist": ""}, favs, saves_once, emit, now,
                                       ((consoles_config.get("systems") or {}).get(s) or {}).get("thumbnails"),
                                       scope=label + "/", strip=(sd_nodes.get(node) or {}).get("strip"))
+                        _mark_kind_dirs(root, s, node, label, (sd_nodes.get(node) or {}).get("kind_dirs"))
                         merged += 1
                     except Exception as exc:
                         emit("WARN %s/%s[%s]: merge failed, skipped (%s)" % (node, s, label, exc)); skipped += 1
@@ -661,6 +662,28 @@ def _systems_with_node(root, node):
                 if any(f["node"] == node for g in doc["games"].values() for f in g["files"]):
                     out.add(s)
     return out
+
+
+def _mark_kind_dirs(root, system, node, label, kind_dirs):
+    """A card folder that holds one kind of thing files what is in it as that kind: a ROM in
+    the EverDrive's Mega Drive/Tools is a tool, whoever put it there. Only games with no
+    kind yet are touched, so a choice made in the drawer is never overridden."""
+    if not kind_dirs:
+        return
+    doc = store.load(root, system)
+    kinds = store.load_kinds(root)
+    mine = kinds.setdefault(system, {})
+    changed = False
+    for kind, sub in kind_dirs.items():
+        prefix = "%s/%s/" % (label, sub.strip("/"))
+        for key, g in doc["games"].items():
+            if key in mine:
+                continue
+            if any(f["node"] == node and f["status"] == "present" and f["path"].startswith(prefix) for f in g["files"]):
+                mine[key] = kind
+                changed = True
+    if changed:
+        store.save_kinds(root, kinds)
 
 
 def _merge_system(root, system, node, found, favs, saves_lookup, emit, now, thumbnails=None, scope=None, strip=None):

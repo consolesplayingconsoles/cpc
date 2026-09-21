@@ -84,6 +84,7 @@ def plan(root, system, target, sources, files=None, all_missing=False):
                 continue
             best = min(candidates, key=lambda f: (rank[f["node"]], f["path"]))
             copies.append({"game": g["key"], "name": names.canonical_name(g["title"], best),
+                           "kind": g.get("kind") or "game",
                            "source": {"node": best["node"], "path": best["path"], "inner": best.get("inner")}})
     return {"copies": copies, "skipped": skipped}
 
@@ -140,16 +141,22 @@ def disc_tracks(descriptor_text, ext):
 
 
 def _files(p, ctx):
-    """File-per-game targets (local, batocera, sd): copy each source to <dest>/<name><ext>.
+    """File-per-game targets (local, batocera, sd, ftp): copy each source to <dest>/<name><ext>,
+    or <dest>/<sub>/<name><ext> when ctx["kind_dirs"] gives the game's kind a folder.
     ctx["card"] does the I/O (mount, exists, put, finish = release + rescan); ctx["unpack"]
     = write the ROM inside a .zip (cards) instead of the archive."""
     card, lines, copied = ctx["card"], [], 0
+    kind_dirs = ctx.get("kind_dirs") or {}
     todo = []
     for c in p["copies"]:
         src = ctx["locate"](c["source"])
         ext = ctx["rom_ext"](c["source"]) if ctx.get("unpack") else "." + c["source"]["path"].rsplit(".", 1)[-1]
         if ctx.get("system") in ARCADE:
             c = dict(c, name=c["source"]["path"].rsplit("/", 1)[-1].rsplit(".", 1)[0])
+        # a kind with its own folder on the target (a card's Tools/) is written under it
+        sub = kind_dirs.get(c.get("kind") or "game")
+        if sub:
+            c = dict(c, name=sub.rstrip("/") + "/" + c["name"])
         if src is None:
             p["skipped"].append({"game": c["name"], "why": "%s's copy can't be read from here yet" % c["source"]["node"]})
         elif ext.lower() in MULTI_FILE and not (ext.lower() in DISC_FOLDER and ctx.get("members")):
