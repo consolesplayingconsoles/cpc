@@ -78,6 +78,8 @@ export const catalogueApi = {
   search: (q: string) => getJson<{ games: GameHit[] }>(`${BASE}/search?q=${enc(q)}`),
   // games on a shelf with no digital copy on any node
   physicalOnly: () => getJson<{ games: MissingCover[] }>(`${BASE}/physical-only`),
+  // every favourite game on every system: the grid's Favourites view
+  favourites: () => getJson<{ games: MissingCover[] }>(`${BASE}/favourites`),
   // consoles + peripherals as grid rows (system "" = general purpose)
   hardware: () => getJson<{ games: MissingCover[] }>(`${BASE}/hardware`),
   setSystemFavourite: async (system: string, on: boolean) => {

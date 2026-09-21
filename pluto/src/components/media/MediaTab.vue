@@ -7,6 +7,7 @@ import { catalogueApi, type SystemSummary, type SystemView, type Game, type Miss
 import consolesConfig from '../../../config/consoles.json'
 import UiButton from '../ui/UiButton.vue'
 import UiSpinner from '../ui/UiSpinner.vue'
+import UiState from '../ui/UiState.vue'
 import UiIconButton from '../ui/UiIconButton.vue'
 import UiSelect from '../ui/UiSelect.vue'
 import UiCopyButton from '../ui/UiCopyButton.vue'
@@ -79,10 +80,13 @@ watch(() => props.active, (a) => { if (a) load() }, { immediate: true })
 //   missing:  games with no image linked in the catalogue (local only)
 //   physical: games you own on a shelf with no digital copy on any node
 //   hardware: your consoles and peripherals (rows open the system's page)
-type ListMode = 'missing' | 'physical' | 'hardware'
+type ListMode = 'missing' | 'physical' | 'hardware' | 'favourites'
 const listMode = ref<ListMode | ''>('')
-const missingOpen = computed(() => listMode.value !== '')
-const lists = ref<Record<ListMode, MissingCover[] | null>>({ missing: null, physical: null, hardware: null })
+// A search wins over the list views (Favourites, Physical only, Missing covers) the same way
+// it already ignores the grid filters: typing shows every match, clearing it brings the list
+// you were in straight back.
+const missingOpen = computed(() => listMode.value !== '' && !systemFilter.value.trim())
+const lists = ref<Record<ListMode, MissingCover[] | null>>({ missing: null, physical: null, hardware: null, favourites: null })
 const missing = computed(() => listMode.value ? lists.value[listMode.value] : null)
 const missingLoading = ref(false)
 async function toggleList(mode: ListMode) {
@@ -90,7 +94,10 @@ async function toggleList(mode: ListMode) {
   if (!listMode.value || missingLoading.value) return
   missingLoading.value = true
   try {
-    const r = mode === 'missing' ? await catalogueApi.missingCovers() : mode === 'physical' ? await catalogueApi.physicalOnly() : await catalogueApi.hardware()
+    const r = mode === 'missing' ? await catalogueApi.missingCovers()
+      : mode === 'physical' ? await catalogueApi.physicalOnly()
+      : mode === 'favourites' ? await catalogueApi.favourites()
+      : await catalogueApi.hardware()
     lists.value[mode] = r.games
   } catch {
     apiError.value = 'Catalogue API unreachable'
@@ -163,7 +170,7 @@ watch(systemFilter, (q) => {
 const hitsBySystem = computed(() => {
   const by = new Map<string, GameHit[]>()
   for (const h of gameHits.value) by.set(h.system, [...(by.get(h.system) ?? []), h])
-  return [...by.entries()].sort(([a], [b]) => systemName(a).localeCompare(systemName(b)))
+  return [...by.entries()].sort(([a], [b]) => systemOrder(a, b))
 })
 
 // Grid toggles: ★ starred systems, Owned consoles. Both on = either one (the ones you own
@@ -182,11 +189,17 @@ async function toggleSystemFav(s: SystemSummary) {
 }
 
 // Families: brand, then name. Systems without a brand (arcade) go last.
-const sortedSystems = computed(() => [...systems.value].filter(s => matchesSystem(s.system) && keepSystem(s)).sort((a, b) => {
-  const ba = SYSTEMS[a.system]?.brand, bb = SYSTEMS[b.system]?.brand
-  if (!!ba !== !!bb) return ba ? -1 : 1
-  return (ba ?? '').localeCompare(bb ?? '') || systemName(a.system).localeCompare(systemName(b.system))
-}))
+// ONE order for systems, used by the grid AND the search results so they never disagree:
+// Arcade first, then every manufacturer A-Z, then the brandless ("Other") last; by name
+// inside a manufacturer.
+const TOP_BRAND = 'Arcade'
+function systemOrder(a: string, b: string): number {
+  const ba = SYSTEMS[a]?.brand, bb = SYSTEMS[b]?.brand
+  const rank = (x?: string) => (x === TOP_BRAND ? 0 : x ? 1 : 2)
+  return rank(ba) - rank(bb) || (ba ?? '').localeCompare(bb ?? '') || systemName(a).localeCompare(systemName(b))
+}
+const sortedSystems = computed(() => [...systems.value].filter(s => matchesSystem(s.system) && keepSystem(s))
+  .sort((a, b) => systemOrder(a.system, b.system)))
 
 // Grid sections by manufacturer (sortedSystems order kept); brandless systems under "Other".
 const brandGroups = computed(() => {
@@ -316,6 +329,32 @@ function variantSummary(g: Game): string {
 const onlyDeleted = (g: Game) => g.files.length > 0 && g.nodes.length === 0
 function nodeName(id: string) { return props.nodes[id]?.name ?? id }
 
+// ── Peek: the game drawer on the CONSOLES page ──
+// Search results and the Favourites / Physical only / Missing covers lists open a game in
+// place, so you can walk through results without landing on its console each time. The
+// drawer needs the game's full record, which lives in its system's view: fetched once per
+// system and kept while you browse.
+const peek = ref<{ system: string; key: string } | null>(null)
+const peekViews = ref<Record<string, SystemView>>({})
+const peekGame = computed(() => peek.value
+  ? peekViews.value[peek.value.system]?.games.find(g => g.key === peek.value!.key) ?? null : null)
+async function openPeek(sys: string, key: string) {
+  if (!peekViews.value[sys]) {
+    try { peekViews.value[sys] = await catalogueApi.system(sys) } catch { apiError.value = 'Catalogue API unreachable'; return }
+  }
+  peek.value = { system: sys, key }
+}
+async function reloadPeek() {
+  if (!peek.value) return
+  try { peekViews.value[peek.value.system] = await catalogueApi.system(peek.value.system) } catch { /* keep the old copy */ }
+}
+async function togglePeekFavourite(g: Game, on: boolean) {
+  g.favourite = on
+  try { await catalogueApi.setFavourite(peek.value!.system, g.key, on) } catch { g.favourite = !on; return }
+  if (listMode.value === 'favourites') lists.value.favourites = (await catalogueApi.favourites()).games
+}
+watch(system, v => { if (v) peek.value = null })                // entering a console closes it
+
 async function toggleFavourite(g: Game, on: boolean) {
   g.favourite = on
   try { await catalogueApi.setFavourite(view.value!.system, g.key, on) } catch { g.favourite = !on }
@@ -323,6 +362,7 @@ async function toggleFavourite(g: Game, on: boolean) {
 
 // ↑/↓ walk the (filtered) list while the drawer is open; Esc closes it.
 function onKey(e: KeyboardEvent) {
+  if (props.active && peek.value && e.key === 'Escape') { peek.value = null; return }
   if (!props.active || !openGame.value) return
   if ((e.target as HTMLElement)?.tagName === 'INPUT') return
   if (e.key === 'Escape') { go(system.value); return }
@@ -434,6 +474,13 @@ const termStyle = computed(() => ({
       <!-- view toolbar, same look as a system page: search takes the room left -->
       <div class="md__toolbar md__toolbar--grid">
         <input v-model="systemFilter" class="md__filter md__search" type="search" placeholder="Search systems and games" />
+        <!-- Favourite GAMES across every console: its own button, not buried in Filter
+             (Filter's Favourites is favourite CONSOLES, and stays there) -->
+        <UiIconButton variant="ghost" :active="listMode === 'favourites'"
+                      :title="listMode === 'favourites' ? 'Back to all systems' : 'Favourite games, every console'"
+                      @click="toggleList('favourites')">
+          <svg width="16" height="16" viewBox="0 0 24 24" :fill="listMode === 'favourites' ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
+        </UiIconButton>
         <!-- same Filter menu + pills pattern as a system page -->
         <span v-if="!missingOpen" class="md__filter-menu">
           <UiButton :class="{ 'is-on': gridFilters }" @click.stop="gridFilterOpen = !gridFilterOpen">
@@ -459,7 +506,7 @@ const termStyle = computed(() => ({
         </UiButton>
         <UiButton class="md__action" variant="primary" :loading="syncing" loading-text="Syncing…" @click="sync('*')">Sync all</UiButton>
         <!-- Physical only shows covers too: same Cards/List choice as a system page -->
-        <span v-if="listMode === 'physical'" class="md__layout">
+        <span v-if="listMode === 'physical' || listMode === 'favourites'" class="md__layout">
           <UiIconButton variant="ghost" :active="layout === 'cards'" title="Cards" @click="setLayout('cards')">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
           </UiIconButton>
@@ -468,7 +515,9 @@ const termStyle = computed(() => ({
           </UiIconButton>
         </span>
       </div>
-      <div class="md__body">
+      <!-- stage: the non-scrolling frame the peek drawer pins to, as on a system page -->
+      <div class="md__stage">
+      <div class="md__body" @click="peek = null">
         <p v-if="systems.length" class="md__stats">{{ stats.join(' · ') }}</p>
         <span v-if="!missingOpen && gridFilters" class="md__pills md__pills--grid">
           <button v-if="favSystemsOnly" class="md__pill" @click="favSystemsOnly = false">Favourites ✕</button>
@@ -476,16 +525,16 @@ const termStyle = computed(() => ({
           <button class="md__pill-clear" @click="favSystemsOnly = ownedOnly = false">Clear all</button>
         </span>
         <template v-if="missingOpen">
-          <p v-if="missingLoading" class="md__state"><UiSpinner /> {{ listMode === 'missing' ? 'Checking covers…' : listMode === 'hardware' ? 'Loading hardware…' : 'Checking shelves…' }}</p>
-          <p v-else-if="missing && !missing.length" class="md__state">{{ listMode === 'missing' ? 'Every game has a cover.' : listMode === 'hardware' ? 'No hardware recorded.' : 'Every physical game has a digital copy.' }}</p>
+          <UiState v-if="missingLoading" loading>Loading…</UiState>
+          <UiState v-else-if="missing && !missing.length">{{ listMode === 'missing' ? 'Every game has a cover.' : listMode === 'hardware' ? 'No hardware recorded.' : listMode === 'favourites' ? 'No favourite games yet.' : 'Every physical game has a digital copy.' }}</UiState>
           <section v-for="[sys, list] in missingBySystem" :key="sys" class="md__missing">
             <button class="md__section md__fold" :aria-expanded="!isFolded(sys, list.length)" @click="toggleFold(sys, list.length)">
               <svg class="md__fold-chev" :class="{ 'is-open': !isFolded(sys, list.length) }" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
               <img v-if="systemIcon(sys) || ICONS[sys]" :src="systemIcon(sys) || ICONS[sys]" class="md__missing-ic" alt="" />
               {{ !sys ? 'General purpose' : SYSTEMS[sys] ? systemName(sys) : nodeName(sys) }} <span>{{ list.length }}</span>
             </button>
-            <div v-if="!isFolded(sys, list.length) && listMode === 'physical' && layout === 'cards'" class="md__cards md__cards--mini">
-              <div v-for="m in list" :key="m.key" class="md__card" role="button" tabindex="0" @click="go(m.system, m.key)" @keydown.enter="go(m.system, m.key)">
+            <div v-if="!isFolded(sys, list.length) && (listMode === 'physical' || listMode === 'favourites') && layout === 'cards'" class="md__cards md__cards--mini">
+              <div v-for="m in list" :key="m.key" class="md__card" role="button" tabindex="0" @click.stop="openPeek(m.system, m.key)" @keydown.enter="openPeek(m.system, m.key)">
                 <span class="md__cover">
                   <img :src="catalogueApi.coverUrl(m.system, m.key)" alt="" loading="lazy" />
                 </span>
@@ -495,17 +544,17 @@ const termStyle = computed(() => ({
               </div>
             </div>
             <ul v-else-if="!isFolded(sys, list.length)" class="md__list">
-              <li v-for="m in list" :key="m.system + m.key" class="md__row" @click="listMode === 'hardware' ? (SYSTEMS[m.system] && go(m.system)) : go(m.system, m.key)">
+              <li v-for="m in list" :key="m.system + m.key" class="md__row" @click.stop="listMode === 'hardware' ? (SYSTEMS[m.system] && go(m.system)) : openPeek(m.system, m.key)">
                 <span class="md__title">{{ m.title }}</span>
                 <span v-if="m.info" class="md__variants">{{ m.info }}</span>
               </li>
             </ul>
           </section>
         </template>
-        <p v-if="apiError" class="md__state is-bad">{{ apiError }}</p>
-        <p v-else-if="loading && !systems.length" class="md__state"><UiSpinner /> Loading catalogue…</p>
-        <p v-else-if="!systems.length" class="md__state">No games yet. Sync all to build the catalogue.</p>
-        <p v-if="!missingOpen && systems.length && !sortedSystems.length && !gameHits.length && !searching" class="md__state">Nothing matches "{{ systemFilter }}".</p>
+        <UiState v-if="apiError" tone="bad">{{ apiError }}</UiState>
+        <UiState v-else-if="loading && !systems.length" loading>Loading…</UiState>
+        <UiState v-else-if="!systems.length">No games yet. Sync all to build the catalogue.</UiState>
+        <UiState v-if="!missingOpen && systems.length && !sortedSystems.length && !gameHits.length && !searching">No results for "{{ systemFilter.trim() }}".</UiState>
         <template v-if="!missingOpen">
          <template v-for="grp in brandGroups" :key="grp.brand">
           <h3 class="md__section md__brand">{{ grp.brand }} <span>{{ grp.systems.length }}</span></h3>
@@ -531,8 +580,11 @@ const termStyle = computed(() => ({
           </div>
           </div>
          </template>
-         <template v-if="systemFilter.trim()">
-          <h3 class="md__section md__brand">Games <span>{{ gameHits.length }}</span><UiSpinner v-if="searching" :size="12" /></h3>
+         <!-- Games block only when it has something to say: when neither a console nor a
+              game matches, the single "Nothing matches" above says it once -->
+         <template v-if="systemFilter.trim() && (searching || gameHits.length || sortedSystems.length)">
+          <h3 class="md__section md__brand">Games <span v-if="!searching">{{ gameHits.length }}</span></h3>
+          <UiState v-if="searching" loading>Searching…</UiState>
           <section v-for="[sys, list] in hitsBySystem" :key="sys" class="md__missing">
             <button class="md__section md__fold" :aria-expanded="!isFolded(sys, list.length)" @click="toggleFold(sys, list.length)">
               <svg class="md__fold-chev" :class="{ 'is-open': !isFolded(sys, list.length) }" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -540,7 +592,7 @@ const termStyle = computed(() => ({
               {{ systemName(sys) }} <span>{{ list.length }}</span>
             </button>
             <div v-if="!isFolded(sys, list.length)" class="md__cards md__cards--mini">
-              <div v-for="h in list" :key="h.key" class="md__card" role="button" tabindex="0" @click="go(h.system, h.key)" @keydown.enter="go(h.system, h.key)">
+              <div v-for="h in list" :key="h.key" class="md__card" role="button" tabindex="0" @click.stop="openPeek(h.system, h.key)" @keydown.enter="openPeek(h.system, h.key)">
                 <span class="md__cover">
                   <img :src="catalogueApi.coverUrl(h.system, h.key)" alt="" loading="lazy" />
                 </span>
@@ -551,9 +603,14 @@ const termStyle = computed(() => ({
               </div>
             </div>
           </section>
-          <p v-if="!searching && !gameHits.length" class="md__state">No games match "{{ systemFilter }}".</p>
+          <UiState v-if="!searching && !gameHits.length">No results for "{{ systemFilter.trim() }}".</UiState>
          </template>
         </template>
+      </div>
+      <GameDrawer v-if="peek && peekGame" :system="peek.system" :game="peekGame" :nodes="nodes" :system-icon="systemIcon(peek.system)"
+                  :cover-version="coverVersion[peekGame.key]"
+                  @close="peek = null" @favourite="togglePeekFavourite(peekGame, $event)"
+                  @cover-changed="coverChanged(peekGame)" @relabeled="reloadPeek" @changed="reloadPeek" />
       </div>
     </template>
 
@@ -591,6 +648,10 @@ const termStyle = computed(() => ({
       <!-- view toolbar: search takes the room left; filter, grouping and view are dropdowns -->
       <div class="md__toolbar">
         <input v-model="filter" class="md__filter md__search" type="search" placeholder="Search games" />
+        <!-- Favourites earn a button of their own; the same toggle stays in Filter too -->
+        <UiIconButton variant="ghost" :active="favOnly" :title="favOnly ? 'Show every game' : 'Only your favourite games'" @click="favOnly = !favOnly">
+          <svg width="16" height="16" viewBox="0 0 24 24" :fill="favOnly ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
+        </UiIconButton>
         <span class="md__filter-menu">
           <UiButton :class="{ 'is-on': activeFilters }" @click.stop="filterOpen = !filterOpen">
             Filter<template v-if="activeFilters"> · {{ activeFilters }}</template> ▾
@@ -645,9 +706,12 @@ const termStyle = computed(() => ({
       <!-- stage = the non-scrolling frame: the drawer pins to it, the body scrolls inside -->
       <div class="md__stage">
       <div class="md__body md__body--list" @click="gameKey && go(system)">
-        <p v-if="actionError" class="md__state is-bad">{{ actionError }}</p>
-        <p v-if="apiError" class="md__state is-bad">{{ apiError }}</p>
-        <p v-else-if="loading && !view" class="md__state"><UiSpinner /> Loading…</p>
+        <UiState v-if="actionError" tone="bad">{{ actionError }}</UiState>
+        <UiState v-if="apiError" tone="bad">{{ apiError }}</UiState>
+        <UiState v-else-if="loading && !view" loading>Loading…</UiState>
+        <!-- same words as the consoles page: a query says what found nothing, filters alone say so -->
+        <UiState v-else-if="view && !games.length && filter.trim()">No results for "{{ filter.trim() }}".</UiState>
+        <UiState v-else-if="view && !games.length && activeFilters">No results for these filters.</UiState>
         <template v-for="sec in sections" :key="sec.label">
         <h3 v-if="sec.label" class="md__section">{{ sec.label }} <span>{{ sec.games.length }}</span></h3>
         <div v-if="layout === 'cards' && kindTab !== 'hardware'" class="md__cards">
@@ -798,9 +862,7 @@ const termStyle = computed(() => ({
 .md__menu-sep { margin: 4px 0 0; padding: 4px 6px 0; border-top: 1px solid var(--line); font-size: 11px; font-weight: 600; color: var(--text-faint); }
 .md__menu-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font: inherit; font-size: 13px; color: var(--text); text-align: left; background: none; border: 0; border-radius: var(--r-sm); cursor: pointer; white-space: nowrap; }
 .md__menu-item img { width: 20px; height: 20px; object-fit: contain; }
-.md__state { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); margin-bottom: var(--sp-4); }
-.md__body--list .md__state { padding: var(--sp-4) var(--sp-5); margin: 0; }
-.md__state.is-bad { color: var(--bad); }
+.md__body--list .ui-state { padding: var(--sp-4) var(--sp-5); margin: 0; }
 
 .md__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--sp-4); }
 .md__tile-marks { position: absolute; top: 8px; right: 8px; display: flex; align-items: center; gap: 4px; }
