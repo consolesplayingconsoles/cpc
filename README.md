@@ -123,6 +123,13 @@ Built something on top of this? Share it on Instagram [@consolesplayingconsoles]
 
 Do what you want with this, and pass it on the same way. Credit the project and share what you find.
 
+## See it in action
+
+See what Pluto has helped me build across the network, with gameplay on real hardware:
+
+- 📸 **Instagram:** [@consolesplayingconsoles](https://www.instagram.com/consolesplayingconsoles/)
+- 🔗 **Everything else:** [beacons.ai/consolesplayingconsoles](https://beacons.ai/consolesplayingconsoles)
+
 ## License
 
 © 2026 consolesplayingconsoles. Free software under the **GNU General Public License v3.0 or later** ([GPL-3.0-or-later](LICENSE)): use it, study it, share it, modify it. Derivative works stay under the same licence, so what gets built on this stays open too. The project is copyleft partly because it leans on GPL-3.0 tooling such as [GDIBuilder](https://github.com/Sappharad/GDIbuilder).
