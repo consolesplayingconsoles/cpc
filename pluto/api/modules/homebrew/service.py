@@ -50,6 +50,20 @@ _procs = {}                    # item id -> Popen of the running action
 _procs_lock = threading.Lock()
 
 
+def is_running(item_id):
+    """Whether an action is still going. A process that has exited counts as finished even
+    if nobody cleaned up after it: without this an interrupted run leaves the item stuck
+    on "building" and refusing to start again."""
+    with _procs_lock:
+        proc = _procs.get(item_id)
+        if proc is None:
+            return False
+        if proc.poll() is None:
+            return True
+        _procs.pop(item_id, None)
+        return False
+
+
 def _nodash(text):
     """No em or en dashes in the UI: a spaced dash used as a pause becomes a colon, any
     other one a comma (titles and descriptions come from READMEs and GitHub, not us)."""
@@ -224,6 +238,11 @@ def _item(repo_root, node, kind, group, name, folder):
             params.append(p)
     title, description = _readme(folder)
     item_id = "/".join(x for x in (node, kind, group, name) if x)
+    game = _catalogue_game(repo_root, os.path.dirname(folder) if group else folder)
+    # A homebrew ROM's system is its own -- its homebrew node (nodes/local/<node>/homebrew),
+    # e.g. megadrive -- with an optional CATALOGUE override. It does NOT need to match a game
+    # in the retail catalogue: a tool or an original game is sendable on its own terms.
+    system = (game or {}).get("system") or node
     return {
         "id": item_id, "node": node, "nodeName": _node_name(repo_root, node),
         "kind": kind, "group": group, "name": name,
@@ -232,10 +251,11 @@ def _item(repo_root, node, kind, group, name, folder):
         "actions": [a for a in ACTIONS if os.path.isfile(os.path.join(folder, a + ".sh"))],
         "params": params,
         "paramsPaths": env_paths,
-        "running": item_id in _procs,
+        "running": is_running(item_id),
         "release": _release(folder),
         "output": last_output(item_id),
-        "game": _catalogue_game(repo_root, os.path.dirname(folder) if group else folder),
+        "system": system,
+        "game": game,
     }
 
 
@@ -326,9 +346,9 @@ def start(repo_root, item, action):
     env = os.environ.copy()
     env["PATH"] = "/usr/local/bin:/opt/homebrew/bin:" + env.get("PATH", "")   # docker/colima when launched outside a login shell
     env["PYTHONUNBUFFERED"] = "1"
+    if is_running(item["id"]):
+        raise RuntimeError("%s is already running" % item["id"])
     with _procs_lock:
-        if item["id"] in _procs:
-            raise RuntimeError("%s is already running" % item["id"])
         proc = subprocess.Popen(["bash", os.path.join(folder, action + ".sh")], cwd=folder, env=env,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, errors="replace", start_new_session=True)
@@ -376,13 +396,20 @@ def lab_filename(item, output_path):
     """The name a build gets in the Lab library, in the catalogue's naming (names.py):
     "<game title> [<mod> v<version>]<ext>". The bracket makes it a variant of the game, so it
     groups with the game but never replaces the original file. Vanilla is [Vanilla Build]:
-    a rebuilt ROM, as opposed to the regular retail one."""
-    game = item.get("game") or {}
+    a rebuilt ROM, as opposed to the regular retail one. A standalone homebrew (a tool or an
+    original game, no CATALOGUE) has no base game to be a variant of, so it is just its title."""
+    ext = os.path.splitext(output_path)[1].lower()
+    game = item.get("game")
+    if not game:
+        return "%s%s" % (_UNSAFE.sub(" ", item["title"]).strip(), ext)
     title = _UNSAFE.sub(" ", game.get("title") or item["name"]).strip()
     mod = "Vanilla Build" if item["name"] == "vanilla" else item["title"]
     version = (item.get("release") or {}).get("version")
-    tag = _UNSAFE.sub(" ", "%s v%s" % (mod, version) if version else mod).replace("[", "(").replace("]", ")").strip()
-    return "%s [%s]%s" % (title, tag, os.path.splitext(output_path)[1].lower())
+    # "by CPC" is what marks the file as ours, so a send replaces it on a node instead of
+    # skipping it: our bytes change from build to build under the same catalogue name.
+    tag = _UNSAFE.sub(" ", "%s by CPC v%s" % (mod, version) if version else "%s by CPC" % mod)
+    tag = tag.replace("[", "(").replace("]", ")").strip()
+    return "%s [%s]%s" % (title, tag, ext)
 
 
 def finish(item_id):

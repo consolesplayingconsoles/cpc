@@ -43,6 +43,7 @@ from modules.google import scanner as google_scanner
 from modules.vmu import vmufs
 from modules.catalogue import service as catalogue
 from modules.catalogue import send as catalogue_send
+from modules.catalogue import names as catalogue_names
 from modules.homebrew import service as homebrew
 from modules.fxos import listen as fxos_listen
 
@@ -4088,9 +4089,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         items = homebrew.discover(self._repo_root())
         by_system = {}
         for it in items:
-            game = it.get("game")
-            if game and game.get("listed"):
-                system = game["system"]
+            # Every homebrew ROM is sendable to nodes that host ITS system (a tool/game/mod
+            # alike); a catalogue match is not required. A CATALOGUE only enriches Media.
+            system = it.get("system")
+            if system:
                 if system not in by_system:
                     by_system[system] = self._homebrew_targets(system)
                 it["sendTargets"] = by_system[system]
@@ -4142,10 +4144,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         out = homebrew.last_output(item["id"])
         if not out:
             self._send(400, {"error": "nothing built yet: run Build first"}); return
-        game = item.get("game")
-        if not game:
-            self._send(400, {"error": "no CATALOGUE file, so the system (and its emulator) is unknown"}); return
-        self._send(*self._launch_desktop(game["system"], out["path"]))
+        system = item.get("system")
+        if not system:
+            self._send(400, {"error": "no system for this item, so its emulator is unknown"}); return
+        self._send(*self._launch_desktop(system, out["path"]))
 
     def _homebrew_script(self, item, action, emit):
         """Run build.sh / deploy.sh, streaming output. ##STEP: -> step, ##OUTPUT: -> recorded.
@@ -4176,7 +4178,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """Copy the item's last build output into the Lab library under its catalogue name (a
         variant of the game) and rescan Lab. Returns the Lab file name."""
         import shutil
-        system = item["game"]["system"]
+        system = item.get("system")
+        if not system:
+            raise catalogue_send.NotAvailable("this item has no system to publish under")
         out = homebrew.last_output(item["id"])
         roms = os.path.expanduser((self.__class__.config.get("ROMS_PATH") or "").strip())
         if not roms:
@@ -4205,6 +4209,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 os.remove(dest + ".part")
                 raise catalogue_send.NotAvailable("copy size mismatch publishing %s to Lab" % fname)
             os.replace(dest + ".part", dest)
+        # Scan the Lab library so this ROM enters the catalogue (mods ride their base game; a
+        # stamped homebrew scans as its own game by its unique header serial). This is what lets
+        # Send sync it to a node and drop you in its drawer, the same as a mod.
         emit("step", "sync")
         if not self._catalogue_lock.acquire(timeout=120):
             raise catalogue_send.NotAvailable("the catalogue is busy (a sync or send is running)")
@@ -4215,6 +4222,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._catalogue_saves, lambda line: emit("line", line),
                 datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
                 lab_roms=roms, sd_nodes=self._catalogue_sd_nodes(), only=["lab"])
+            # a homebrew tool is filed as a tool, so Media lists it in the tools tab, not as a game
+            if item["kind"] == "tools":
+                catalogue.set_kind(self._catalogue_root(), system,
+                                   catalogue_names.key(item["name"].replace("-", " ")), "tool")
         finally:
             self._catalogue_lock.release()
         return rel
@@ -4261,12 +4272,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif not self._homebrew_script(item, "build", emit):
                 emit("done", "failed:build"); return
             game = item.get("game")
-            listed = bool(game and game.get("listed"))
+            system = item.get("system")
             name = None
-            if listed and homebrew.last_output(item["id"]):
-                name = self._homebrew_publish(item, emit)
-            elif not listed:
-                emit("line", "not in the catalogue (no CATALOGUE file): built only")
+            if system and homebrew.last_output(item["id"]):
+                name = self._homebrew_publish(item, emit)   # any homebrew ROM publishes to the Lab library
+            elif not system:
+                emit("line", "no system for this item: built only")
             if node:
                 emit("step", "send")
                 if not name:
@@ -4274,12 +4285,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if node == "lab":
                     emit("line", "in the Lab library: %s" % name)
                 else:
-                    result = self._catalogue_send_run(game["system"], {"node": node, "path": name},
+                    result = self._catalogue_send_run(system, {"node": node, "path": name},
                                                       lambda line: emit("line", line))
                     if result.get("status") == "command":
                         emit("line", "run this in Terminal to finish: " + result["command"])
-                if listed:
-                    emit("media", "/media/%s/%s" % (game["system"], game["key"]))
+                # drop into this item's drawer -- its own catalogue game (a mod rides its base
+                # game; a stamped homebrew scans as its own key = names.key(its title))
+                key = game["key"] if (game and game.get("listed")) else catalogue_names.key(item["name"].replace("-", " "))
+                emit("media", "/media/%s/%s" % (system, key))
             emit("done", "ok")
         except catalogue_send.NotAvailable as exc:
             fail(str(exc))

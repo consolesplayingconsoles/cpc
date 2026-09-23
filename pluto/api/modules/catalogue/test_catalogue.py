@@ -1042,6 +1042,43 @@ def test_systems_count_tools_translations_and_mods():
     assert (s["games"], s["tools"], s["translations"], s["mods"]) == (2, 1, 1, 1), s
 
 
+def test_send_replaces_our_own_translation_but_not_a_third_party_one():
+    """A cpc translation keeps its catalogue name from build to build while its bytes change, so
+    "the target already has it" must NOT skip it. Someone else's release is immutable: still skipped."""
+    root = tempfile.mkdtemp()
+    doc = store.empty("dreamcast")
+    store.merge(doc, "lab", [{"path": "Boku Doraemon (Japan) [T-Ca by cpc v1.0].gdi", "header": None},
+                             {"path": "Kunoichi (Japan) [T-En by Someone v1.0].gdi", "header": None}], NOW)
+    store.merge(doc, "sd", [{"path": "Boku Doraemon (Japan) [T-Ca by cpc v1.0].gdi", "header": None},
+                            {"path": "Kunoichi (Japan) [T-En by Someone v1.0].gdi", "header": None}], NOW)
+    os.makedirs(os.path.join(root, "dreamcast"))
+    with open(os.path.join(root, "dreamcast", "variants.json"), "w") as fh:
+        json.dump({"boku-doraemon/T-Ca": {"author": "cpc"},
+                   "kunoichi/T-En": {"author": "Someone"}}, fh)
+    store.save(root, doc)
+
+    p = send.plan(root, "dreamcast", "sd", ["lab"], all_missing=True)
+    assert [c["name"] for c in p["copies"]] == ["Boku Doraemon (Japan) [T-Ca by cpc v1.0]"], p["copies"]
+    assert p["copies"][0]["replace"] is True
+    assert [s["game"] for s in p["skipped"]] == ["Kunoichi"], p["skipped"]
+
+
+def test_sd_strategy_overwrites_a_copy_marked_for_replacement():
+    """The card already holds the file; a replace must write over it instead of reporting it there."""
+    p = {"copies": [{"game": "a", "name": "Boku Doraemon (Japan) [T-Ca by cpc v1.0]", "replace": True,
+                     "source": {"node": "lab", "path": "Boku Doraemon (Japan) [T-Ca by cpc v1.0].bin"}},
+                    {"game": "b", "name": "Ecco (Europe)", "source": {"node": "lab", "path": "Ecco (Europe).bin"}}],
+         "skipped": []}
+    put = []
+    card = {"mount": lambda: None, "exists": lambda n: True,        # everything is already there
+            "put": lambda src, name: put.append(name), "finish": lambda: []}
+    got = send.STRATEGIES["sd"](p, {"target": "gdemu", "card": card, "locate": lambda s: "/roms/" + s["path"],
+                                    "system": "dreamcast"})
+    assert put == ["Boku Doraemon (Japan) [T-Ca by cpc v1.0].bin"], put
+    assert got["count"] == 1 and [s["game"] for s in p["skipped"]] == ["Ecco (Europe)"]
+    assert any("replacing" in l for l in got["lines"]), got["lines"]
+
+
 def test_send_plan_skips_what_the_target_has_and_prefers_lab_sources():
     root = tempfile.mkdtemp()
     doc = store.empty("ps2")
