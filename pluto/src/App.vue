@@ -13,8 +13,10 @@ import MediaTab from './components/media/MediaTab.vue'
 import HomebrewTab from './components/homebrew/HomebrewTab.vue'
 import AchievementToast from './components/AchievementToast.vue'
 import MiniChat from './components/MiniChat.vue'
+import TerminalDrawer from './components/TerminalDrawer.vue'
 import UiIconButton from './components/ui/UiIconButton.vue'
 import { useAchievement } from './composables/useAchievement'
+import { useRuns } from './composables/useRuns'
 import plutoLabMark from './assets/avatars/pluto-lab.svg'
 import plutoC2Mark from './assets/avatars/pluto-c2.svg'
 
@@ -81,6 +83,7 @@ function closeChat() { router.push(lastTabPath.value) }
 const { nodes, loading, error } = useNodes()
 const { connections } = useConnections()
 const { messages } = useMessages()
+const { open: terminalOpen } = useRuns()
 const { show: showToast, desc: toastDesc, points: toastPoints, action: toastAction, dismiss: dismissToast } = useAchievement()
 
 // ── Global second header: a per-tab channel hashtag + your identity. Both headers
@@ -289,8 +292,12 @@ const displayNodes = computed(() => {
 
         <HomebrewTab v-show="activeTab === 'homebrew'" :active="activeTab === 'homebrew'" />
 
-        <!-- Mini chat dock on every tab; hidden while the full chat overlay is open. -->
-        <MiniChat v-if="!chatOpen" :nodes="nodes" :unread="unreadCount" @expand="goToTab('chat')" @seen="markChatSeen" />
+        <!-- Terminal drawer on every tab: all runs (deploys, builds, sends, syncs) as tabs. -->
+        <TerminalDrawer />
+
+        <!-- Mini chat dock on every tab; hidden while the full chat overlay is open, and while the
+             terminal drawer holds the left side. -->
+        <MiniChat v-if="!chatOpen && !terminalOpen" :nodes="nodes" :unread="unreadCount" @expand="goToTab('chat')" @seen="markChatSeen" />
 
         <!-- Full chat: an overlay over the current tab (/command), not a tab. -->
         <div v-if="chatOpen" class="chat-overlay">

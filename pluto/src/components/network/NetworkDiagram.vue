@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { NodeMap } from '../../composables/useNodes'
 import type { Connection } from '../../composables/useConnections'
@@ -8,7 +8,8 @@ import { API_BASE } from '../../composables/useNodes'
 import { BUBBLE_R } from '../../composables/bubbleConstants'
 import NodeBubble from './NodeBubble.vue'
 import NodeDrawer from './NodeDrawer.vue'
-import Terminal, { type TerminalOutput } from '../Terminal.vue'
+import type { TerminalOutput } from '../Terminal.vue'
+import { useRuns } from '../../composables/useRuns'
 
 import { ICONS } from '../../composables/useIcons'
 import layout from '../../../config/layout.json'
@@ -172,47 +173,33 @@ async function openConfig() {
   await fetch(`${API_BASE}/config/open`, { method: 'POST' })
 }
 
-// The deploy terminal floats over the map (closable), not in the drawer — so the
-// drawer stays lean and the stream survives closing/switching drawers. It tracks
-// the node you deployed, independent of which drawer (if any) is open.
-const deployTermId = ref<string | null>(null)
-function startDeploy(id: string) { deployTermId.value = id; deploy(id) }
+// Deploys and native actions stream into the global terminal drawer, so the stream survives
+// closing/switching drawers and tabs. A deploy's tab mirrors the engine's per-node output and
+// is reused when the same node deploys again.
+const { openRun } = useRuns()
+function startDeploy(id: string) {
+  const lastMs = lastDurations.value[id] ?? null
+  deploy(id)
+  openRun('Deploy ' + (props.nodes[id]?.name ?? id),
+    computed(() => deployOutput.value[id] ?? { raw: '', ok: false, step: 'cleared', startedAt: 0 }),
+    { key: 'deploy:' + id, lastMs, onClose: () => clearOutput(id) })
+}
 // Sync saves -> Dropbox. Batocera runs the mirror; the result (and any "not wired
 // yet" for other nodes) surfaces in the chat feed, so this is fire-and-forget.
 function startSync(id: string) {
   fetch(`${API_BASE}/sync/${id}`, { method: 'POST' }).catch(() => { /* chat reflects it */ })
 }
-function closeDeployTerm() {
-  if (deployTermId.value) clearOutput(deployTermId.value)
-  deployTermId.value = null
+// A native action (unmount a card, quit a game, restart ES) gets a terminal tab like a deploy:
+// pressing a button and seeing nothing is no way to tell whether it worked. Updates for the
+// same run (same startedAt) land in the same tab.
+let nativeRun: { startedAt: number; out: Ref<TerminalOutput> } | null = null
+function showNativeRun(p: { action: string; title: string; lines: string[]; ok: boolean | null; startedAt: number }) {
+  const prev = nativeRun?.startedAt === p.startedAt ? nativeRun.out.value.raw : ''
+  const output = { raw: prev + p.lines.join('\n') + '\n', ok: p.ok,
+                   step: p.ok === null ? p.action : (p.ok ? 'done' : 'failed'), startedAt: p.startedAt }
+  if (nativeRun?.startedAt === p.startedAt) nativeRun.out.value = output
+  else nativeRun = { startedAt: p.startedAt, out: openRun(p.title, output) }
 }
-// A native action (unmount a card, quit a game, restart ES) gets the same floating terminal
-// the deploy uses: pressing a button and seeing nothing is no way to tell whether it worked.
-const nativeTerm = ref<{ title: string; output: TerminalOutput } | null>(null)
-function showNativeRun(p: { action: string; lines: string[]; ok: boolean | null; startedAt: number }) {
-  const prev = nativeTerm.value && nativeTerm.value.output.startedAt === p.startedAt ? nativeTerm.value.output.raw : ''
-  nativeTerm.value = { title: p.action, output: { raw: prev + p.lines.join('\n') + '\n', ok: p.ok,
-                                                  step: p.ok === null ? p.action : (p.ok ? 'done' : 'failed'),
-                                                  startedAt: p.startedAt } }
-}
-
-const floatingDeploy = computed(() => {
-  const id = deployTermId.value
-  if (!id) return null
-  const output = deployOutput.value[id]
-  if (!output) return null
-  return { id, output, lastMs: lastDurations.value[id] ?? null }
-})
-// Right-aligned + wide, so it doesn't block the centre of the map and long log
-// lines don't wrap. Offsets to clear the open drawer (300px) or the zoom column.
-const floatTermStyle = computed(() => ({
-  position: 'absolute',
-  right: activeMenu.value ? '316px' : '56px',
-  bottom: '16px',
-  width: 'min(540px, 46%)',
-  maxHeight: '46%',
-  zIndex: '5',
-}))
 
 function closeMenu() {
   if (panMoved) { panMoved = false; return }   // a pan-drag, not a real click
@@ -364,26 +351,6 @@ watch(hoveredNode, () => nextTick(updatePeekPos))
         @open-tab="emit('open-tab', 'robutek')"
       />
     </Transition>
-
-    <!-- native actions (unmount, quit, restart ES): same floating terminal as deploy -->
-    <Terminal
-      v-if="nativeTerm"
-      :title="nativeTerm.title"
-      :output="nativeTerm.output"
-      :card-style="floatTermStyle"
-      @close="nativeTerm = null"
-    />
-
-    <!-- deploy terminal: floats over the map (closable), out of the drawer -->
-    <Terminal
-      v-if="floatingDeploy"
-      title="deploy"
-      :output="floatingDeploy.output"
-      :last-ms="floatingDeploy.lastMs"
-      :card-style="floatTermStyle"
-      @close="closeDeployTerm"
-    />
-
 
     <!-- zoom controls (fit-to-view by default; zoom in for detail, then pan) -->
     <div class="zoom-controls" @click.stop>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, shallowRef, computed, watch, onMounted, onUnmounted, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { NodeMap } from '../../composables/useNodes'
 import { ICONS } from '../../composables/useIcons'
@@ -11,7 +11,8 @@ import UiState from '../ui/UiState.vue'
 import UiIconButton from '../ui/UiIconButton.vue'
 import UiSelect from '../ui/UiSelect.vue'
 import UiCopyButton from '../ui/UiCopyButton.vue'
-import Terminal, { type TerminalOutput } from '../Terminal.vue'
+import type { TerminalOutput } from '../Terminal.vue'
+import { useRuns } from '../../composables/useRuns'
 import GameDrawer from './GameDrawer.vue'
 import AdminCommand from './AdminCommand.vue'
 import UiSubTabs from '../ui/UiSubTabs.vue'
@@ -415,10 +416,11 @@ function onKey(e: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', onKey))
 onUnmounted(() => window.removeEventListener('keydown', onKey))
 
-// ── Sync: same SSE line/done contract as deploy, shown in the same console ──
-const syncOut = ref<TerminalOutput | null>(null)
-const termTitle = ref('sync')                            // the console serves sync and send
-const syncing = computed(() => syncOut.value?.ok === null)
+// ── Sync: same SSE line/done contract as deploy, shown in the terminal drawer ──
+// Each run opens its own tab in the terminal drawer; `syncing` follows the latest one.
+const { openRun } = useRuns()
+const syncOut = shallowRef<{ out: Ref<TerminalOutput> } | null>(null)
+const syncing = computed(() => syncOut.value?.out.value.ok === null)
 const { unlock } = useAchievement()
 // Nodes whose drive only root can read (the PS2 HDD) don't sync from here: the API streams
 // "<node>: needs admin, run in Terminal: <command>" (service.sync admin_nodes), shown as a dialog.
@@ -426,62 +428,61 @@ const ADMIN_LINE = /^\S+: needs admin, run in Terminal: (.+)$/
 const adminCommands = ref<string[]>([])
 function sync(target: string) {
   const startedAt = Date.now()
-  termTitle.value = 'sync'
   adminCommands.value = []
-  syncOut.value = { raw: '', ok: null, step: target === '*' ? 'all systems' : systemName(target), startedAt }
+  const out = openRun(target === '*' ? 'Sync all systems' : 'Sync ' + systemName(target), { raw: '', ok: null, step: 'running', startedAt })
+  syncOut.value = { out }
   const es = new EventSource(catalogueApi.syncUrl(target))
   es.addEventListener('line', (e: MessageEvent) => {
-    if (syncOut.value) syncOut.value = { ...syncOut.value, raw: syncOut.value.raw + e.data + '\n' }
+    out.value = { ...out.value, raw: out.value.raw + e.data + '\n' }
     const admin = ADMIN_LINE.exec(e.data)
     if (admin) adminCommands.value = [...adminCommands.value, admin[1]]
   })
   es.addEventListener('done', (e: MessageEvent) => {
     es.close()
     const ok = e.data === 'ok'
-    if (syncOut.value) syncOut.value = { ...syncOut.value, ok, step: ok ? 'done' : 'failed' }
+    out.value = { ...out.value, ok, step: ok ? 'done' : 'failed' }
     if (ok) setTimeout(() => unlock(`Successfully Synced ${target === '*' ? 'All Systems' : systemName(target)}`, `${Math.round((Date.now() - startedAt) / 1000)}s`), 600)
     load()
   })
   es.onerror = () => {
     es.close()
-    if (syncOut.value?.ok === null) syncOut.value = { ...syncOut.value, raw: syncOut.value.raw + '\n[connection lost]', ok: false, step: 'failed' }
+    if (out.value.ok === null) out.value = { ...out.value, raw: out.value.raw + '\n[connection lost]', ok: false, step: 'failed' }
   }
 }
 // Saved games: its own button next to this console's Sync, because backing up saves is the
 // step you want BEFORE writing to a card -- for THIS console, not every card you own.
-// Streams into the same console as sync.
+// Streams into the terminal drawer like sync.
 function syncSaves(target: string) {
-  termTitle.value = 'saves'
   adminCommands.value = []
-  syncOut.value = { raw: '', ok: null, step: systemName(target) + ' saves', startedAt: Date.now() }
+  const out = openRun('Sync ' + systemName(target) + ' saves', { raw: '', ok: null, step: 'starting', startedAt: Date.now() })
+  syncOut.value = { out }
   const es = new EventSource(catalogueApi.savesUrl(target))
   es.addEventListener('line', (e: MessageEvent) => {
-    if (syncOut.value) syncOut.value = { ...syncOut.value, raw: syncOut.value.raw + e.data + '\n' }
+    out.value = { ...out.value, raw: out.value.raw + e.data + '\n' }
   })
   es.addEventListener('step', (e: MessageEvent) => {
-    if (syncOut.value) syncOut.value = { ...syncOut.value, step: e.data }
+    out.value = { ...out.value, step: e.data }
   })
   es.addEventListener('done', (e: MessageEvent) => {
     es.close()
     const ok = e.data === 'ok'
-    if (syncOut.value) syncOut.value = { ...syncOut.value, ok, step: ok ? 'done' : 'failed' }
+    out.value = { ...out.value, ok, step: ok ? 'done' : 'failed' }
   })
   es.onerror = () => {
     es.close()
-    if (syncOut.value?.ok === null) syncOut.value = { ...syncOut.value, raw: syncOut.value.raw + '\n[connection lost]', ok: false, step: 'failed' }
+    if (out.value.ok === null) out.value = { ...out.value, raw: out.value.raw + '\n[connection lost]', ok: false, step: 'failed' }
   }
 }
-// Floats bottom-right, left of the game drawer when one is open (as the deploy console does
-// beside the Network drawer), so it never covers the drawer.
-// Send all: streams into the same console as sync. A target that needs admin (PS2 drive)
+// Send all: streams into the terminal drawer like sync. A target that needs admin (PS2 drive)
 // answers with a `command` event instead of copying: the popup shows it.
-function sendAll(node: string, name: string, path?: string, from?: string) {
+// `game` names a single copy (from a game drawer) so its tab reads "Copy <game> to <node>".
+function sendAll(node: string, name: string, path?: string, from?: string, game?: string) {
   const startedAt = Date.now()
-  termTitle.value = 'send'
-  syncOut.value = { raw: '', ok: null, step: 'send to ' + name, startedAt }
+  const out = openRun(game ? `Copy ${game} to ${name}` : `Send all ${systemName(system.value)} games to ${name}`, { raw: '', ok: null, step: 'running', startedAt })
+  syncOut.value = { out }
   const es = new EventSource(catalogueApi.sendStreamUrl(system.value, node, path, from))
   es.addEventListener('line', (e: MessageEvent) => {
-    if (syncOut.value) syncOut.value = { ...syncOut.value, raw: syncOut.value.raw + e.data + '\n' }
+    out.value = { ...out.value, raw: out.value.raw + e.data + '\n' }
   })
   es.addEventListener('command', (e: MessageEvent) => {
     try { sendCommand.value = JSON.parse(e.data).command } catch { /* malformed: the log shows it */ }
@@ -489,26 +490,15 @@ function sendAll(node: string, name: string, path?: string, from?: string) {
   es.addEventListener('done', (e: MessageEvent) => {
     es.close()
     const ok = e.data === 'ok'
-    if (syncOut.value) syncOut.value = { ...syncOut.value, ok, step: ok ? 'done' : 'failed' }
+    out.value = { ...out.value, ok, step: ok ? 'done' : 'failed' }
     if (ok && !sendCommand.value) setTimeout(() => unlock(`Sent to ${name}`, `${Math.round((Date.now() - startedAt) / 1000)}s`), 600)
     load()
   })
   es.onerror = () => {
     es.close()
-    if (syncOut.value?.ok === null) syncOut.value = { ...syncOut.value, raw: syncOut.value.raw + '\n[connection lost]', ok: false, step: 'failed' }
+    if (out.value.ok === null) out.value = { ...out.value, raw: out.value.raw + '\n[connection lost]', ok: false, step: 'failed' }
   }
 }
-// Floats bottom-right, BESIDE the drawer rather than under it (the deploy console does the same
-// next to the Network drawer). Terminal's own CSS is z-index 2 and the drawer is 4, so without an
-// explicit z-index here the console renders behind the drawer instead of next to it.
-// The console sits beside whichever drawer is open (a console page's, or the consoles page's
-// peek), never under it -- the same as the deploy console next to the Network drawer.
-const drawerOpen = computed(() => !!openGame.value || !!peekGame.value)
-const termStyle = computed(() => ({
-  right: drawerOpen.value ? 'min(432px, calc(100% - 16px))' : '16px', bottom: '16px',
-  width: drawerOpen.value ? 'min(560px, max(240px, calc(100% - 448px)))' : 'min(560px, calc(100% - 32px))', height: '260px',
-  zIndex: '5',
-}))
 </script>
 
 <template>
@@ -660,7 +650,7 @@ const termStyle = computed(() => ({
                   :cover-version="coverVersion[peekGame.key]"
                   @close="peek = null" @favourite="togglePeekFavourite(peekGame, $event)"
                   @cover-changed="coverChanged(peekGame)" @relabeled="reloadPeek" @changed="reloadPeek"
-                  @send="sendAll($event.node, nodeName($event.node), $event.path, $event.from)" />
+                  @send="sendAll($event.node, nodeName($event.node), $event.path, $event.from, peekGame.title)" />
       </div>
     </template>
 
@@ -829,11 +819,10 @@ const termStyle = computed(() => ({
       <GameDrawer v-if="openGame && view" :system="view.system" :game="openGame" :nodes="nodes" :system-icon="systemIcon(system)"
                   :cover-version="coverVersion[openGame.key]"
                   @close="go(system)" @favourite="toggleFavourite(openGame, $event)" @cover-changed="coverChanged(openGame)" @relabeled="relabeled" @changed="load"
-                  @send="sendAll($event.node, nodeName($event.node), $event.path, $event.from)" />
+                  @send="sendAll($event.node, nodeName($event.node), $event.path, $event.from, openGame.title)" />
       </div>
     </template>
 
-    <Terminal v-if="syncOut" :title="termTitle" :output="syncOut" :card-style="termStyle" @close="syncOut = null" />
     <AdminCommand v-if="sendCommand" title="Send the games to the drive from Terminal" :commands="[sendCommand]" @close="sendCommand = ''" />
     <AdminCommand v-if="adminCommands.length && !syncing" title="Sync the PS2 drive from Terminal" :commands="adminCommands" @close="adminCommands = []" />
   </div>

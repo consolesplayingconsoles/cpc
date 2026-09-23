@@ -5,7 +5,8 @@
 // them. No polling: the list loads when the tab is first shown and on Refresh.
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import Terminal, { type TerminalOutput } from '../Terminal.vue'
+import { useRuns } from '../../composables/useRuns'
+import { useRunDurations } from '../../composables/useRunDurations'
 import UiButton from '../ui/UiButton.vue'
 import UiIconButton from '../ui/UiIconButton.vue'
 import RomCard from '../RomCard.vue'
@@ -136,8 +137,14 @@ async function save(): Promise<boolean> {
 }
 
 // ── actions + terminal ────────────────────────────────────────────────────────
-const output = ref<TerminalOutput | null>(null)
-const termTitle = ref('build')
+// How long this item's last successful build or send took, so the terminal can show a
+// "~last" next to the live timer: a disc build is ten minutes of near-silence while the
+// image and its EDC/ECC are written, which looks hung without a reference. Build and send
+// are timed apart, since a send adds the copy to the console.
+const { durations: lastRuns, remember: rememberRun } = useRunDurations('cpc.homebrew.lastMs')
+const runKey = (itemId: string, node?: string | null) => itemId + ':' + (node || 'build')
+
+const { openRun } = useRuns()
 const runningId = ref<string | null>(null)
 let es: EventSource | null = null
 
@@ -149,29 +156,29 @@ async function build(node?: string) {
   if (!it || runningId.value) return
   if (!(await save())) return
   const target = node ? it.sendTargets.find(t => t.id === node) : null
-  termTitle.value = target ? `send ${it.name} to ${target.name}` : `build ${it.name}`
-  output.value = { raw: '', ok: null, step: 'build', startedAt: Date.now() }
+  const output = openRun(target ? `Send ${it.name} to ${target.name}` : `Build ${it.name}`,
+    { raw: '', ok: null, step: 'build', startedAt: Date.now() },
+    { lastMs: lastRuns.value[runKey(it.id, node)] ?? null })
   runningId.value = it.id
   sendingTo.value = node ?? null
   let mediaPath: string | null = null
   es = new EventSource(streamUrl(it.id, node))
   es.addEventListener('media', (e: MessageEvent) => { mediaPath = e.data })
   es.addEventListener('line', (e: MessageEvent) => {
-    if (output.value) output.value = { ...output.value, raw: output.value.raw + e.data + '\n' }
+    output.value = { ...output.value, raw: output.value.raw + e.data + '\n' }
   })
   es.addEventListener('step', (e: MessageEvent) => {
-    if (output.value) output.value = { ...output.value, step: e.data }
+    output.value = { ...output.value, step: e.data }
   })
   es.addEventListener('done', (e: MessageEvent) => {
     es?.close(); es = null
     const ok = e.data === 'ok'
     const stopped = e.data === 'failed:-15'          // SIGTERM from Stop
-    if (output.value) {
-      output.value = {
-        ...output.value, ok, step: ok ? 'done' : stopped ? 'stopped' : 'failed',
-        raw: ok ? output.value.raw : output.value.raw + (stopped ? '\n[stopped]' : `\n[${e.data}]`),
-      }
+    output.value = {
+      ...output.value, ok, step: ok ? 'done' : stopped ? 'stopped' : 'failed',
+      raw: ok ? output.value.raw : output.value.raw + (stopped ? '\n[stopped]' : `\n[${e.data}]`),
     }
+    if (ok) rememberRun(runKey(it.id, node), Date.now() - output.value.startedAt)
     runningId.value = null
     sendingTo.value = null
     load()   // the build recorded a new output
@@ -179,7 +186,7 @@ async function build(node?: string) {
   })
   es.onerror = () => {
     es?.close(); es = null
-    if (output.value?.ok === null) {
+    if (output.value.ok === null) {
       output.value = { ...output.value, ok: false, step: 'failed', raw: output.value.raw + '\n[connection lost]' }
     }
     runningId.value = null
@@ -218,7 +225,6 @@ async function openDir() {
   try { await openFolder(selected.value.id) } catch (e) { openError.value = (e as Error).message }
 }
 
-const termStyle = { right: '16px', bottom: '16px', width: 'min(640px, calc(100% - 32px))', height: '300px' }
 const EMPTY: Record<HomebrewKind, string> = {
   mods: 'No mods found. A mod is a folder with build.sh at nodes/local/<node>/homebrew/mods/<game>/<mod>/.',
   games: 'No games found. A game is a folder with build.sh at nodes/local/<node>/homebrew/games/<game>/.',
@@ -347,7 +353,6 @@ const EMPTY: Record<HomebrewKind, string> = {
       </main>
     </div>
 
-    <Terminal v-if="output" :title="termTitle" :output="output" :card-style="termStyle" @close="output = null" />
   </div>
 </template>
 
