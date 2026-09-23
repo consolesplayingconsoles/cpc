@@ -1208,8 +1208,44 @@ def test_cover_falls_back_to_another_systems_art():
     assert covers.cached(root, "naomi", "nope") == "miss"
 
 
+def test_delete_on_a_card_strips_the_label_and_takes_the_disc_folder():
+    """A Saturn copy is stored as "SAROO/<game>/<game>.cue" while the write base already points
+    inside the card. Keeping the label aimed rm -rf at a path that is not there, which exits 0:
+    the delete claimed success, the file stayed on the card, the next scan brought it back."""
+    game = "SAROO/Akumajou Dracula X - Gekka no Yasoukyoku (Japan) (2M)"
+    peers = [{"path": game + "/Akumajou Dracula X - Gekka no Yasoukyoku (Japan) (2M).cue", "card": "SAROO"},
+             {"path": "SAROO/Panzer Dragoon (USA) (5S)/Panzer Dragoon (USA) (5S).cue", "card": "SAROO"}]
+    # the disc is a folder of tracks: remove the folder, not just the descriptor
+    assert send.card_target(peers[0]["path"], "SAROO", peers) == \
+        "Akumajou Dracula X - Gekka no Yasoukyoku (Japan) (2M)"
+    # a file sitting loose at the card's root keeps its own name
+    assert send.card_target("SAROO/kof95.bin", "SAROO", peers) == "kof95.bin"
+
+
+def test_delete_keeps_a_folder_another_copy_still_lives_in():
+    """Two games in one folder (a card that groups them): only the file goes, never the folder."""
+    peers = [{"path": "EDSMS/ROM A-Z/Alex Kidd.sms", "card": "EDSMS"},
+             {"path": "EDSMS/ROM A-Z/Wonder Boy.sms", "card": "EDSMS"}]
+    assert send.card_target(peers[0]["path"], "EDSMS", peers) == "ROM A-Z/Alex Kidd.sms"
+
+
+def test_delete_ignores_copies_on_the_other_card():
+    """SD_LABEL=SAROO,SAROO2: a namesake folder on the second card must not save the first's."""
+    peers = [{"path": "SAROO/Bug! (USA)/Bug! (USA).cue", "card": "SAROO"},
+             {"path": "SAROO2/Bug! (USA)/Bug! (USA).cue", "card": "SAROO2"}]
+    assert send.card_target(peers[0]["path"], "SAROO", peers) == "Bug! (USA)"
+
+
+def test_delete_on_a_node_without_cards_leaves_the_path_alone():
+    """Batocera has no label in front: the path is already relative to its ROM folder."""
+    peers = [{"path": "Sonic the Hedgehog (Europe).md", "card": ""}]
+    assert send.card_target(peers[0]["path"], "", peers) == "Sonic the Hedgehog (Europe).md"
+    assert send.card_target("psx/Tomb Raider (Europe)/disc.cue", "", peers) == "psx"
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
         t()
     print("%d tests passed" % len(tests))
+
+
