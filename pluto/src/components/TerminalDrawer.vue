@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import Terminal from './Terminal.vue'
+import UiSidePanel from './ui/UiSidePanel.vue'
 import { useRuns } from '../composables/useRuns'
 
 // The terminal drawer: every run (deploy, build, send, sync) as a tab in one left drawer on
 // every Pluto tab, so a run started on one page is still there from another. Opens itself when
 // a run starts; closed, it leaves a handle on the left edge while any run is listed. It takes
 // the mini chat's corner, so App hides the chat dock while it is open.
-const { runs, activeId, open, closeRun, focus, setMaxRuns } = useRuns()
+const { runs, activeId, open, closeRun, clearDone, focus, setMaxRuns } = useRuns()
 
 const active  = computed(() => runs.value.find(r => r.id === activeId.value) ?? runs.value[runs.value.length - 1] ?? null)
 const running = computed(() => runs.value.filter(r => r.output.value.ok === null).length)
+const done    = computed(() => runs.value.length - running.value)
 
 // Tabs shrink to TAB_MIN and never scroll: the row's width sets how many runs are kept
 // (useRuns closes the oldest past that). Measured whenever the row is shown or resized.
@@ -24,7 +26,9 @@ const fill = { inset: '0', borderRadius: '0', border: '0', boxShadow: 'none' }
 </script>
 
 <template>
-  <aside v-if="open && runs.length" class="td" @click.stop>
+  <!-- resizable like the other left panels (drag the right edge); width kept per viewer -->
+  <div v-if="open && runs.length" class="td" @click.stop>
+   <UiSidePanel :width="640" :min="360" :max="1100" storage-key="cpc.terminal.width" :collapsible="false">
     <header class="td__head">
       <div ref="tabsEl" class="td__tabs" role="tablist">
         <button
@@ -47,6 +51,7 @@ const fill = { inset: '0', borderRadius: '0', border: '0', boxShadow: 'none' }
           </span>
         </button>
       </div>
+      <button v-if="done" class="td__clear" title="Close every finished run; running ones stay" @click="clearDone">Clear done</button>
       <button class="td__btn" title="Hide terminal" @click="open = false">
         <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
@@ -62,7 +67,8 @@ const fill = { inset: '0', borderRadius: '0', border: '0', boxShadow: 'none' }
         @close="closeRun(active.id)"
       />
     </div>
-  </aside>
+   </UiSidePanel>
+  </div>
 
   <button
     v-else-if="runs.length"
@@ -79,10 +85,8 @@ const fill = { inset: '0', borderRadius: '0', border: '0', boxShadow: 'none' }
 <style scoped>
 .td {
   position: absolute; top: 0; left: 0; bottom: 0; z-index: 5;
-  width: min(640px, 100%);
-  display: flex; flex-direction: column;
-  background: #060e06;
-  border-right: 1px solid var(--line);
+  max-width: 100%;
+  display: flex;
   box-shadow: 8px 0 30px rgba(26, 34, 51, 0.18);
 }
 .td__head {
@@ -134,6 +138,15 @@ const fill = { inset: '0', borderRadius: '0', border: '0', boxShadow: 'none' }
   border: 0; border-radius: 6px; cursor: pointer;
 }
 .td__btn:hover { color: var(--accent); background: var(--surface-3); }
+.td__clear {
+  flex: none; align-self: center; margin-bottom: 6px;
+  padding: 4px 9px;
+  font-family: var(--font-sans); font-size: 12px; font-weight: 600;
+  color: var(--text-muted); background: transparent;
+  border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+  white-space: nowrap;
+}
+.td__clear:hover { color: var(--accent); border-color: var(--accent); }
 .td__body { flex: 1; min-height: 0; position: relative; }
 
 /* Closed: a tab at the top of the left edge, clear of the chat dock in the bottom corner (and

@@ -79,6 +79,11 @@ function closeRun(id: number) {
   if (!next.length) open.value = false
 }
 
+// Clear the finished runs (done or failed); live ones stay.
+function clearDone() {
+  for (const r of runs.value.filter(r => r.output.value.ok !== null)) closeRun(r.id)
+}
+
 export function useRuns() {
-  return { runs, activeId, open, openRun, closeRun, focus, setMaxRuns }
+  return { runs, activeId, open, openRun, closeRun, clearDone, focus, setMaxRuns }
 }

@@ -166,7 +166,8 @@ def merge(doc, node, scan, now, scope=None, strip=None):
     scan: [{"path": "...", "header": {"id", "title"} or None}, ...]
     """
     scan = _drop_shared_ids(scan, strip)
-    counts = {"added": 0, "present": 0, "deleted": 0, "restored": 0}
+    counts = {"added": 0, "present": 0, "deleted": 0, "restored": 0, "moved": 0}
+    added_now = []                      # (game key, index in that game's files) added this run
     warnings, renames = [], {}
     have = {}
     for gk, g in doc["games"].items():
@@ -256,7 +257,7 @@ def merge(doc, node, scan, now, scope=None, strip=None):
             warnings.append({"code": "id-name-mismatch", "node": node, "path": path, "game": gk, "id": gid})
         if gid and gid not in game["ids"]:
             game["ids"].append(gid)
-        game["files"].append({
+        record = {
             "node": node, "path": path, "tags": p["tags"], "version": p["version"],
             "regions": header["regions"] if header else [], "variants": p["variants"],
             "id": gid, "headerTitle": header["title"] if header else None, "inner": item.get("inner"),
@@ -265,13 +266,48 @@ def merge(doc, node, scan, now, scope=None, strip=None):
             # HG boots on its own, GD is the install half of a disc game and cannot.
             "category": item.get("category") or None,
             "status": "present", "firstSeen": now, "lastSeen": now,
-        })
+        }
+        game["files"].append(record)
+        added_now.append((gk, record))          # so a file that only MOVED is seen as the same copy
         counts["added"] += 1
 
+    # A file that is gone from where it was, while the same copy turned up somewhere else on
+    # the same node and card, MOVED -- it was not deleted and then added. Reorganising a card
+    # (677 ROMs into letter folders, mods into Mods/) would otherwise leave a deleted ghost
+    # for every game beside its new record, and each one would need forgetting by hand.
+    def signature(f):
+        return (f["node"], f.get("card") or "", os.path.splitext(f["path"])[1].lower(),
+                tuple(sorted((v.get("kind"), v.get("name"), v.get("version")) for v in (f.get("variants") or []))))
+
+    fresh = {}
+    for gk, rec in added_now:
+        fresh.setdefault((gk, signature(rec)), []).append(rec)
+
     for path, f in have.items():
-        if path not in seen and f["status"] == "present":
-            f["status"] = "deleted"
-            counts["deleted"] += 1
+        if path in seen or f["status"] != "present":
+            continue
+        gone_from = next((gk for gk, g in doc["games"].items() if f in g["files"]), None)
+        cand = fresh.get((gone_from, signature(f))) if gone_from else None
+        if not cand:
+            # the copy was RENAMED as well as moved (a mod's name normalised on its way to a
+            # card): same game, same card, same kind of file, and nothing else unaccounted
+            # for on either side -- so it is still that copy, not a deletion and an arrival.
+            same = [r for key, recs in fresh.items() if key[0] == gone_from
+                    for r in recs if os.path.splitext(r["path"])[1].lower() == os.path.splitext(f["path"])[1].lower()
+                    and (r.get("card") or "") == (f.get("card") or "")]
+            gone = [o for p2, o in have.items() if p2 not in seen and o["status"] == "present"
+                    and next((gk for gk, g in doc["games"].items() if o in g["files"]), None) == gone_from]
+            if len(same) == 1 and len(gone) == 1:
+                cand = same
+        if cand:
+            moved = cand.pop(0)
+            moved["firstSeen"] = f.get("firstSeen") or moved["firstSeen"]
+            doc["games"][gone_from]["files"].remove(f)          # one record, at its new path
+            counts["moved"] += 1
+            counts["added"] -= 1
+            continue
+        f["status"] = "deleted"
+        counts["deleted"] += 1
     return counts, warnings, renames
 
 
