@@ -127,14 +127,21 @@ for f in "$TEX"/*.PVR "$TEX"/*.PVM; do
     python3 "$HERE/dc/inplace.py" "$DEST/track05.bin" "$EXTRACT/$rel" "$patched" || echo "  (skipped tex $rel)"
   done
 done
-# SOD / week-transition banner: one glyph atlas lives as chunk #170 inside STORYGRA.PAC (~464 MB).
-# We ship only the 128 KB patched chunk and splice just that region in place (never load the PAC).
+# Patched chunks INSIDE the big STORYGRA.PAC (~464 MB): the SOD week banner is #170, the opening
+# sequence's six text lines are #140-#145. We ship only the patched chunks and splice each region
+# in place (the PAC is never loaded). Any `STORYGRA_c<N>.bin` in the textures dir is picked up, so
+# a new chunk needs no change here -- name it and commit it.
 if [ -f "$EXTRACT/STORYGRA.PAC" ]; then
-  if [ -f "$TEX/STORYGRA_c170.bin" ]; then
-    python3 "$HERE/dc/splice_pac_chunk.py" "$DEST/track05.bin" "$EXTRACT/STORYGRA.PAC" "$TEX/STORYGRA_c170.bin" 170 || echo "  (splice FAILED for STORYGRA chunk)"
-  else
-    echo "  (STORYGRA_c170.bin NOT fetched -- SOD banner NOT patched; is it committed + served?)"
-  fi
+  found=0
+  for chunk in "$TEX"/STORYGRA_c*.bin; do
+    [ -f "$chunk" ] || continue
+    n=$(basename "$chunk" .bin); n=${n#STORYGRA_c}
+    case "$n" in (*[!0-9]*|"") echo "  (skipping $chunk: no chunk index in the name)"; continue;; esac
+    found=$((found + 1))
+    python3 "$HERE/dc/splice_pac_chunk.py" "$DEST/track05.bin" "$EXTRACT/STORYGRA.PAC" "$chunk" "$n" \
+      || echo "  (splice FAILED for STORYGRA chunk #$n)"
+  done
+  [ "$found" -gt 0 ] || echo "  (no STORYGRA_c*.bin fetched -- banner + opening NOT patched; committed + served?)"
 fi
 
 echo "[5/5] name the .gdi + gamelist"

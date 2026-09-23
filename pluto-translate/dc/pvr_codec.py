@@ -40,9 +40,50 @@ def find_chunk(d, index):
             return j + 16, w, h, pf
         n += 1; i = j + 4
 
+def _twiddled_u16(d, off, w, h):
+    """The shared part of every format: read w*h little-endian u16 and un-twiddle to (h, w)."""
+    raw = np.frombuffer(d, dtype="<u2", count=w * h, offset=off)
+    sx = twiddle_table(w); sy = twiddle_table(h)
+    idx = (sx[None, :] << 1) | sy[:, None]
+    return raw[idx.ravel()].reshape(h, w).astype(np.uint16)
+
+
+def _untwiddle_to_bytes(v, w, h):
+    """The shared inverse: (h, w) u16 -> twiddled little-endian bytes."""
+    sx = twiddle_table(w); sy = twiddle_table(h)
+    out = np.zeros(w * h, dtype=np.uint16)
+    dst = (sx[None, :] << 1) | sy[:, None]
+    out[dst.ravel()] = v.ravel()
+    return out.astype("<u2").tobytes()
+
+
+def decode_rgb565(d, off, w, h):
+    """Twiddled RGB565 (pixfmt 1) -> (h, w, 4) uint8 RGBA, alpha forced opaque.
+
+    The opening-sequence text lines (STORYGRA chunks 140-145) are this format, not the ARGB4444
+    the SOD banner uses. 565 carries no alpha at all, so the white behind the glyphs is real
+    picture, not transparency: a repaint must paint the background, it cannot leave it clear.
+    Expansion is the usual bit-replication so the round trip is exact.
+    """
+    v = _twiddled_u16(d, off, w, h)
+    r = ((v >> 11) & 0x1F); g = ((v >> 5) & 0x3F); b = (v & 0x1F)
+    r = (r << 3) | (r >> 2); g = (g << 2) | (g >> 4); b = (b << 3) | (b >> 2)
+    a = np.full_like(r, 255)
+    return np.dstack([r, g, b, a]).astype(np.uint8)
+
+
+def encode_rgb565(rgba):
+    """(h, w, 4) uint8 RGBA -> twiddled RGB565 bytes. Inverse of decode_rgb565 (alpha dropped)."""
+    h, w, _ = rgba.shape
+    r = rgba[:, :, 0].astype(np.uint16) >> 3
+    g = rgba[:, :, 1].astype(np.uint16) >> 2
+    b = rgba[:, :, 2].astype(np.uint16) >> 3
+    return _untwiddle_to_bytes((r << 11) | (g << 5) | b, w, h)
+
+
 def decode_argb4444(d, off, w, h):
-    """Twiddled ARGB4444 -> (h, w, 4) uint8 RGBA. (ARGB1555/RGB565 are similar;
-    add their unpack if needed — see textures.md.)"""
+    """Twiddled ARGB4444 -> (h, w, 4) uint8 RGBA. (ARGB1555 is similar; add its unpack if
+    needed — see textures.md. RGB565 is `decode_rgb565`.)"""
     raw = np.frombuffer(d, dtype="<u2", count=w * h, offset=off)
     sx = twiddle_table(w); sy = twiddle_table(h)
     idx = (sx[None, :] << 1) | sy[:, None]          # src twiddled index per (x, y)
