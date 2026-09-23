@@ -1242,6 +1242,120 @@ def test_delete_on_a_node_without_cards_leaves_the_path_alone():
     assert send.card_target(peers[0]["path"], "", peers) == "Sonic the Hedgehog (Europe).md"
     assert send.card_target("psx/Tomb Raider (Europe)/disc.cue", "", peers) == "psx"
 
+
+
+def test_card_letter_ranges_put_a_game_in_its_folder():
+    """677 ROMs in one folder is past what the EverDrive-MD OS indexes (~200): the browser
+    garbles and sorts at random. Games go in letter-range folders instead."""
+    ranges = ["0-D", "E-H", "I-L", "M-P", "Q-T", "U-Z"]
+    assert send.pick_range("Sonic The Hedgehog (Japan, USA, Europe)", ranges) == "Q-T"
+    assert send.pick_range("Aladdin (Europe)", ranges) == "0-D"
+    assert send.pick_range("688 Attack Sub (USA, Europe)", ranges) == "0-D"   # digits ride the first
+    assert send.pick_range("Zero Tolerance (USA, Europe)", ranges) == "U-Z"
+    assert send.pick_range("Mega Bomberman (Japan, USA, Europe)", ranges) == "M-P"
+    assert send.pick_range("anything", []) == ""                                # no ranges: flat, as before
+
+
+def test_a_mod_is_named_after_the_mod_inside_its_game_folder():
+    """On the card our slugs sorted away from everyone else's Title Case names. Inside
+    Mods/<game>/ the game is already said, so the name carries only the mod."""
+    s1 = {"title": "Sonic The Hedgehog", "name": "Sonic The Hedgehog (Japan, USA, Europe)"}
+    # a flat Mods/ folder: the game leads, so every mod of a game sits together, and the
+    # mod's own name is written exactly as the file says it (no re-wording)
+    assert send.variant_file_name(dict(s1, variant={"name": "Infinite Jump", "author": "CPC", "version": "1.0"})) \
+        == "Sonic The Hedgehog [Infinite Jump by CPC v1.0]"
+    assert send.variant_file_name(dict(s1, variant={"name": "Chao Walker"})) == "Sonic The Hedgehog [Chao Walker]"
+    # a hack distributed under a bare name repeats its game: only a WHOLE-title prefix comes off
+    assert send.variant_file_name({"title": "Streets of Rage 2",
+                                   "variant": {"name": "Streets of Rage 2 - Looney Tunes Edition"}}) \
+        == "Streets of Rage 2 [Looney Tunes Edition]"
+    # ... and never word by word: "Super Mario 46" is not "46" under Super Mario 64
+    assert send.variant_file_name({"title": "Super Mario 64", "variant": {"name": "Super Mario 46"}}) \
+        == "Super Mario 64 [Super Mario 46]"
+    # someone else's casing and wording are theirs to keep
+    assert send.variant_file_name({"title": "Shining Force II",
+                                   "variant": {"name": "Shining Force II - War of the Gods"}}) \
+        == "Shining Force II [War of the Gods]"
+    assert send.variant_file_name({"title": "Michael Jackson's Moonwalker",
+                                   "variant": {"name": "Michael-Jackson-Moonwalker-Thriller-Hack"}}) \
+        == "Michael Jackson's Moonwalker [Michael-Jackson-Moonwalker-Thriller-Hack]"
+    # in a per-game folder the game is already said
+    assert send.variant_file_name(dict(s1, variant={"name": "Chao Walker"}), True) == "[Chao Walker]"
+    assert send.variant_file_name(dict(s1, variant={"name": "Chao Walker"})) == "Sonic The Hedgehog [Chao Walker]"
+    assert send.variant_file_name(dict(s1, variant={})) is None          # not a mod: keep the game name
+
+
+def test_a_mods_card_name_reads_back_as_that_mod():
+    """The brackets are not decoration: a sync reads the copy back through names.parse, and
+    "Sonic The Hedgehog - Chao Walker.bin" would come back as a GAME of that name."""
+    n = send.variant_file_name({"title": "Sonic The Hedgehog",
+                                "variant": {"name": "Infinite Jump", "author": "CPC", "version": "1.0"}})
+    back = names.parse(n + ".bin")
+    assert back["title"] == "Sonic The Hedgehog"
+    assert [(v["kind"], v["name"], v["version"], v.get("author")) for v in back["variants"]] \
+        == [("mod", "Infinite Jump", "1.0", "CPC")]
+
+
+def test_a_moved_copy_is_the_same_copy_not_a_deletion():
+    """Reorganising a card moves every file. Without this, one sync leaves a deleted ghost
+    beside each game's new record -- 675 of them on the Mega Drive card."""
+    doc = store.empty("megadrive")
+    flat = [{"path": "EDMD/Mega Drive/Sonic The Hedgehog (Japan, USA, Europe).md", "header": None,
+             "card": "EDMD"},
+            {"path": "EDMD/Mega Drive/Sonic The Hedgehog (Japan, USA, Europe) [Chao Walker].md",
+             "header": None, "card": "EDMD"}]
+    store.merge(doc, "megadrive", flat, NOW)
+    nested = [{"path": "EDMD/Mega Drive/Q-T/Sonic The Hedgehog (Japan, USA, Europe).md", "header": None,
+               "card": "EDMD"},
+              {"path": "EDMD/Mega Drive/Mods/Sonic The Hedgehog [Chao Walker].md", "header": None,
+               "card": "EDMD"}]
+    counts, _w, _r = store.merge(doc, "megadrive", nested, NOW)
+    files = [f for g in doc["games"].values() for f in g["files"]]
+    assert counts["moved"] == 2, counts
+    assert counts["deleted"] == 0, counts
+    assert not [f for f in files if f["status"] == "deleted"], [f["path"] for f in files]
+    assert sorted(f["path"] for f in files) == sorted(i["path"] for i in nested)
+
+
+def test_our_own_build_keeps_its_name_from_the_lab_to_the_card():
+    """homebrew names a build "<game> [<mod> by CPC v<version>]"; the card copy must read the
+    same, because "by CPC" is what tells the next send this copy is ours and a rebuild
+    REPLACES it. Dropping the author made every rebuild skip as "already there"."""
+    lab = "Sonic The Hedgehog [Infinite Jump by CPC v1.0].bin"
+    p = names.parse(lab)
+    card = send.variant_file_name({"title": p["title"], "variant": p["variants"][0]}) + ".bin"
+    assert card == lab, card
+    assert send._ours({"variants": names.parse(card)["variants"]}) is True
+
+
+def test_kind_sub_fills_the_game_and_range_tokens():
+    """SD_SEND_DIRS carries the layout: mod:Mega Drive/Mods/<game>, megadrive:Mega Drive/<range>."""
+    c = {"title": "Sonic & Knuckles", "name": "Sonic & Knuckles (Japan, USA, Europe)"}
+    assert send.kind_sub("Mods/<game>", c) == "Mods/Sonic & Knuckles"
+    assert send.kind_sub("<range>", c, ["0-D", "E-H", "I-L", "M-P", "Q-T", "U-Z"]) == "Q-T"
+    assert send.kind_sub("Tools", c) == "Tools"                          # no token: unchanged
+    # a path character in a title can never become a folder of its own
+    assert send.kind_sub("Mods/<game>", {"title": "Ecco: Tides/Time"}) == "Mods/Ecco- Tides-Time"
+
+
+def test_send_writes_a_mod_into_its_game_folder_under_its_own_name():
+    put = []
+    card = {"mount": lambda: None, "exists": lambda n: False,
+            "put": lambda src, name: put.append(name), "finish": lambda: []}
+    p = {"copies": [{"game": "sonic-the-hedgehog", "name": "Sonic The Hedgehog (Japan, USA, Europe)",
+                     "kind": "mod", "title": "Sonic The Hedgehog",
+                     "variant": {"name": "Infinite Jump", "author": "CPC", "version": "1.0"},
+                     "source": {"node": "lab", "path": "Sonic The Hedgehog [Infinite Jump by CPC v1.0].bin"}},
+                    {"game": "aladdin", "name": "Aladdin (Europe)", "kind": "game",
+                     "title": "Aladdin", "source": {"node": "lab", "path": "Aladdin (Europe).md"}}],
+         "skipped": []}
+    send._files(p, {"target": "megadrive", "system": "megadrive", "card": card,
+                    "locate": lambda src: "/lab/" + src["path"], "emit": None, "unpack": True,
+                    "rom_ext": lambda src: "." + src["path"].rsplit(".", 1)[-1],
+                    "ranges": ["0-D", "E-H", "I-L", "M-P", "Q-T", "U-Z"],
+                    "kind_dirs": {"mod": "Mods", "game": "<range>"}})
+    assert put == ["Mods/Sonic The Hedgehog [Infinite Jump by CPC v1.0].bin", "0-D/Aladdin (Europe).md"], put
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

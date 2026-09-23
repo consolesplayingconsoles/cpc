@@ -13,7 +13,8 @@ const props = withDefaults(defineProps<{
   max?: number
   storageKey?: string
   label?: string          // for the toggle's title: "Collapse list"
-}>(), { width: 280, min: 200, max: 640, label: 'list' })
+  collapsible?: boolean   // false: no toggle (the parent shows/hides the panel itself)
+}>(), { width: 280, min: 200, max: 640, label: 'list', collapsible: true })
 
 const collapsed = ref(false)
 const w = ref(props.width)
@@ -52,6 +53,7 @@ onUnmounted(() => stopDrag?.())
     <aside class="ui-side__panel"><slot /></aside>
     <div v-if="!collapsed" class="ui-side__grip" title="Drag to resize" @pointerdown.prevent="startDrag" />
     <button
+      v-if="collapsible"
       class="ui-side__toggle" :style="{ left: collapsed ? '8px' : (w - 12) + 'px' }"
       :title="(collapsed ? 'Expand ' : 'Collapse ') + label"
       @click="collapsed = !collapsed"

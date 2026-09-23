@@ -25,6 +25,11 @@ tag starts with the prefix is shown; if there is none, the newest pre-release.
 """
 import os
 import re
+
+try:
+    from ..catalogue import names as catalogue_names
+except (ImportError, ValueError):
+    from catalogue import names as catalogue_names
 import signal
 import subprocess
 import threading
@@ -116,17 +121,29 @@ def _parse_sample(path):
     return params
 
 
+def _mod_name(folder):
+    """The item's display name: MOD_NAME in its own .env, else its .env.sample.
+
+    Same convention as a node's NODE_NAME -- identity is env, committed in the sample and
+    overridable in the gitignored .env. It used to be scraped from the README's first
+    heading, which made documentation double as metadata: with no README a build went out
+    named after its folder ("sonic-infinite-jump").
+    """
+    for f in (".env", ".env.sample"):
+        name = _parse_env(os.path.join(folder, f)).get("MOD_NAME")
+        if name:
+            return _nodash(name.strip())
+    return None
+
+
 def _readme(folder):
-    """(title, first paragraph) of README.md, or (None, None)."""
+    """The first paragraph of README.md as a description, or None. The README is docs."""
     path = os.path.join(folder, "README.md")
     if not os.path.isfile(path):
-        return None, None
-    title, para, lines = None, [], open(path, encoding="utf-8").read().splitlines()
+        return None
+    para, lines = [], open(path, encoding="utf-8").read().splitlines()
     for line in lines:
         s = line.strip()
-        if title is None and s.startswith("# "):
-            title = s[2:].strip()
-            continue
         if not s:
             if para:
                 break
@@ -135,7 +152,7 @@ def _readme(folder):
             continue
         para.append(s)
     text = _nodash(" ".join(para))
-    return _nodash(title), (text[:400] + "...") if len(text) > 400 else (text or None)
+    return (text[:400] + "...") if len(text) > 400 else (text or None)
 
 
 def _node_name(repo_root, node):
@@ -236,7 +253,7 @@ def _item(repo_root, node, kind, group, name, folder):
             p["value"] = current.get(p["key"], p["default"])
             p["scope"] = sc
             params.append(p)
-    title, description = _readme(folder)
+    title, description = _mod_name(folder), _readme(folder)
     item_id = "/".join(x for x in (node, kind, group, name) if x)
     game = _catalogue_game(repo_root, os.path.dirname(folder) if group else folder)
     # A homebrew ROM's system is its own -- its homebrew node (nodes/local/<node>/homebrew),
@@ -246,7 +263,8 @@ def _item(repo_root, node, kind, group, name, folder):
     return {
         "id": item_id, "node": node, "nodeName": _node_name(repo_root, node),
         "kind": kind, "group": group, "name": name,
-        "title": title or name, "description": description,
+        # no MOD_NAME: the folder is shown as it is, never a name made up from it
+        "title": title or name, "named": bool(title), "description": description,
         "path": os.path.relpath(folder, repo_root),
         "actions": [a for a in ACTIONS if os.path.isfile(os.path.join(folder, a + ".sh"))],
         "params": params,

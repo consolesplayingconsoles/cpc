@@ -2988,9 +2988,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         'if ! grep -q "^$d " /proc/self/mounts; then echo "$l was not mounted"; continue; fi; '
         'sync; if ! sudo umount "$d" 2>/dev/null; then sleep 2; sudo umount "$d" 2>/dev/null; fi; '
         'if grep -q "^$d " /proc/self/mounts; then echo "WARN $l is busy, still mounted"; continue; fi; '
+        # The dirty flag lives at offset 106 of an exFAT volume ONLY. On a FAT32 card (the
+        # EverDrive's) that offset is ordinary data, so reading it there says nothing.
+        't=$(sudo blkid -s TYPE -o value "$d" 2>/dev/null); '
+        'if [ "$t" = exfat ]; then '
         'f=$(sudo dd if=$d bs=1 skip=106 count=1 2>/dev/null | od -An -tu1 | tr -d " \n"); '
         'case "$f" in 2|3|6|7) echo "WARN $l unmounted but still marked dirty: run fsck" ;; '
         '*) echo "$l unmounted cleanly: safe to pull" ;; esac; '
+        'else echo "$l unmounted cleanly: safe to pull"; fi; '
         # Re-arm the trigger. systemd leaves an automount unit "failed (Result: unmounted)"
         # once its filesystem goes away under it, and the path then stops mounting on demand:
         # the card became unbrowsable until someone restarted the unit by hand.
@@ -4589,11 +4594,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return {}
         base = self._sd_send_dir(cfg, system)
         out = {}
-        for k in ("tool",):
+        for k in ("tool", "mod", "translation"):
             d = self._sd_send_dir(cfg, system, k)
             if d and d != base:
                 out[k] = os.path.relpath(d, base or ".")
+        # SD_SEND_RANGES splits the games themselves into letter folders, because a cart menu
+        # indexes one directory at a time: 677 ROMs in one folder is past what the
+        # EverDrive-MD OS handles and the browser garbles and sorts at random.
+        if self._sd_ranges(cfg):
+            out["game"] = catalogue_send.RANGE_TOKEN
         return out
+
+    @staticmethod
+    def _sd_ranges(cfg):
+        """The card's letter-range folders, in order: SD_SEND_RANGES=0-D,E-L,M-Q,R-S,T-Z."""
+        return [r.strip().strip("/") for r in (cfg.get("SD_SEND_RANGES") or "").split(",") if r.strip()]
 
     # Where a PS3's games live, in the order the catalogue reads them: ISOs webMAN can
     # mount, folder games, and titles already installed on the drive (arcade PKGs and the
@@ -4707,11 +4722,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """{kind: path under roms_dir} for the kind folders SD_SEND_DIRS names inside the
         scanned folder (a folder outside it is not scanned, so it cannot mark anything)."""
         out = {}
+        # Only kinds that belong to a GAME, which is what a kind marks. A mod is a property of
+        # the FILE (its [bracket] variant) and mods ride their base game's key, so marking from
+        # a Mods/ folder filed the retail Sonic 1, Sonic 2 and Streets of Rage 2 as mods.
         for k in ("tool",):
             pairs = dict(p.split(":", 1) for p in (cfg.get("SD_SEND_DIRS") or "").split(",") if ":" in p)
             d = (pairs.get(k) or "").strip().strip("/")
             if not d:
                 continue
+            d = d.split(catalogue_send.GAME_TOKEN)[0].strip("/")      # Tools/<game> -> Tools
             root = "" if roms_dir in (".", "") else roms_dir + "/"
             if not root or d.startswith(root):
                 out[k] = d[len(root):]
@@ -4816,6 +4835,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                "card": self._send_dest(kind, target, target_cfg, system, ctx_emit=emit) if kind in ("local", "batocera", "sd", "ftp") else None,
                "members": lambda src, ext: self._send_members(src, ext, workdir),
                # a kind with its own folder on the target (a card's Tools/): its copies go there
+               "ranges": self._sd_ranges(target_cfg) if kind == "sd" else [],
                "kind_dirs": self._send_kind_dirs(kind, target_cfg, system)}
         try:
             result = catalogue_send.STRATEGIES[kind](plan, ctx)
@@ -4997,9 +5017,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                            'sudo touch "$3/.cpc-write-test" 2>/dev/null && sudo rm -f "$3/.cpc-write-test" '
                                            '|| { echo "$2 is still read-only, nothing was copied"; exit 3; }; '
                                            'df -k --output=avail "$2" | tail -1 | tr -d " "; '
-                                           'ls -1 "$3"; b=$3; shift 3; '
-                                           'for s in "$@"; do if [ -d "$b/$s" ]; then ls -1 "$b/$s" | sed "s|^|$s/|"; fi; done',
-                                           label, mnt, base, *self._send_kind_dirs("sd", cfg, system).values())
+                                           # every copy already on the card, top level and inside the
+                                           # kind/range folders, named the way a send names them
+                                           'cd "$3" && find . -maxdepth 3 -type f -printf "%P\n"',
+                                           label, mnt, base)
                 else:
                     rc, out = ssh_sh(host, 'mkdir -p "$1" && echo reused && ls -1 "$1"', base)
                 if rc != 0:

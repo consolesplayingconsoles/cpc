@@ -69,6 +69,108 @@ def _ours(f):
     return any((v.get("author") or "").strip().lower() == "cpc" for v in (f.get("variants") or []))
 
 
+GAME_TOKEN = "<game>"        # in SD_SEND_DIRS: one folder per base game, e.g. Mods/<game>
+_UNSAFE_NAME = re.compile(r'[/\\:*?"<>|]')
+
+
+def _safe_name(text):
+    """A title as a folder name a cart's file browser can hold (no path characters)."""
+    return _UNSAFE_NAME.sub("-", text).strip().rstrip(".") or "Unnamed"
+
+
+RANGE_TOKEN = "<range>"      # in SD_SEND_DIRS: split games into A-C / D-F ... folders
+
+
+def pick_range(name, ranges):
+    """Which of a card's letter-range folders a name belongs in ("Sonic..." -> "R-S").
+
+    ranges are the folder names themselves, in order, each "<first>-<last>" or a single
+    letter; "0-9-D" means digits through D. The last range takes anything after it, the
+    first takes anything before, so a name can never fall outside the card's layout.
+    """
+    if not ranges:
+        return ""
+    ch = (name or "").strip()[:1].upper()
+    ch = ch if ch.isalpha() else "0"
+    for r in ranges:
+        parts = r.split("-")
+        lo, hi = parts[0][:1].upper(), parts[-1][:1].upper()
+        lo = lo if lo.isalpha() else "0"
+        hi = hi if hi.isalpha() else "0"
+        if lo <= ch <= hi:
+            return r
+    return ranges[-1] if ch > "A" else ranges[0]
+
+
+def kind_sub(sub, copy, ranges=None):
+    """A kind's sub-folder for one copy, tokens filled in: "Mods/Sonic The Hedgehog", "R-S".
+
+    A cart menu indexes one directory at a time -- the EverDrive-MD OS tops out near 200
+    files, and past that the browser garbles and sorts at random -- so games split into
+    letter-range folders and mods go in a folder per base game instead of all beside the
+    games they patch.
+    """
+    if GAME_TOKEN in sub:
+        sub = sub.replace(GAME_TOKEN, _safe_name(copy.get("title") or copy.get("game") or ""))
+    if RANGE_TOKEN in sub:
+        sub = sub.replace(RANGE_TOKEN, pick_range(copy.get("name") or copy.get("title") or "", ranges or []))
+    return sub.strip("/")
+
+
+def variant_file_name(copy, per_game_folder=False):
+    """What a mod is CALLED on a card: "<game> [<mod> by <author> v<version>]".
+
+    The only thing dropped is the REGION, which is what split a game's mods apart on the
+    card -- one hack of Sonic 1 was filed "(USA, Europe)" while the rest said "(Japan, USA,
+    Europe)", so they sorted nowhere near each other. Nothing else is touched: the mod's
+    name is whatever the file says, word for word, capitals and all. It is not ours to
+    rewrite, so "Michael-Jackson-Moonwalker-Thriller-Hack" stays exactly that.
+
+    "by <author>" travels with it, because that is what tells a later send this copy is ours
+    and a rebuild REPLACES it (_ours) -- and it is how homebrew names its builds, so the Lab
+    file and the card copy read as the same thing.
+    -> None when the copy is not a mod at all.
+    """
+    v = copy.get("variant") or {}
+    name = (v.get("name") or "").strip()
+    if not name:
+        return None
+    author = (v.get("author") or "").strip()
+    if author and ("by " + author).lower() not in name.lower():
+        name += " by " + author
+    version = (v.get("version") or "").strip()
+    if version and not name.lower().endswith(version.lower()):
+        name += " v" + version.lstrip("vV")
+    name = _safe_name(name)
+    title = (copy.get("title") or "").strip()
+    # A hack distributed under a bare file name carries the game in that name ("Streets of
+    # Rage 2 - Looney Tunes Edition"), so "<game> [<mod>]" would say the game twice. Only a
+    # DASHED whole-title prefix comes off, which is the file-name idiom: a pun keeps its
+    # words ("Sonic & Knuckles + Sonic 3", "Super Mario 46", "Tokyo BS Guide").
+    if title and name.lower().startswith(title.lower() + " - "):
+        rest = name[len(title) + 3:].strip()
+        if rest and rest[0].isalnum():
+            name = rest
+    if per_game_folder or not title:
+        return "[%s]" % name if per_game_folder else name
+    return "%s [%s]" % (_safe_name(title), name)
+
+
+def kind_sub(sub, copy, ranges=None):
+    """A kind's sub-folder for one copy, tokens filled in: "Mods/Sonic The Hedgehog", "R-S".
+
+    A cart menu indexes one directory at a time -- the EverDrive-MD OS tops out near 200
+    files, and past that the browser garbles and sorts at random -- so games split into
+    letter-range folders and mods go in a folder per base game instead of all beside the
+    games they patch.
+    """
+    if GAME_TOKEN in sub:
+        sub = sub.replace(GAME_TOKEN, _safe_name(copy.get("title") or copy.get("game") or ""))
+    if RANGE_TOKEN in sub:
+        sub = sub.replace(RANGE_TOKEN, pick_range(copy.get("name") or copy.get("title") or "", ranges or []))
+    return sub.strip("/")
+
+
 def card_target(path, card, peers):
     """What a delete must actually remove on a node, given a catalogue copy's stored path.
 
@@ -123,8 +225,17 @@ def plan(root, system, target, sources, files=None, all_missing=False):
             if replace and not _ours(best):
                 skipped.append({"game": g["title"], "why": "already on %s" % target})
                 continue
+            # Mod-ness belongs to the file (its [bracket] variant), while a kind like "tool"
+            # belongs to the game. A copy with a variant is a mod copy, so it is filed with
+            # the mods even though its game is the plain retail game.
+            # ("game" is what the view calls a game with no kind of its own, so it is not a
+            # kind to route by -- reading it as one filed every mod among the games.)
+            own_kind = g.get("kind") if g.get("kind") not in (None, "", "game") else None
+            kind = own_kind or ("mod" if best.get("variants") else "game")
             copies.append({"game": g["key"], "name": names.canonical_name(g["title"], best),
-                           "kind": g.get("kind") or "game", "replace": replace,
+                           "kind": kind, "replace": replace,
+                           # a card's layout needs the base game and the mod this copy is
+                           "title": g["title"], "variant": (best.get("variants") or [{}])[0],
                            "source": {"node": best["node"], "path": best["path"], "inner": best.get("inner")}})
     return {"copies": copies, "skipped": skipped}
 
@@ -197,10 +308,13 @@ def _files(p, ctx):
         ext = ctx["rom_ext"](c["source"]) if ctx.get("unpack") else "." + c["source"]["path"].rsplit(".", 1)[-1]
         if ctx.get("system") in ARCADE:
             c = dict(c, name=c["source"]["path"].rsplit("/", 1)[-1].rsplit(".", 1)[0])
-        # a kind with its own folder on the target (a card's Tools/) is written under it
+        # a kind with its own folder on the target (a card's Tools/, Mods/<game>/, A-C/)
         sub = kind_dirs.get(c.get("kind") or "game")
         if sub:
-            c = dict(c, name=sub.rstrip("/") + "/" + c["name"])
+            sub = kind_sub(sub, c, ctx.get("ranges"))
+            raw = kind_dirs.get(c.get("kind") or "game") or ""
+            own = None if raw == RANGE_TOKEN else variant_file_name(c, GAME_TOKEN in raw)
+            c = dict(c, name=sub + "/" + (own or c["name"]))
         if src is None:
             p["skipped"].append({"game": c["name"], "why": "%s's copy can't be read from here yet" % c["source"]["node"]})
         elif ctx.get("unpack") and ext.lower() in OPAQUE_ARCHIVES:

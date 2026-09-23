@@ -717,8 +717,9 @@ def _merge_system(root, system, node, found, favs, saves_lookup, emit, now, thum
     store.save(root, doc)
     covers.clear_misses(root, system)       # new files may match art that didn't before
 
-    emit("%s/%s: %d added, %d present, %d deleted, %d restored%s" % (
+    emit("%s/%s: %d added, %d present, %d deleted, %d restored%s%s" % (
         node + ("[%s]" % scope.rstrip("/") if scope else ""), system, counts["added"], counts["present"], counts["deleted"], counts["restored"],
+        ", %d moved" % counts["moved"] if counts.get("moved") else "",
         ", %d favourites imported" % imported if imported else ""))
     for w in warnings:
         emit("  WARN %s: %s -> %s" % (w["code"], w["path"], w["game"]))
