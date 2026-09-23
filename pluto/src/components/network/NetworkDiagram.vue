@@ -8,7 +8,7 @@ import { API_BASE } from '../../composables/useNodes'
 import { BUBBLE_R } from '../../composables/bubbleConstants'
 import NodeBubble from './NodeBubble.vue'
 import NodeDrawer from './NodeDrawer.vue'
-import Terminal from '../Terminal.vue'
+import Terminal, { type TerminalOutput } from '../Terminal.vue'
 
 import { ICONS } from '../../composables/useIcons'
 import layout from '../../../config/layout.json'
@@ -186,6 +186,16 @@ function closeDeployTerm() {
   if (deployTermId.value) clearOutput(deployTermId.value)
   deployTermId.value = null
 }
+// A native action (unmount a card, quit a game, restart ES) gets the same floating terminal
+// the deploy uses: pressing a button and seeing nothing is no way to tell whether it worked.
+const nativeTerm = ref<{ title: string; output: TerminalOutput } | null>(null)
+function showNativeRun(p: { action: string; lines: string[]; ok: boolean | null; startedAt: number }) {
+  const prev = nativeTerm.value && nativeTerm.value.output.startedAt === p.startedAt ? nativeTerm.value.output.raw : ''
+  nativeTerm.value = { title: p.action, output: { raw: prev + p.lines.join('\n') + '\n', ok: p.ok,
+                                                  step: p.ok === null ? p.action : (p.ok ? 'done' : 'failed'),
+                                                  startedAt: p.startedAt } }
+}
+
 const floatingDeploy = computed(() => {
   const id = deployTermId.value
   if (!id) return null
@@ -347,12 +357,22 @@ watch(hoveredNode, () => nextTick(updatePeekPos))
         :last-at="lastDeployedAt[activeMenu] ?? null"
         @close="closeMenu"
         @deploy="startDeploy(activeMenu)"
+        @native-run="showNativeRun"
         @sync="startSync(activeMenu)"
         @open-smb="openSmb(activeMenu)"
         @open-config="openConfig"
         @open-tab="emit('open-tab', 'robutek')"
       />
     </Transition>
+
+    <!-- native actions (unmount, quit, restart ES): same floating terminal as deploy -->
+    <Terminal
+      v-if="nativeTerm"
+      :title="nativeTerm.title"
+      :output="nativeTerm.output"
+      :card-style="floatTermStyle"
+      @close="nativeTerm = null"
+    />
 
     <!-- deploy terminal: floats over the map (closable), out of the drawer -->
     <Terminal

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { NodeData, NodeMap } from '../../composables/useNodes'
 import { API_BASE } from '../../composables/useNodes'
 import NodeBubble from './NodeBubble.vue'
@@ -29,6 +29,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close:         []
+  // a native action's run, for the floating terminal (same place deploy's output goes)
+  'native-run':  [payload: { action: string; lines: string[]; ok: boolean | null; startedAt: number }]
   deploy:        []
   sync:          []
   'open-smb':    []
@@ -111,13 +113,28 @@ const isWii = computed(() => props.id === 'wii')
 const isBatocera = computed(() => props.id === 'batocera')
 const nativeBusy = ref('')
 const nativeNote = ref('')
+watch(() => props.id, () => { nativeNote.value = '' })
+
 function nativeAction(action: string) {
   nativeNote.value = ''
   nativeBusy.value = action
+  const startedAt = Date.now()
+  // The run goes to the terminal, which says what actually happened in the API's own words
+  // ("SAROO unmounted: safe to pull", "WARN SAROO is busy, still mounted", "was not mounted").
+  emit('native-run', { action, lines: ['running ' + action + ' on ' + props.id], ok: null, startedAt })
   fetch(`${API_BASE}/native/${props.id}/${action}`, { method: 'POST' })
     .then(r => r.json())
-    .then(j => { nativeNote.value = j?.error || (j?.ok ? '' : 'failed') })
-    .catch(() => { nativeNote.value = 'API unreachable' })
+    .then(j => {
+      const lines: string[] = Array.isArray(j?.lines) ? j.lines : []
+      if (j?.error) lines.push('ERROR ' + j.error)
+      if (!lines.length) lines.push(j?.ok ? 'done' : 'failed')
+      nativeNote.value = j?.error || (j?.ok ? '' : 'failed')
+      emit('native-run', { action, lines, ok: !!j?.ok, startedAt })
+    })
+    .catch(() => {
+      nativeNote.value = 'API unreachable'
+      emit('native-run', { action, lines: ['ERROR API unreachable'], ok: false, startedAt })
+    })
     .finally(() => { nativeBusy.value = '' })
 }
 
@@ -275,7 +292,7 @@ function postCommand(text: string) {
             <span>Game Library</span>
           </UiActionRow>
         </template>
-        <p v-if="nativeNote" class="nd__hint">{{ nativeNote }}</p>
+        <p v-if="nativeNote" class="nd__hint is-bad">{{ nativeNote }}</p>
       </section>
 
       <section v-if="node.folder" class="nd__sec">
@@ -295,7 +312,7 @@ function postCommand(text: string) {
           <span>Unmount SD card ({{ node.sd }})</span>
           <span v-if="nativeBusy === 'unmount-sd'" class="nd__act-note">Unmounting…</span>
         </UiActionRow>
-        <p v-if="nativeNote" class="nd__hint">{{ nativeNote }}</p>
+        <p v-if="nativeNote" class="nd__hint is-bad">{{ nativeNote }}</p>
       </section>
 
       <!-- Saves: the back-up button shows on every non-cloud node (the "usual"
@@ -379,6 +396,7 @@ function postCommand(text: string) {
 /* the action-row frame is now UiActionRow; these are the row CONTENTS */
 .nd__ic { width: 18px; height: 18px; color: var(--accent); flex: 0 0 auto; }
 .nd__act-note { margin-left: auto; font-size: 12px; color: var(--text-faint); }
+.nd__hint.is-bad { color: var(--bad); }
 .nd__arrow { margin-left: auto; color: var(--text-faint); }
 .nd__ext { margin-left: auto; color: var(--text-faint); font-size: 13px; }
 /* the config shortcut rides in the "Lab" section header — label + folder-gear icon

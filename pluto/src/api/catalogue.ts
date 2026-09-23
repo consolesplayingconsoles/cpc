@@ -166,7 +166,12 @@ export const catalogueApi = {
   },
   // SSE form of send (all = every game the node lacks): line events, a `command` event when
   // the target needs a Terminal command, then done ok/failed. Same console as sync.
-  sendStreamUrl: (system: string, node: string) => `${BASE}/${enc(system)}/send/stream?node=${enc(node)}&all=1`,
+  // path = one copy (the drawer's Send), no path = every game the target lacks (Send all)
+  // `from` = the node holding the copy. Without it the API assumes lab, so sending a copy TO lab
+  // could never work: source and target were the same node and the plan filtered everything out.
+  sendStreamUrl: (system: string, node: string, path?: string, from?: string) =>
+    `${BASE}/${enc(system)}/send/stream?node=${enc(node)}` + (path ? `&path=${enc(path)}` : '&all=1')
+    + (from ? `&from=${enc(from)}` : ''),
   // SSE, read-only against nodes. '*' = everything Batocera has.
   syncUrl: (system: string) => `${BASE}/sync/stream?system=${enc(system)}`,
   // SSE. Saved games for ONE console: only the nodes that hold it and have a back-up
