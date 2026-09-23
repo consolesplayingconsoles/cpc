@@ -12,6 +12,7 @@ import MetadataCard from '../MetadataCard.vue'
 import type { GameMeta } from '../MetadataCard.vue'
 import SpeakerLegend from './SpeakerLegend.vue'
 import PromptCopier from '../PromptCopier.vue'
+import { useRuns } from '../../composables/useRuns'
 import TranslationRow from './TranslationRow.vue'
 import { type Block, caBytes } from '../../lib/translation'
 import { formatOffset, buildSourcesPayload, reconcileByOffset, applyPoll } from './TranslationTable.logic'
@@ -826,15 +827,22 @@ const { unlock } = useAchievement()
 const building = ref(false)
 const buildMsg = ref('')
 const buildFailed = ref(false)
+// The build's own log, kept in the terminal drawer until dismissed. The achievement toast fades,
+// which left no way to tell a finished build from one still running (or from one that failed
+// quietly on the box).
+const { openRun } = useRuns()
 async function runBuild() {
   if (building.value || !curPath.value) return
   building.value = true; buildMsg.value = ''; buildFailed.value = false
   const startedAt = Date.now()
+  const buildOut = openRun('Build ' + (selGameName.value || 'game'), { raw: '', ok: null, step: 'building on batocera', startedAt })
   try {
     const data = await translationApi.run(curPath.value, selLang.value)
+    buildOut.value = { ...buildOut.value, raw: data.log || '(the box returned no log)' }
     if (data.error) {
       buildFailed.value = true
       buildMsg.value = `Build failed: ${data.error}`.slice(0, 80)
+      buildOut.value = { ...buildOut.value, ok: false, step: 'failed' }
     } else {
       const secs = Math.round((Date.now() - startedAt) / 1000)
       // the release patch rides along: say where it went, or why there isn't one
@@ -842,10 +850,12 @@ async function runBuild() {
         : data.dcp?.error ? ` · patch failed: ${data.dcp.error}`
         : data.dcp?.skipped ? ` · no patch: ${data.dcp.skipped}` : ''
       unlock(`Released to Batocera — ${selGameName.value || 'game'}`, `${secs}s${patch}`, bootAction(data.dest))
+      buildOut.value = { ...buildOut.value, ok: true, step: 'done' }
     }
   } catch {
     buildFailed.value = true
     buildMsg.value = 'Build failed: no response from the box'
+    buildOut.value = { ...buildOut.value, raw: buildOut.value.raw + '\nno response from the box', ok: false, step: 'failed' }
   } finally {
     building.value = false
     if (buildFailed.value) setTimeout(() => { buildMsg.value = '' }, 8000)

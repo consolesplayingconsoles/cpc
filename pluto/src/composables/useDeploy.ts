@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { API_BASE } from './useNodes'
 import type { NodeMap } from './useNodes'
 import { useAchievement } from './useAchievement'
+import { useRunDurations } from './useRunDurations'
 
 export interface DeployResult {
   raw:       string
@@ -17,9 +18,6 @@ export interface DeployResult {
 // flashing more boards lengthens this number -- that drift is expected, not a bug.
 // (Key follows the cpc.<domain>.<leaf> convention; see the storage-keys .claude memory.)
 const DURATIONS_KEY = 'cpc.deploy.lastMs'
-function loadDurations(): Record<string, number> {
-  try { return JSON.parse(localStorage.getItem(DURATIONS_KEY) || '{}') } catch { return {} }
-}
 
 // When (epoch ms) each node last deployed successfully, keyed BY NODE id. Parallel to
 // lastMs (duration); this is the timestamp. Lets the drawer show "last deployed N ago"
@@ -47,13 +45,8 @@ export function useDeploy(getNodes: () => NodeMap = () => ({})) {
 
   const deploying        = ref<string | null>(null)
   const deployOutput     = ref<Record<string, DeployResult | null>>({})
-  const lastDurations    = ref<Record<string, number>>(loadDurations())
+  const { durations: lastDurations, remember: rememberDuration } = useRunDurations(DURATIONS_KEY)
   const lastDeployedAt   = ref<Record<string, number>>(loadLastAt())
-
-  function rememberDuration(id: string, ms: number) {
-    lastDurations.value = { ...lastDurations.value, [id]: ms }
-    try { localStorage.setItem(DURATIONS_KEY, JSON.stringify(lastDurations.value)) } catch { /* ignore */ }
-  }
 
   function rememberDeployedAt(id: string, at: number) {
     lastDeployedAt.value = { ...lastDeployedAt.value, [id]: at }

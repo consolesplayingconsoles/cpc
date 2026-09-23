@@ -54,7 +54,14 @@ export const translationApi = {
   createState: (ns: string, body: unknown) => sendJson<Record<string, unknown>>('POST', `${BASE}/${enc(ns)}`, body),
 
   // actions
-  run:     (path: string, lang: string) => sendJson<{ error?: string; dest?: string; dcp?: ReleasePatch }>('POST', `${BASE}/run`, { path, lang }),
+  // `log` = translate.sh's full output, shown in the Translation tab's terminal: the toast fades,
+  // the log stays until dismissed. NOT sendJson: a failed build answers 500 with the log attached,
+  // and sendJson throws the body away exactly when the log matters most.
+  run: async (path: string, lang: string) => {
+    const r = await fetch(`${BASE}/run`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ path, lang }) })
+    const j = await r.json().catch(() => ({})) as { error?: string; dest?: string; log?: string; dcp?: ReleasePatch }
+    return r.ok ? j : { ...j, error: j.error || `build -> ${r.status}` }
+  },
   openDir: (ns: string) => fetch(`${BASE}/open`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ ns }) }),
   remove:  (ns: string) => fetch(`${BASE}/delete`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ ns }) }),
 }

@@ -30,7 +30,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   close:         []
   // a native action's run, for the floating terminal (same place deploy's output goes)
-  'native-run':  [payload: { action: string; lines: string[]; ok: boolean | null; startedAt: number }]
+  'native-run':  [payload: { action: string; title: string; lines: string[]; ok: boolean | null; startedAt: number }]
   deploy:        []
   sync:          []
   'open-smb':    []
@@ -115,13 +115,24 @@ const nativeBusy = ref('')
 const nativeNote = ref('')
 watch(() => props.id, () => { nativeNote.value = '' })
 
+// The terminal tab's name: what was done, and to which console (or card).
+function nativeTitle(action: string): string {
+  const on = ' on ' + props.node.name
+  if (action === 'unmount-sd') return `Unmount ${props.node.sd ?? props.node.name} SD`
+  if (action === 'quit-game')  return 'Quit game' + on
+  if (action === 'restart-es') return 'Restart EmulationStation' + on
+  if (action === 'flash')      return 'Flash Homebrew' + on
+  if (action === 'games')      return 'Game Library' + on
+  return action + on
+}
 function nativeAction(action: string) {
+  const title = nativeTitle(action)
   nativeNote.value = ''
   nativeBusy.value = action
   const startedAt = Date.now()
   // The run goes to the terminal, which says what actually happened in the API's own words
   // ("SAROO unmounted: safe to pull", "WARN SAROO is busy, still mounted", "was not mounted").
-  emit('native-run', { action, lines: ['running ' + action + ' on ' + props.id], ok: null, startedAt })
+  emit('native-run', { action, title, lines: ['running ' + action + ' on ' + props.id], ok: null, startedAt })
   fetch(`${API_BASE}/native/${props.id}/${action}`, { method: 'POST' })
     .then(r => r.json())
     .then(j => {
@@ -129,11 +140,11 @@ function nativeAction(action: string) {
       if (j?.error) lines.push('ERROR ' + j.error)
       if (!lines.length) lines.push(j?.ok ? 'done' : 'failed')
       nativeNote.value = j?.error || (j?.ok ? '' : 'failed')
-      emit('native-run', { action, lines, ok: !!j?.ok, startedAt })
+      emit('native-run', { action, title, lines, ok: !!j?.ok, startedAt })
     })
     .catch(() => {
       nativeNote.value = 'API unreachable'
-      emit('native-run', { action, lines: ['ERROR API unreachable'], ok: false, startedAt })
+      emit('native-run', { action, title, lines: ['ERROR API unreachable'], ok: false, startedAt })
     })
     .finally(() => { nativeBusy.value = '' })
 }

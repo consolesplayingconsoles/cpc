@@ -11,7 +11,7 @@ export interface TerminalOutput {
 </script>
 
 <script setup lang="ts">
-import { ref, watch, computed, nextTick, onUnmounted } from 'vue'
+import { ref, watch, computed, nextTick, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps<{
   title:     string          // bar label, e.g. "deploy", "sync"
@@ -57,12 +57,14 @@ function fmtDur(ms: number): string {
 const elapsed = computed(() => props.output.startedAt ? fmtDur(now.value - props.output.startedAt) : '0s')
 const lastRef = computed(() => (props.lastMs ? fmtDur(props.lastMs) : null))
 
-// Auto-scroll to bottom when output grows
-watch(() => props.output.raw, () => {
+// Auto-scroll to bottom when output grows, and on mount (switching drawer tabs remounts it)
+function scrollDown() {
   nextTick(() => {
     if (bodyEl.value) bodyEl.value.scrollTop = bodyEl.value.scrollHeight
   })
-})
+}
+watch(() => props.output.raw, scrollDown)
+onMounted(scrollDown)
 
 watch(() => props.output, () => { copied.value = false })
 
@@ -89,7 +91,7 @@ async function copyOutput() {
   >
     <div class="term__bar">
       <span class="term__title">
-        ▶ {{ title }} ·
+        <span class="term__name" :title="title">▶ {{ title }}</span> ·
         <span class="term__step">{{ output.step }}</span>
         <span class="term__timer">
           {{ elapsed }}<span v-if="lastRef" class="term__last"> / ~{{ lastRef }}</span>
@@ -150,7 +152,10 @@ async function copyOutput() {
   align-items: center;
   gap: 8px;
 }
+.term__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .term__step {
+  flex: none;
+  white-space: nowrap;
   color: #3deb76;
   opacity: 0.7;
   font-size: 10px;
