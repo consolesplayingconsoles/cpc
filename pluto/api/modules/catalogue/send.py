@@ -60,6 +60,15 @@ def strategy_for(cfg, node=None):
     return None
 
 
+def _ours(f):
+    """A copy WE made (a cpc translation or mod), as opposed to someone else's release.
+
+    It matters for sending: a third-party ROM is immutable, so a target that has it needs
+    nothing. Ours carries the same catalogue name from one build to the next while its BYTES
+    change every time -- so "the target already has it" is never a reason to skip it."""
+    return any((v.get("author") or "").strip().lower() == "cpc" for v in (f.get("variants") or []))
+
+
 def plan(root, system, target, sources, files=None, all_missing=False):
     """-> {"copies": [{game, name, source: {node, path}}], "skipped": [{game, why}]}.
 
@@ -80,12 +89,13 @@ def plan(root, system, target, sources, files=None, all_missing=False):
                 continue
             by_variant.setdefault(f["variant"], []).append(f)
         for variant, candidates in sorted(by_variant.items()):
-            if variant in on_target:
+            best = min(candidates, key=lambda f: (rank[f["node"]], f["path"]))
+            replace = variant in on_target
+            if replace and not _ours(best):
                 skipped.append({"game": g["title"], "why": "already on %s" % target})
                 continue
-            best = min(candidates, key=lambda f: (rank[f["node"]], f["path"]))
             copies.append({"game": g["key"], "name": names.canonical_name(g["title"], best),
-                           "kind": g.get("kind") or "game",
+                           "kind": g.get("kind") or "game", "replace": replace,
                            "source": {"node": best["node"], "path": best["path"], "inner": best.get("inner")}})
     return {"copies": copies, "skipped": skipped}
 
@@ -179,23 +189,25 @@ def _files(p, ctx):
             if ext.lower() in DISC_FOLDER:
                 # a disc: its own folder, descriptor renamed to the game, tracks keep their names
                 name = c["name"]
-                if card["exists"](name):
+                if card["exists"](name) and not c.get("replace"):
                     p["skipped"].append({"game": c["name"], "why": "already there as " + name + "/"})
                     continue
                 members = ctx["members"](src, ext)
-                (ctx.get("emit") or lines.append)("copying %s/ (%d files)" % (name, len(members)))
+                verb = "replacing" if c.get("replace") else "copying"
+                (ctx.get("emit") or lines.append)("%s %s/ (%d files)" % (verb, name, len(members)))
                 for member, filename, is_descriptor in members:
                     card["put"](member, name + "/" + (name + ext if is_descriptor else filename))
-                lines.append("copied %s/" % name)
+                lines.append("%s %s/" % ("replaced" if c.get("replace") else "copied", name))
                 copied += 1
                 continue
             name = c["name"] + ext
-            if card["exists"](name):
+            if card["exists"](name) and not c.get("replace"):
                 p["skipped"].append({"game": c["name"], "why": "already there as " + name})
                 continue
-            (ctx.get("emit") or lines.append)("copying %s" % name)
+            verb = "replacing" if c.get("replace") else "copying"
+            (ctx.get("emit") or lines.append)("%s %s" % (verb, name))
             card["put"](src, name)
-            lines.append("copied %s" % name)
+            lines.append("%s %s" % ("replaced" if c.get("replace") else "copied", name))
             copied += 1
     finally:
         for line in card["finish"]():

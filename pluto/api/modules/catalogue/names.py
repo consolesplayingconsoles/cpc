@@ -10,7 +10,8 @@ names.py -- read a ROM filename into a title, its tags and its variants.
               No-Intro tag "(Rev 1)" / "(Rev A)" / "(v1.1)". The tag stays in `tags`.
   (...)       tags, kept raw for display only. Regions come from the header, never
               from the name (headers.py): a filename can be wrong.
-  [T-foo]     translation into foo. "[T-En by Some Team v1.0]" also carries its author
+  [T-foo]     translation into foo. "[T-En by Some Team v1.0]" also carries its author,
+              and so does a mod: "[Tokyo BS Guide by CPC v1.0]"
               (credited) and version.
   [anything]  a mod -- [!], [b], [h], [T+Eng] included. Cleanup happens by renaming.
   " vX.Y..."  a trailing version inside a bracket is split off, so "Boss Versus v0.3"
@@ -123,7 +124,7 @@ def parse(filename):
         kind = "translation" if bracket.startswith("T-") and len(bracket) > 2 else "mod"
         name, version = _split_version(bracket[2:] if kind == "translation" else bracket)
         v = {"kind": kind, "name": name, "version": version}
-        by = _BY.match(name) if kind == "translation" else None
+        by = _BY.match(name)          # mods carry an author the same way translations do
         if by:
             v["name"], v["author"] = by.group(1).strip(), by.group(2).strip()
         if kind == "translation":
