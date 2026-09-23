@@ -2079,6 +2079,21 @@ _DOCS_HTML = """<!DOCTYPE html>
 </html>"""
 
 
+def _ssh_sh(host, script, *args, stdin=None):
+    """Run a /bin/sh script on a node over SSH. -> (rc, output). Args land as $1.. ($0 is "_").
+    Lives at module level because the card helpers outside _send_dest need it as well."""
+    import shlex as _shlex
+    r = subprocess.run(["ssh", "-o", "ConnectTimeout=6", host,
+                        "sh -c %s _ %s" % (_shlex.quote(script), " ".join(_shlex.quote(a) for a in args))],
+                       stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=1800)
+    return r.returncode, r.stdout.decode("utf-8", "replace")
+
+
+def _mb(n):
+    """Bytes as a short human size for a message: 246MB, 3.3GB."""
+    return "%.1fGB" % (n / 1024.0 ** 3) if n >= 1024 ** 3 else "%dMB" % (n // 1024 ** 2)
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     config      = {}
     base_dir    = ""
@@ -2961,6 +2976,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
                          daemon=True).start()
         self._send(200, {"ok": True, "message": "%s SD backup started -- watch the chat feed." % node_id})
 
+    # Unmounting a card for real, in one place. NOT `umount -l`: a lazy unmount detaches the
+    # mountpoint at once and finishes the real work later, so it says "safe to pull" while the
+    # data may be unflushed AND the exFAT dirty flag still up -- Linux and macOS ignore that
+    # flag, SAROO's own reader does not and the cart stops booting. So: sync, umount, then PROVE
+    # it is gone and read the volume flags back (offset 106; bit 1 = dirty). od, not xxd: the Pi
+    # hub has no xxd.
+    SD_UMOUNT = (
+        'for l in "$@"; do d=$(readlink -f /dev/disk/by-label/$l 2>/dev/null); '
+        '[ -b "$d" ] || { echo "$l is not in the hub"; continue; }; '
+        'if ! grep -q "^$d " /proc/self/mounts; then echo "$l was not mounted"; continue; fi; '
+        'sync; if ! sudo umount "$d" 2>/dev/null; then sleep 2; sudo umount "$d" 2>/dev/null; fi; '
+        'if grep -q "^$d " /proc/self/mounts; then echo "WARN $l is busy, still mounted"; continue; fi; '
+        'f=$(sudo dd if=$d bs=1 skip=106 count=1 2>/dev/null | od -An -tu1 | tr -d " \n"); '
+        'case "$f" in 2|3|6|7) echo "WARN $l unmounted but still marked dirty: run fsck" ;; '
+        '*) echo "$l unmounted cleanly: safe to pull" ;; esac; '
+        # Re-arm the trigger. systemd leaves an automount unit "failed (Result: unmounted)"
+        # once its filesystem goes away under it, and the path then stops mounting on demand:
+        # the card became unbrowsable until someone restarted the unit by hand.
+        'u=$(systemd-escape -p --suffix=automount "/mnt/cpc-sd/$l" 2>/dev/null); '
+        '[ -n "$u" ] && sudo systemctl restart "$u" 2>/dev/null; '
+        'systemctl is-active "$u" >/dev/null 2>&1 || echo "WARN $l will not automount again: $u is $(systemctl is-active "$u" 2>/dev/null)"; '
+        'done')
+
     def _handle_native(self, node_id, action):
         """A node's NATIVE-system action (e.g. the Wii's homebrew flash / game library),
         as opposed to its Linux side (SSH deploy / SMB). Batocera: quit-game (stop the
@@ -2974,10 +3012,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             labels = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()]
             if not labels:
                 self._send(400, {"ok": False, "error": "%s has no SD card (SD_LABEL)" % node_id}); return
-            script = ('for l in "$@"; do m="/mnt/cpc-sd/$l"; '
-                      'if mountpoint -q "$m"; then sync; sudo umount -l "$m" && echo "$l unmounted: safe to pull" '
-                      '|| echo "WARN $l is busy, still mounted"; else echo "$l was not mounted"; fi; done')
-            rc, out = self._node_ssh("pi", ["sh", "-c", script, "unmount"] + labels, timeout=60, connect_timeout=5)
+            rc, out = self._node_ssh("pi", ["sh", "-c", self.SD_UMOUNT, "unmount"] + labels,
+                                     timeout=60, connect_timeout=5)
             if rc != 0:
                 self._send(502, {"ok": False, "error": (out.strip()[-200:] or "rc %d" % rc)}); return
             lines = [l for l in out.splitlines() if l.strip()]
@@ -4777,7 +4813,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ctx = {"target": target, "system": system, "locate": locate, "emit": emit,
                "command": lambda args: self._admin_command(target, args),
                "rom_ext": lambda src: self._send_rom_ext(system, src), "unpack": kind == "sd",
-               "card": self._send_dest(kind, target, target_cfg, system) if kind in ("local", "batocera", "sd", "ftp") else None,
+               "card": self._send_dest(kind, target, target_cfg, system, ctx_emit=emit) if kind in ("local", "batocera", "sd", "ftp") else None,
                "members": lambda src, ext: self._send_members(src, ext, workdir),
                # a kind with its own folder on the target (a card's Tools/): its copies go there
                "kind_dirs": self._send_kind_dirs(kind, target_cfg, system)}
@@ -4791,7 +4827,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
         result.update(strategy=kind, skipped=plan["skipped"])
         return result
 
-    def _send_dest(self, kind, node, cfg, system, card_label=None):
+    def _sd_pick_label(self, host, labels, want=None):
+        """Which of a node's cards to write to (SD_LABEL can name several: SAROO,SAROO2).
+
+        The first label used to win, so a second card was unreachable. What decides instead is
+        which card is IN the hub, since only one sits in the reader at a time. `want` (a delete
+        knows the card its copy is on) must be the one present: writing that path to the other
+        card would delete or overwrite the wrong game.
+        """
+        if not labels:
+            raise catalogue_send.NotAvailable("this node has no card (SD_LABEL is empty)")
+        rc, out = _ssh_sh(host, 'for l in "$@"; do [ -e "/dev/disk/by-label/$l" ] && echo "$l"; done',
+                         "pick", *labels)
+        here = [l for l in out.split() if l in labels] if rc == 0 else []
+        if not here:
+            raise catalogue_send.NotAvailable("no card in the hub: put %s in and try again"
+                                              % " or ".join(labels))
+        if want:
+            if want not in here:
+                raise catalogue_send.NotAvailable("this copy is on %s, but the hub has %s: swap the card"
+                                                  % (want, " and ".join(here)))
+            return want
+        if len(here) > 1:
+            raise catalogue_send.NotAvailable("%s are both in the hub: pull the one you are not "
+                                              "writing to" % " and ".join(here))
+        return here[0]
+
+    CARD_HEADROOM = 512 * 1024 * 1024     # room left over so a written file stays contiguous
+
+    def _send_dest(self, kind, node, cfg, system, card_label=None, ctx_emit=None):
         """I/O for the file-per-game send strategies (modules/catalogue/send.py _files):
         {mount, exists, put, finish}. Every source is first fetched to a local temp file (a
         node:/path source over SSH, which must come back whole; a .zip unpacked to its ROM for
@@ -4828,11 +4892,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 raise catalogue_send.NotAvailable("%s is empty at the source" % os.path.basename(src))
             return local
 
-        def ssh_sh(host, script, *args, stdin=None):
-            r = subprocess.run(["ssh", "-o", "ConnectTimeout=6", host,
-                                "sh -c %s _ %s" % (shlex.quote(script), " ".join(shlex.quote(a) for a in args))],
-                               stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=1800)
-            return r.returncode, r.stdout.decode("utf-8", "replace")
+        ssh_sh = _ssh_sh                     # module-level: other methods use it too
 
         # One remote write, the same for Batocera and the Pi: .part, size check, rename.
         REMOTE_PUT = ('%s mkdir -p "$(dirname "$1")" && %s sh -c \'cat > "$1.part"\' _ "$1" && [ "$(stat -c %%s "$1.part")" = "$2" ] '
@@ -4918,8 +4978,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             else:
                 host = ((roster.get("pi") or {}).get("CUSTOM_SSH_ALIAS") or "pipc").strip()
                 labels = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()]
-                # the card this copy is on, when the caller knows (a console can own several)
-                label = card_label if card_label in labels else labels[0]
+                label = self._sd_pick_label(host, labels, card_label)
                 mnt = "/mnt/cpc-sd/" + "".join(c for c in label if c.isalnum() or c in "-_")
                 base, sudo = mnt + "/" + self._sd_send_dir(cfg, system), "sudo"
 
@@ -4937,6 +4996,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                            'sudo mkdir -p "$3" 2>/dev/null; '
                                            'sudo touch "$3/.cpc-write-test" 2>/dev/null && sudo rm -f "$3/.cpc-write-test" '
                                            '|| { echo "$2 is still read-only, nothing was copied"; exit 3; }; '
+                                           'df -k --output=avail "$2" | tail -1 | tr -d " "; '
                                            'ls -1 "$3"; b=$3; shift 3; '
                                            'for s in "$@"; do if [ -d "$b/$s" ]; then ls -1 "$b/$s" | sed "s|^|$s/|"; fi; done',
                                            label, mnt, base, *self._send_kind_dirs("sd", cfg, system).values())
@@ -4945,26 +5005,56 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if rc != 0:
                     raise catalogue_send.NotAvailable((out.strip().splitlines() or ["could not reach " + node])[-1])
                 lines = out.splitlines()
-                state["ours"] = bool(lines) and lines[0] == "mounted"
+                # a card also answers with its free space, on the line after the mount state
+                if kind == "sd" and len(lines) > 1 and lines[1].isdigit():
+                    state["free"] = int(lines[1]) * 1024
+                    lines = [lines[0]] + lines[2:]
                 state["have"] = set(lines[1:])
 
             def put(src, name):
                 with tempfile.TemporaryDirectory() as tmp:
                     local = fetch(src, tmp, kind == "sd")
+                    size = os.path.getsize(local)
+                    free = state.get("free")
+                    # A card with barely any room left scatters a big file across the free space,
+                    # and a console that reads the card itself pays for it: a 246MB Saturn track
+                    # written into 3GB free came out in 11 extents (every game that boots is 1)
+                    # and the cart hung before its menu. Refuse BEFORE writing it.
+                    if free is not None and size > free - self.CARD_HEADROOM:
+                        raise catalogue_send.NotAvailable(
+                            "%s needs %s but the card has only %s free (a card needs %s spare for a "
+                            "file to land in one piece): delete some games from it first"
+                            % (name, _mb(size), _mb(free), _mb(self.CARD_HEADROOM)))
                     with open(local, "rb") as stream:
                         rc, out = ssh_sh(host, REMOTE_PUT % (sudo, sudo, sudo, sudo), base + "/" + name,
-                                         str(os.path.getsize(local)), stdin=stream)
+                                         str(size), stdin=stream)
                 if rc != 0:
                     raise catalogue_send.NotAvailable("copy failed for %s: %s" % (name, out.strip()[-200:]))
+                if state.get("free") is not None:
+                    state["free"] -= size
+                    if size >= 32 * 1024 * 1024:            # only worth asking about a big file
+                        fc, fo = ssh_sh(host, 'sudo filefrag "$1" 2>/dev/null | sed "s/.*: //"',
+                                        base + "/" + name)
+                        n = re.match(r"(\d+) extent", fo.strip())
+                        if fc == 0 and n and int(n.group(1)) > 1:
+                            (ctx_emit or (lambda _l: None))(
+                                "WARN %s landed in %s pieces: a card this full fragments big files, "
+                                "and the console may not read it" % (name, n.group(1)))
                 state["have"].add(name)
 
             def finish():
                 if kind == "batocera":
                     return rescan("batocera")
-                rc, out = ssh_sh(host, 'sync; if [ "$2" = 1 ]; then sudo umount "$1"; else sudo mount -o remount,ro "$1"; fi',
-                                 mnt, "1" if state["ours"] else "0")
-                lines = ["card flushed and %s" % ("unmounted: safe to pull" if state["ours"] else "back to read-only") if rc == 0
-                         else "WARN could not unmount the card: %s" % out.strip()[-200:]]
+                # ALWAYS unmount, whoever mounted it. Linux's exfat driver raises the volume's
+                # dirty flag when it mounts read-write and clears it on UNMOUNT -- a
+                # `remount,ro` flushes the data and leaves the flag up. Linux and macOS ignore
+                # a dirty volume; SAROO's own exFAT reader does not, and the cart stopped
+                # booting off a card that read fine everywhere else. autofs mounts it again
+                # (read-only, per fstab) the next time anything touches the path.
+                rc, out = ssh_sh(host, self.SD_UMOUNT, "unmount", label)
+                lines = [l for l in out.splitlines() if l.strip()] if rc == 0 else \
+                        ["WARN could not unmount the card, so it may be left marked dirty: %s"
+                         % out.strip()[-200:]]
                 return lines + rescan(node, sd_nodes=self._catalogue_sd_nodes())
 
             def remove(rel):
@@ -5155,22 +5245,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         kind = catalogue_send.strategy_for(cfg, node)
         if kind not in ("batocera", "sd"):
             self._send(400, {"error": "%s can't delete games from here (no writable ROM folder)" % (cfg.get("NODE_NAME") or node)}); return
-        # A card's paths are stored with the CARD LABEL in front ("SAROO/<game>/<game>.cue"),
-        # because one node can own several cards. The label is not a folder on the card, and the
-        # write base already points inside it, so it comes off before anything is deleted --
-        # with it, the target did not exist and `rm -rf` exited 0: a silent no-op that dropped
-        # the copy from the catalogue until the next scan put it back.
         card_label = (copy.get("card") or "").strip()
-        peers = [f for f in files if (f.get("card") or "") == card_label]
-        if card_label and clean.split("/")[0] == card_label:
-            clean = clean[len(card_label) + 1:]
-            peers = [dict(f, path=f["path"][len(card_label) + 1:]) for f in peers
-                     if f["path"].startswith(card_label + "/")]
-        target = clean
-        if "/" in clean:
-            top = clean.split("/")[0]
-            if not [f for f in peers if f["path"] != clean and f["path"].split("/")[0] == top]:
-                target = top                                          # the disc's own folder
+        # what to remove under the node's ROM base: the card label comes off the stored path,
+        # and a disc's own folder wins over its descriptor (send.card_target, tested there)
+        target = catalogue_send.card_target(clean, card_label, [dict(f) for f in files])
         try:
             card = self._send_dest(kind, node, cfg, system, card_label or None)
             card["mount"]()

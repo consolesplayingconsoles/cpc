@@ -69,6 +69,35 @@ def _ours(f):
     return any((v.get("author") or "").strip().lower() == "cpc" for v in (f.get("variants") or []))
 
 
+def card_target(path, card, peers):
+    """What a delete must actually remove on a node, given a catalogue copy's stored path.
+
+    A copy on a card is stored with the CARD LABEL in front ("SAROO/<game>/<game>.cue"),
+    because one node can own several cards. That label is not a folder on the card -- the
+    node's write base already points inside it -- so it comes off first. With it in the
+    path the target did not exist, and `rm -rf` on a missing path exits 0: the delete
+    looked like it worked while the file stayed put and the next scan brought it back.
+
+    A disc is a folder of tracks, so when no OTHER copy on the same card lives under that
+    folder, the folder itself is the target: deleting only the .cue would leave the bins.
+
+    path/card come from the copy; peers are the node's other copies (each {path, card}).
+    -> the path to remove, relative to the node's ROM base.
+    """
+    card = (card or "").strip()
+    if card and path.split("/")[0] == card:
+        path = path[len(card) + 1:]
+        peers = [dict(f, path=f["path"][len(card) + 1:]) for f in peers
+                 if (f.get("card") or "").strip() == card and f["path"].startswith(card + "/")]
+    else:
+        peers = [f for f in peers if (f.get("card") or "").strip() == card]
+    if "/" not in path:
+        return path
+    top = path.split("/")[0]
+    others = [f for f in peers if f["path"] != path and f["path"].split("/")[0] == top]
+    return path if others else top
+
+
 def plan(root, system, target, sources, files=None, all_missing=False):
     """-> {"copies": [{game, name, source: {node, path}}], "skipped": [{game, why}]}.
 
