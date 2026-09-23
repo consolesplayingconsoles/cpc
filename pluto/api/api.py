@@ -4900,11 +4900,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             def mount():
                 if kind == "sd":
+                    # These mountpoints are autofs, so touch the path FIRST: `mountpoint -q` is
+                    # true for the autofs layer before the card is mounted, so a remount lands
+                    # on autofs and the card then comes up read-only from fstab (the safe
+                    # default) -- the copy died on "Read-only file system". After remounting,
+                    # PROVE the folder is writable instead of trusting it.
                     rc, out = ssh_sh(host, 'D=/dev/disk/by-label/$1; [ -e "$D" ] || { echo "no card labelled $1 in the hub"; exit 2; }; '
-                                           'if mountpoint -q "$2"; then sudo mount -o remount,rw "$2" && echo reused; '
+                                           'ls "$2" >/dev/null 2>&1; '
+                                           'if mountpoint -q "$2"; then sudo mount -o remount,rw "$2" >/dev/null 2>&1; echo reused; '
                                            'else sudo mkdir -p "$2" && sudo mount "$D" "$2" && echo mounted; fi; '
-                                           'sudo mkdir -p "$3" && ls -1 "$3"; b=$3; shift 3; '
-                                           'for s in "$@"; do [ -d "$b/$s" ] && ls -1 "$b/$s" | sed "s|^|$s/|"; done',
+                                           'sudo mkdir -p "$3" 2>/dev/null; '
+                                           'sudo touch "$3/.cpc-write-test" 2>/dev/null && sudo rm -f "$3/.cpc-write-test" '
+                                           '|| { echo "$2 is still read-only, nothing was copied"; exit 3; }; '
+                                           'ls -1 "$3"; b=$3; shift 3; '
+                                           'for s in "$@"; do if [ -d "$b/$s" ]; then ls -1 "$b/$s" | sed "s|^|$s/|"; fi; done',
                                            label, mnt, base, *self._send_kind_dirs("sd", cfg, system).values())
                 else:
                     rc, out = ssh_sh(host, 'mkdir -p "$1" && echo reused && ls -1 "$1"', base)

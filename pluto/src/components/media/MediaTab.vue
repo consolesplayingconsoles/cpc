@@ -475,11 +475,11 @@ function syncSaves(target: string) {
 // beside the Network drawer), so it never covers the drawer.
 // Send all: streams into the same console as sync. A target that needs admin (PS2 drive)
 // answers with a `command` event instead of copying: the popup shows it.
-function sendAll(node: string, name: string) {
+function sendAll(node: string, name: string, path?: string, from?: string) {
   const startedAt = Date.now()
   termTitle.value = 'send'
   syncOut.value = { raw: '', ok: null, step: 'send to ' + name, startedAt }
-  const es = new EventSource(catalogueApi.sendStreamUrl(system.value, node))
+  const es = new EventSource(catalogueApi.sendStreamUrl(system.value, node, path, from))
   es.addEventListener('line', (e: MessageEvent) => {
     if (syncOut.value) syncOut.value = { ...syncOut.value, raw: syncOut.value.raw + e.data + '\n' }
   })
@@ -498,9 +498,16 @@ function sendAll(node: string, name: string) {
     if (syncOut.value?.ok === null) syncOut.value = { ...syncOut.value, raw: syncOut.value.raw + '\n[connection lost]', ok: false, step: 'failed' }
   }
 }
+// Floats bottom-right, BESIDE the drawer rather than under it (the deploy console does the same
+// next to the Network drawer). Terminal's own CSS is z-index 2 and the drawer is 4, so without an
+// explicit z-index here the console renders behind the drawer instead of next to it.
+// The console sits beside whichever drawer is open (a console page's, or the consoles page's
+// peek), never under it -- the same as the deploy console next to the Network drawer.
+const drawerOpen = computed(() => !!openGame.value || !!peekGame.value)
 const termStyle = computed(() => ({
-  right: openGame.value ? 'min(432px, calc(100% - 16px))' : '16px', bottom: '16px',
-  width: openGame.value ? 'min(560px, max(240px, calc(100% - 448px)))' : 'min(560px, calc(100% - 32px))', height: '260px',
+  right: drawerOpen.value ? 'min(432px, calc(100% - 16px))' : '16px', bottom: '16px',
+  width: drawerOpen.value ? 'min(560px, max(240px, calc(100% - 448px)))' : 'min(560px, calc(100% - 32px))', height: '260px',
+  zIndex: '5',
 }))
 </script>
 
@@ -652,7 +659,8 @@ const termStyle = computed(() => ({
       <GameDrawer v-if="peek && peekGame" :system="peek.system" :game="peekGame" :nodes="nodes" :system-icon="systemIcon(peek.system)"
                   :cover-version="coverVersion[peekGame.key]"
                   @close="peek = null" @favourite="togglePeekFavourite(peekGame, $event)"
-                  @cover-changed="coverChanged(peekGame)" @relabeled="reloadPeek" @changed="reloadPeek" />
+                  @cover-changed="coverChanged(peekGame)" @relabeled="reloadPeek" @changed="reloadPeek"
+                  @send="sendAll($event.node, nodeName($event.node), $event.path, $event.from)" />
       </div>
     </template>
 
@@ -820,7 +828,8 @@ const termStyle = computed(() => ({
       </div>
       <GameDrawer v-if="openGame && view" :system="view.system" :game="openGame" :nodes="nodes" :system-icon="systemIcon(system)"
                   :cover-version="coverVersion[openGame.key]"
-                  @close="go(system)" @favourite="toggleFavourite(openGame, $event)" @cover-changed="coverChanged(openGame)" @relabeled="relabeled" @changed="load" />
+                  @close="go(system)" @favourite="toggleFavourite(openGame, $event)" @cover-changed="coverChanged(openGame)" @relabeled="relabeled" @changed="load"
+                  @send="sendAll($event.node, nodeName($event.node), $event.path, $event.from)" />
       </div>
     </template>
 

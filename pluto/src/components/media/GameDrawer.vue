@@ -22,7 +22,9 @@ import { names } from '../../lib/catalogueNames'
 // entry by design -- the grouping below is what makes that readable (where Batocera
 // shows each file as its own game).
 const props = defineProps<{ system: string; game: Game; nodes: NodeMap; systemIcon?: string; coverVersion?: number }>()
-const emit = defineEmits<{ close: []; favourite: [on: boolean]; 'cover-changed': []; relabeled: []; changed: [] }>()
+const emit = defineEmits<{ close: []; favourite: [on: boolean]; 'cover-changed': []; relabeled: []; changed: [];
+  // one copy to a node: the page streams it into the console and reloads, as Send all does
+  send: [payload: { node: string; path: string; from: string }] }>()   // from = the node holding this copy
 
 interface Group { label: string; kind: 'original' | 'translation' | 'mod'; versions: string[]; authors: string[]; files: CatalogueFile[] }
 
@@ -181,7 +183,9 @@ async function saveLabel() {
 }
 const focusEl = (el: unknown) => { if (el instanceof HTMLInputElement) el.focus() }
 
-const { playTitle, play, quit, openFolder, actionError, sendTargets, send, sendCommand, sending } =
+// send() is not taken from the composable: a copy goes up to the page, which streams it into
+// the console and reloads the list, the same path Send all uses.
+const { playTitle, play, quit, openFolder, actionError, sendTargets, sendCommand, sending } =
   useRomActions(toRef(props, 'system'), toRef(props, 'nodes'))
 watch(() => props.game.key, () => { sendCommand.value = '' })
 
@@ -299,7 +303,7 @@ async function forget(f: CatalogueFile) {
         :remove-title="f.node === 'lab' ? 'Delete: move to the Trash' : 'Delete from ' + nodeName(f.node)"
         :error="active === key(f) ? actionError : null"
         @play="act(f, () => play(f))" @quit="act(f, () => quit(f))" @open="act(f, () => openFolder(f))"
-        @send="id => act(f, () => send(f, id))" @remove="act(f, () => deleteCopy(f))" @forget="act(f, () => forget(f))"
+        @send="id => emit('send', { node: id, path: f.path, from: f.node })" @remove="act(f, () => deleteCopy(f))" @forget="act(f, () => forget(f))"
       >
         <div class="gd__copy-head">
           <button class="gd__node-link" :title="'Open ' + nodeName(f.node) + ' in Network'" @click="openNode(f.node)">
