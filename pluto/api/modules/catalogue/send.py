@@ -15,6 +15,7 @@ Strategies, chosen from the target node (strategy_for):
   local    lab            this Mac's library, <ROMS_PATH>/<system>/roms
   batocera batocera       the box's /userdata/roms/<system>, over SSH
   sd       SD_LABEL +     a card in the Pi hub, under SD_ROMS_DIR; ROMs unpacked from .zip
+                          (an archive we cannot open, .7z and friends, is skipped, not copied)
            SD_ROMS_DIR
   hdd      PS2_HDD_BYTES  the PS2's APA drive on this Mac: root only, so the answer is the
                           Terminal command (nodes/local/<node>/scripts/ps2hdd.py install)
@@ -115,6 +116,10 @@ def _nothing(ctx):
 
 
 MULTI_FILE = (".cue", ".gdi", ".m3u", ".ccd", ".mds")
+# Only .zip can be opened here (stdlib). A card target unpacks the ROM out of the archive, so
+# any other archive would be copied in VERBATIM -- and a console that indexes its game folder
+# then chokes on a file it cannot read: a .7z dropped in SAROO/ISO stopped the cart booting.
+OPAQUE_ARCHIVES = (".7z", ".rar", ".gz", ".xz", ".tar")
 DISC_FOLDER = (".gdi", ".cue")      # the multi-file formats a send can carry: descriptor + listed tracks
 
 
@@ -159,6 +164,9 @@ def _files(p, ctx):
             c = dict(c, name=sub.rstrip("/") + "/" + c["name"])
         if src is None:
             p["skipped"].append({"game": c["name"], "why": "%s's copy can't be read from here yet" % c["source"]["node"]})
+        elif ctx.get("unpack") and ext.lower() in OPAQUE_ARCHIVES:
+            p["skipped"].append({"game": c["name"],
+                                 "why": "%s can't be unpacked here, and the console can't read an archive" % ext})
         elif ext.lower() in MULTI_FILE and not (ext.lower() in DISC_FOLDER and ctx.get("members")):
             p["skipped"].append({"game": c["name"], "why": "%s disc images can't be sent yet" % ext})
         else:

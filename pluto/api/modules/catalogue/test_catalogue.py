@@ -536,6 +536,21 @@ def test_mame_titles_come_from_the_scrape_not_the_romset():
     shutil.rmtree(root)
 
 
+def test_send_to_a_card_skips_an_archive_it_cannot_unpack():
+    """A .7z copied verbatim into SAROO/ISO stopped the cart booting: skip, do not copy."""
+    put = []
+    card = {"mount": lambda: None, "exists": lambda n: False,
+            "put": lambda src, name: put.append(name), "finish": lambda: []}
+    plan = {"copies": [{"game": "densha", "name": "Densha de Go! EX (Japan)", "kind": "game",
+                        "source": {"node": "lab", "path": "Densha de Go! EX (Japan).7z"}}], "skipped": []}
+    ctx = {"target": "saturn", "system": "saturn", "locate": lambda src: "/lab/" + src["path"],
+           "emit": None, "rom_ext": lambda src: "." + src["path"].rsplit(".", 1)[-1], "unpack": True,
+           "card": card, "members": None}
+    send._files(plan, ctx)
+    assert put == []
+    assert plan["skipped"] and ".7z can't be unpacked here" in plan["skipped"][0]["why"]
+
+
 def test_send_writes_a_tool_into_the_kind_folder_and_games_where_they_were():
     """SD_SEND_DIRS=tool:Mega Drive/Tools: a tool lands in Tools/, a game still in the root."""
     put, have = [], set()

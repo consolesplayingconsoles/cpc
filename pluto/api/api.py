@@ -2503,7 +2503,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             qs = urllib.parse.parse_qs(parsed.query)
             self._handle_catalogue_send_stream(urllib.parse.unquote(parts[1]), {
                 "node": (qs.get("node") or [""])[0], "all": (qs.get("all") or [""])[0] in ("1", "true"),
-                "path": (qs.get("path") or [""])[0] or None})
+                "path": (qs.get("path") or [""])[0] or None,
+                "from": (qs.get("from") or [""])[0] or None})
         elif parsed.path == "/catalogue/search":
             qs = urllib.parse.parse_qs(parsed.query)
             self._send(200, catalogue.search(self._catalogue_root(), (qs.get("q") or [""])[0]))
@@ -4725,7 +4726,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         them; this handler never branches on the strategy. Answer: {status: "command", command}
         (run it in Terminal) or {status: "done", lines}; a 400 says why nothing was sent."""
         target = str(body.get("node") or "")
-        files = body.get("files") or ([{"node": "lab", "path": body["path"]}] if body.get("path") else [])
+        # `from` = the node holding the copy (the drawer knows it). Defaulting to lab made a send
+        # TO lab impossible: plan() drops any candidate already on the target, so source == target
+        # filtered everything out and the send reported "nothing to copy".
+        files = body.get("files") or ([{"node": body.get("from") or "lab", "path": body["path"]}]
+                                      if body.get("path") else [])
         if not re.match(r"^[A-Za-z0-9_.-]+$", system) or not isinstance(files, list):
             raise catalogue_send.NotAvailable("bad request")
         target_cfg = self.__class__.config if target == "lab" else ((self.__class__.node_roster or {}).get(target) or {})
@@ -4753,22 +4758,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             plan = catalogue_send.plan(self._catalogue_root(), system, target, sources,
                                        files=[f for f in files if isinstance(f, dict)], all_missing=bool(body.get("all")))
         emit("%s: %d to copy, %d skipped (%s)" % (target, len(plan["copies"]), len(plan["skipped"]), kind))
+        # A send may have to unpack an archive to write the console's own layout; the files it
+        # extracts live here until the copy is done.
+        workdir = tempfile.mkdtemp(prefix="cpc-send-")
         ctx = {"target": target, "system": system, "locate": locate, "emit": emit,
                "command": lambda args: self._admin_command(target, args),
-               "rom_ext": lambda src: os.path.splitext(src.get("inner") or src["path"])[1], "unpack": kind == "sd",
+               "rom_ext": lambda src: self._send_rom_ext(system, src), "unpack": kind == "sd",
                "card": self._send_dest(kind, target, target_cfg, system) if kind in ("local", "batocera", "sd", "ftp") else None,
-               "members": self._send_members,
+               "members": lambda src, ext: self._send_members(src, ext, workdir),
                # a kind with its own folder on the target (a card's Tools/): its copies go there
                "kind_dirs": self._send_kind_dirs(kind, target_cfg, system)}
         try:
             result = catalogue_send.STRATEGIES[kind](plan, ctx)
         finally:
+            import shutil
+            shutil.rmtree(workdir, ignore_errors=True)
             for sk in plan["skipped"]:
                 emit("skipped %s: %s" % (sk["game"], sk["why"]))
         result.update(strategy=kind, skipped=plan["skipped"])
         return result
 
-    def _send_dest(self, kind, node, cfg, system):
+    def _send_dest(self, kind, node, cfg, system, card_label=None):
         """I/O for the file-per-game send strategies (modules/catalogue/send.py _files):
         {mount, exists, put, finish}. Every source is first fetched to a local temp file (a
         node:/path source over SSH, which must come back whole; a .zip unpacked to its ROM for
@@ -4894,7 +4904,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 base, sudo = "/userdata/roms/" + system, ""
             else:
                 host = ((roster.get("pi") or {}).get("CUSTOM_SSH_ALIAS") or "pipc").strip()
-                label = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()][0]
+                labels = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()]
+                # the card this copy is on, when the caller knows (a console can own several)
+                label = card_label if card_label in labels else labels[0]
                 mnt = "/mnt/cpc-sd/" + "".join(c for c in label if c.isalnum() or c in "-_")
                 base, sudo = mnt + "/" + self._sd_send_dir(cfg, system), "sudo"
 
@@ -4943,8 +4955,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return lines + rescan(node, sd_nodes=self._catalogue_sd_nodes())
 
             def remove(rel):
-                """rm -rf one file or disc folder under the node's ROM root (no Trash there)."""
-                rc, out = ssh_sh(host, '%s rm -rf -- "$1"' % sudo, base + "/" + rel)
+                """rm -rf one file or disc folder under the node's ROM root (no Trash there).
+                A path that is not there is an ERROR: `rm -rf` would exit 0 and the delete would
+                look like it worked while the file stayed on the card."""
+                rc, out = ssh_sh(host, '[ -e "$1" ] || { echo "not on the card: $1"; exit 4; }; %s rm -rf -- "$1"' % sudo,
+                                 base + "/" + rel)
                 if rc != 0:
                     raise catalogue_send.NotAvailable("could not delete %s on %s: %s" % (rel, node, out.strip()[-200:]))
 
@@ -4953,10 +4968,91 @@ class Handler(http.server.BaseHTTPRequestHandler):
             card["remove"] = remove
         return card
 
-    def _send_members(self, src, ext):
+    # Archive readers a send can use: .zip from the stdlib, .7z through the 7z command when
+    # it is installed. An archive we cannot open is skipped by send.py, never copied to a card.
+    @staticmethod
+    def _archive_list(path):
+        """Names inside an archive, or [] when it cannot be read here."""
+        import shutil, zipfile
+        if path.lower().endswith(".zip"):
+            try:
+                with zipfile.ZipFile(path) as z:
+                    return [n for n in z.namelist() if not n.endswith("/")]
+            except Exception:
+                return []
+        if path.lower().endswith(".7z"):
+            exe = shutil.which("7z") or shutil.which("7za")
+            if not exe:
+                return []
+            r = subprocess.run([exe, "l", "-ba", "-slt", path], stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, timeout=300)
+            return [l[7:].strip() for l in r.stdout.decode("utf-8", "replace").splitlines()
+                    if l.startswith("Path = ")]
+        return []
+
+    @staticmethod
+    def _archive_extract(path, dest):
+        """Unpack an archive into dest. -> True when it worked."""
+        import shutil, zipfile
+        if path.lower().endswith(".zip"):
+            try:
+                with zipfile.ZipFile(path) as z:
+                    z.extractall(dest)
+                return True
+            except Exception:
+                return False
+        exe = shutil.which("7z") or shutil.which("7za")
+        if not exe:
+            return False
+        r = subprocess.run([exe, "x", "-y", "-o" + dest, path], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=3600)
+        return r.returncode == 0
+
+    def _send_rom_ext(self, system, src):
+        """What the copy will BE on the target: the ROM's own extension, and for an archive the
+        extension of what is inside it -- a .cue in there means a disc, so the send writes the
+        game's folder (the layout a card expects) instead of copying the archive."""
+        path = src.get("inner") or src["path"]
+        ext = os.path.splitext(path)[1]
+        if ext.lower() in self.ARCHIVES and not src.get("inner"):
+            local = self._lab_rom(system, src["path"]) if src.get("node") == "lab" else None
+            names = self._archive_list(local) if local else []
+            inner = next((n for n in names if os.path.splitext(n)[1].lower() in self.DESCRIPTORS), None)
+            if inner:
+                return os.path.splitext(inner)[1]
+            if len(names) == 1:
+                return os.path.splitext(names[0])[1]
+        return ext
+
+    ARCHIVES = (".zip", ".7z")
+    DESCRIPTORS = (".cue", ".gdi")
+
+    def _disc_in_archive(self, path, workdir):
+        """Unpack an archive holding a disc and return its descriptor (.cue/.gdi) path.
+
+        A card wants the console's own layout -- SAROO reads SAROO/ISO/<game>/<game>.cue plus
+        its (Track NN).bin files -- so an archived disc has to be opened and written out that
+        way. Copying the archive in instead is what stopped the SAROO cart booting.
+        """
+        dest = os.path.join(workdir, "x%d" % abs(hash(path)))
+        if not os.path.isdir(dest):
+            os.makedirs(dest)
+            if not self._archive_extract(path, dest):
+                raise catalogue_send.NotAvailable("could not unpack %s" % os.path.basename(path))
+        found = [os.path.join(r, f) for r, _d, fs in os.walk(dest) for f in fs
+                 if os.path.splitext(f)[1].lower() in self.DESCRIPTORS]
+        if not found:
+            raise catalogue_send.NotAvailable("%s holds no .cue or .gdi" % os.path.basename(path))
+        return sorted(found)[0]
+
+    def _send_members(self, src, ext, workdir=None):
         """A .gdi/.cue disc as the files a send copies: [(source, file name, is_descriptor)].
-        src is what locate() returned: a local path or node:/path (read over SSH)."""
+        src is what locate() returned: a local path or node:/path (read over SSH), or an
+        archive holding the disc, which is unpacked into workdir first."""
         import shlex
+        if workdir and src.lower().endswith(self.ARCHIVES):
+            src = self._disc_in_archive(src, workdir)
+            ext = os.path.splitext(src)[1]
         m = re.match(r"^([A-Za-z0-9_.-]+):(/.*)$", src)
         if m:
             r = subprocess.run(["ssh", "-o", "ConnectTimeout=6", m.group(1), "cat " + shlex.quote(m.group(2))],
@@ -5046,13 +5142,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
         kind = catalogue_send.strategy_for(cfg, node)
         if kind not in ("batocera", "sd"):
             self._send(400, {"error": "%s can't delete games from here (no writable ROM folder)" % (cfg.get("NODE_NAME") or node)}); return
+        # A card's paths are stored with the CARD LABEL in front ("SAROO/<game>/<game>.cue"),
+        # because one node can own several cards. The label is not a folder on the card, and the
+        # write base already points inside it, so it comes off before anything is deleted --
+        # with it, the target did not exist and `rm -rf` exited 0: a silent no-op that dropped
+        # the copy from the catalogue until the next scan put it back.
+        card_label = (copy.get("card") or "").strip()
+        peers = [f for f in files if (f.get("card") or "") == card_label]
+        if card_label and clean.split("/")[0] == card_label:
+            clean = clean[len(card_label) + 1:]
+            peers = [dict(f, path=f["path"][len(card_label) + 1:]) for f in peers
+                     if f["path"].startswith(card_label + "/")]
         target = clean
         if "/" in clean:
             top = clean.split("/")[0]
-            if not [f for f in files if f["path"] != rel and f["path"].split("/")[0] == top]:
+            if not [f for f in peers if f["path"] != clean and f["path"].split("/")[0] == top]:
                 target = top                                          # the disc's own folder
         try:
-            card = self._send_dest(kind, node, cfg, system)
+            card = self._send_dest(kind, node, cfg, system, card_label or None)
             card["mount"]()
             try:
                 card["remove"](target)
