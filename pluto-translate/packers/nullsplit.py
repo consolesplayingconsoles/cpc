@@ -32,6 +32,8 @@ table's CMD size, and rec0's u32 script-length marker. ASM is untouched.
 """
 import struct, bisect
 
+from . import wrapping
+
 LB = b"\x01\xff"          # in-box line break
 PB = b"\x04\xff"          # page break (wait-for-input); the game's box holds ~2 lines/page
 
@@ -165,18 +167,8 @@ def _sections(d, base):
     return secs
 
 
-def _wrap(text, width):
-    out, cur = [], ""
-    for w in text.split(" "):
-        if not cur:
-            cur = w
-        elif len(cur) + 1 + len(w) <= width:
-            cur += " " + w
-        else:
-            out.append(cur); cur = w
-    if cur:
-        out.append(cur)
-    return out
+_hyphen_pieces = wrapping.hyphen_pieces      # kept as a name for the tests/census
+_wrap = wrapping.wrap
 
 
 MID = LB + PB + LB        # 01ff 04ff 01ff — the game's page-break grammar (line, page, line)
