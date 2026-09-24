@@ -23,6 +23,8 @@ import struct
 
 from packers import ptrtable
 
+from . import wrapping
+
 DESC_BASE = 0x1800
 SECTOR = 0x800
 LB = b"\x01\xff"                       # in-box line break
@@ -34,18 +36,7 @@ def _off(b):
     return int(o, 16) if isinstance(o, str) else o
 
 
-def _wrap(text, width):
-    out, cur = [], ""
-    for w in text.split(" "):
-        if not cur:
-            cur = w
-        elif len(cur) + 1 + len(w) <= width:
-            cur += " " + w
-        else:
-            out.append(cur); cur = w
-    if cur:
-        out.append(cur)
-    return out
+_wrap = wrapping.wrap      # shared: breaks over-long hyphenated words (see wrapping.py)
 
 
 def _paginate(ca, encode, box, lpp):

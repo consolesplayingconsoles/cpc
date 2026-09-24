@@ -88,12 +88,90 @@ def _squeeze(g, tw):
             seg = g[r][lo:hi]
             if seg: out[r][i] = max(seg)
     return out
-def _apos_r(g, sq):             # BOLD apostrophe, RIGHT edge. ALWAYS squeeze the letter to 14 cols so
-    g = _squeeze(g, 14)         # a right-ascender letter (d, b) can't merge with the mark; 3px solid
+def _balance(g, mark_col=16):
+    """Sit the letter so the gap BEFORE it matches the gap between it and its mark.
+
+    The first version pushed the letter as far left as it would go (ink ending at col 13), which
+    left 4 px of left bearing and only 2 px before the mark: the operator read that as lopsided on
+    hardware ("balance both sides to be similarly wide"). Sharing the slack evenly gives 3 px and
+    3 px for a 10 px letter, and keeps the >= 2 px of clearance the 2bpp blit needs.
+    """
+    cols = [c for c in range(W) if any(g[r][c] for r in range(ROWS))]
+    if not cols:
+        return g
+    lo, hi = min(cols), max(cols)
+    lpad = max(0, (mark_col - (hi - lo + 1)) // 2)
+    shift = lo - lpad
+    if shift > 0:
+        return [row[shift:] + [0] * shift for row in g]
+    if shift < 0:
+        return [[0] * (-shift) + row[:W + shift] for row in g]
+    return g
+
+
+# The apostrophe hung on the letter's own SHOULDER, the letter untouched.
+# The operator's read, and it is the right one: there is empty space between the letter and the mark,
+# so close the gap instead of moving (or squeezing) the letter. An apostrophe sits at cap height
+# (rows 0-4) and a lowercase body at x-height (rows 6-17), so the two never share a row and the mark
+# can hang anywhere along the top. It is anchored one column in from THAT letter's right edge, so it
+# follows the letter's width (narrow `i` gets it at 13-15, round `e` at 17-19) instead of parking at
+# the cell edge, where it read as belonging to the next letter. Nothing moves: the letter keeps its
+# full width AND its normal 8 px spacing either side.
+def _apos_px(lo, wide=True):
+    if wide:
+        return [(0, lo), (0, lo + 1), (0, lo + 2), (1, lo), (1, lo + 1), (1, lo + 2),
+                (2, lo), (2, lo + 1), (2, lo + 2), (3, lo + 1), (4, lo)]
+    return [(0, lo), (0, lo + 1), (1, lo), (1, lo + 1), (2, lo), (2, lo + 1), (3, lo + 1), (4, lo)]
+
+
+_PX_APOS_C3 = _apos_px(17)          # the widest letters end up here; kept as names for the tests
+_PX_APOS_C2 = _apos_px(18, False)
+
+
+def _apos_corner(g):
+    """Hang the apostrophe just PAST the letter's right edge, never above it.
+
+    Anchored at the letter's right edge + 1, so it never sits on top of a stroke ("u' the apostrophe
+    is right over the right part of u"), and the letter is nudged left by at most 2 px if that is
+    what it takes to fit the 3 px wide mark. Cap height vs x-height means they never share a row, so
+    nothing here can collide; this is purely about where the eye reads the mark.
+    """
+    body = [c for c in range(W) if any(g[r][c] for r in range(6, ROWS))]
+    if not body:
+        return None
+    for wide in (True, False):              # a 3 px mark first, and only then the narrow one
+        for shift in (0, 1, 2):             # nudging the letter at most 2 px to make room for it
+            moved = [row[shift:] + [0] * shift for row in g] if shift else [row[:] for row in g]
+            right = max(c for c in range(W) if any(moved[r][c] for r in range(6, ROWS)))
+            px = _apos_px(right + 1, wide)
+            if max(c for _, c in px) <= W - 1 and not any(moved[r][c] for r, c in px):
+                for r, c in px:
+                    moved[r][c] = 3
+                return moved
+    return None
+
+
+def _apos_r(g, sq):             # BOLD apostrophe, RIGHT edge.
+    """The letter is MOVED when it fits, and only squeezed when it cannot be.
+
+    It used to squeeze every letter to 14 columns so a right-ascender (d, b) could not merge with
+    the mark. The price was a thinned letter: `a` went from 12 px to 9 and read as a lighter, oddly
+    isolated glyph between its neighbour and the mark ("Grandpa'?"), and `n` the same. Moving keeps
+    every pixel, and the 2-column clearance still guards the ascenders, so only the letters too wide
+    to move (m at 14 px, w at 20) take the squeeze now.
+    """
+    corner = _apos_corner(g)                        # best case: nothing moves at all
+    if corner is not None:
+        return corner
+    cols = [c for c in range(W) if any(g[r][c] for r in range(ROWS))]
+    if cols and max(cols) - min(cols) + 1 <= 12:     # else move it, every stroke intact
+        return _mark_r(g, _PX_APOS)
+    g = _squeeze(g, 14)         # too wide to move (m, w): squeeze, as before; 3px solid
     # M's base has a thin col-0 left serif set apart from its main stroke; the squeeze strands it as a
     # floating "|" ghost. If col 0 is inked but cols 1-2 are empty, that's the orphan serif -> drop it.
     if any(g[r][0] for r in range(ROWS)) and not any(g[r][1] or g[r][2] for r in range(ROWS)):
         for r in range(ROWS): g[r][0] = 0
+    g = _balance(g)                            # even gaps either side of the letter, as with the marks
     for r, c in ((0,16),(0,17),(0,18),(1,16),(1,17),(1,18),   # (thin marks vanish in the game's blit).
                  (2,16),(2,17),(2,18),(3,17),(4,16)):
         if 0 <= c < W: g[r][c] = 3
@@ -105,11 +183,63 @@ def _apos_r(g, sq):             # BOLD apostrophe, RIGHT edge. ALWAYS squeeze th
 # never scaled, even a full-height mark like `!` fits without touching a stroke.
 # All pixels are level 3 (solid): the game's 2bpp blit eats thin or anti-aliased marks.
 _PX_DOT   = [(r, c) for r in (16, 17, 18) for c in (16, 17, 18)]
+# The comma stays inside cols 16-18 like the other marks. An earlier version let its tail reach
+# col 15, which left only ONE blank column before the letter -- and a 1 px gap is what the game's
+# 2bpp blit merges. Two columns of clearance on every mark, no exceptions.
 _PX_COMMA = ([(r, c) for r in (14, 15, 16) for c in (16, 17, 18)]
-             + [(17, 15), (17, 16), (17, 17), (18, 15), (18, 16)])        # body + descending tail
+             + [(17, 16), (17, 17), (17, 18), (18, 16), (18, 17)])        # body + descending tail
 _PX_BANG  = ([(r, c) for r in range(3, 14) for c in (16, 17, 18)]
              + [(r, c) for r in (16, 17, 18) for c in (16, 17, 18)])      # stem, gap at 14-15, dot
-_MARKS = {".": _PX_DOT, ",": _PX_COMMA, "!": _PX_BANG}
+# The apostrophe as a MOVED mark (kind 'rm'), for letters narrow enough not to need the squeeze:
+# same shape `_apos_r` draws, but the letter keeps every pixel and `_balance` places it. `I` is 8 px
+# wide, so squeezing it to 14 columns thinned its stem to 1 px -- the operator asked for a wider I
+# and a smaller gap, and moving gives both.
+_PX_APOS = ([(r, c) for r in (0, 1, 2) for c in (16, 17, 18)] + [(3, 17), (4, 16)])
+_MARKS = {".": _PX_DOT, ",": _PX_COMMA, "!": _PX_BANG, "'": _PX_APOS}
+
+
+# ── marks hung in the letter's own bottom-right corner ──────────────────────────
+# Same idea as the apostrophe's shoulder, and for the same reason: a combo that MOVES the letter
+# steals from the gap to the letter before it ("u, not quite yet", "n in soon"). A 2 px mark in
+# columns 18-19 fits without touching the letter on 22 of the 26 letters for `.` and `,` (a g k m
+# collide: their bowl or descender reaches the corner) and on 16 for the full-height `!`.
+# Everything else falls back to the moved-and-balanced version below.
+_PX_DOT_C   = [(r, c) for r in (16, 17, 18) for c in (18, 19)]
+_PX_COMMA_C = [(r, c) for r in (15, 16, 17) for c in (18, 19)] + [(18, 18)]
+_PX_BANG_C  = ([(r, c) for r in range(3, 14) for c in (18, 19)]
+               + [(r, c) for r in (16, 17, 18) for c in (18, 19)])
+_MARKS_CORNER = {".": _PX_DOT_C, ",": _PX_COMMA_C, "!": _PX_BANG_C}
+
+
+_MARK_AIR = 3       # px between the letter and a hung mark. At 0 (the mark flush against the letter)
+                    # the operator read every one of them as cramped: "e." "n." "n," "u," "u." "y!".
+
+
+def _mark_corner(g, kind):
+    """Hang the mark at columns 18-19 with `_MARK_AIR` px of daylight before it.
+
+    The letter is nudged left only as far as that daylight needs -- 2-3 px, against the 4-5 px the
+    old 16-18 placement cost -- so it keeps 5-6 px of left bearing instead of 3. Returns `None` when
+    the letter's own ink is in the corner (a g k m w, and the taller `!` on b e o p v): those fall
+    back to the moved-and-balanced version.
+    """
+    px = _MARKS_CORNER.get(kind)
+    if px is None or any(g[r][c] for r, c in px):
+        return None
+    cols = [c for c in range(W) if any(g[r][c] for r in range(ROWS))]
+    if not cols:
+        return None
+    shift = max(0, max(cols) - (min(c for _, c in px) - 1 - _MARK_AIR))
+    if shift:
+        if min(cols) - shift < 1:                       # would run off the left edge: leave it
+            return None
+        g = [row[shift:] + [0] * shift for row in g]
+        if any(g[r][c] for r, c in px):                 # the shift moved ink INTO the corner
+            return None
+    out = [row[:] for row in g]
+    for r, c in px:
+        out[r][c] = 3
+    return out
 
 
 def _period_r(g, px=None):
@@ -127,18 +257,16 @@ def _period_r(g, px=None):
     visibly so -- is exactly the 0.7x downscale merging 2 px strokes into 1, the same failure that
     needed the o/e fudge. Moving instead of scaling removes the cause, so there is no fudge here.
 
-    Only `m` (14 px) and `w` (full 20 px) are too wide to move without touching the left edge; they
-    fall back to the proven squeeze. The letter always ends by col 13, leaving cols 14-15 blank and
-    the dot in 16-18: the same clearance the shipped apostrophe combos use.
+    `m` (14 px) and `w` (20 px) are too wide to move, so they would hit the squeeze branch below --
+    and the operator rejected squeezed glyphs on hardware. They are excluded from every mark set
+    instead (see `_MARK_SKIP`), so NO shipped combo is scaled: the branch is kept only as a guard.
+    The letter always ends by col 13, leaving cols 14-15 blank and the mark in 16-18.
     """
     cols = [c for c in range(W) if any(g[r][c] for r in range(ROWS))]
     lo, hi = (min(cols), max(cols)) if cols else (0, W - 1)
-    shift = hi - 13
-    if shift <= 0:
-        pass                                            # already clear of the dot
-    elif lo - shift >= 1:                               # room to move: strokes untouched
-        g = [row[shift:] + [0] * shift for row in g]
-    else:                                               # m / w: must scale, as the apostrophe does
+    if hi - lo + 1 <= 14:                               # fits: place it with even gaps either side
+        g = _balance(g)
+    else:                                               # unreachable for the shipped sets (see _MARK_SKIP)
         g = _squeeze(g, 14)
         if any(g[r][0] for r in range(ROWS)) and not any(g[r][1] or g[r][2] for r in range(ROWS)):
             for r in range(ROWS): g[r][0] = 0           # same orphan-serif drop as _apos_r
@@ -150,9 +278,49 @@ def _period_r(g, px=None):
 _mark_r = _period_r        # the general name; `_period_r` is kept for the tests that use it
 
 
+def _bold_bang_right(g):
+    """Redraw the `!` half of the ?!/!? cell 3 px wide, like every mark we author ourselves.
+
+    The stock `!` is a 2 px stem. On its own that reads fine, but pressed against the fat `?` in one
+    cell the operator read it as a hairline ("very narrow !"). Our letter+mark combos all use a 3 px
+    solid mark for exactly this reason (the 2bpp blit eats thin strokes), so the interrobang matches
+    them now instead of the stock glyph.
+    """
+    for r in range(ROWS):
+        for c in range(14, W):
+            g[r][c] = 0
+    for r in range(2, 14):                      # stem, same rows as the stock bang
+        for c in (15, 16, 17):
+            g[r][c] = 3
+    for r in (15, 16, 17):                      # the dot
+        for c in (15, 16, 17):
+            g[r][c] = 3
+    return g
+
+
+def _bold_bang_left(g):
+    """The LEFT half of `!!` / `!?`, drawn 3 px like its partner so the pair is symmetric.
+
+    Operator on hardware: "not vertically equal !!" -- the two bangs came from different places (one
+    authored by us at 3 px, one the stock 2 px hairline), so they differed in weight AND in height."""
+    for r in range(ROWS):
+        for c in range(0, 15):          # 14 too: the right half only clears from 14 up
+            g[r][c] = 0
+    for r in range(2, 14):
+        for c in (5, 6, 7):
+            g[r][c] = 3
+    for r in (15, 16, 17):
+        for c in (5, 6, 7):
+            g[r][c] = 3
+    return g
+
+
 def _basejis(ch):
     up = ch.isupper(); o = ord(ch)
     return (0x23, (0x41 if up else 0x61) + o - (ord('A') if up else ord('a')))
+
+_MIN_LEFT = 3   # no composed glyph may start left of this: at column 2 the `i` of `it` vanished on
+                # hardware, at column 3 it renders (proven by `li`, which has always sat there).
 
 # composition glyphs: two letters/marks evenly set in one cell (menu Sí/No, and ?!)
 def _crop(g):
@@ -174,7 +342,15 @@ def _resize(g, tw):
 def _glyph(data, shi, slo):
     jhi, jlo = sjis2jis(shi, slo)
     return decode(bytearray(data[jis_index(jhi, jlo) * STRIDE:][:STRIDE]))
-def _compose(lg, rg, lw=None, rw=None):
+def _compose(lg, rg, lw=None, rw=None, extra=0):
+    """`extra` widens the gap BETWEEN the two letters by that many px, taken from the RIGHT
+    bearing: the right-hand letter moves right, the left-hand one does not move at all.
+
+    It was paid out of the LEFT bearing first, which put the `i` of `it` at columns 2-3 instead of
+    3-4 -- and on hardware that `i` DISAPPEARED ("Nobita" rendered as "Nobta"), while `li` (whose
+    `l` stayed at column 3) was fine. Whatever the renderer does with the left edge of a composed
+    cell, column 3 is proven and column 2 is not, so nothing composed may start left of column 3.
+    `_MIN_LEFT` below enforces that for every pair."""
     lw = lw or _crop(lg)[1]; rw = rw or _crop(rg)[1]
     scaled = lw + rw + 3 > W                   # two WIDE letters don't fit -> must shrink (ugly)
     if scaled:
@@ -182,8 +358,9 @@ def _compose(lg, rg, lw=None, rw=None):
         lw = max(1, round(lw * sc)); rw = max(1, round(rw * sc))
     L = _resize(lg, lw); R = _resize(rg, rw)
     slack = W - lw - rw
-    lpad = slack // 3                          # small left gap, the rest BETWEEN the letters so the
-    mid = slack - 2 * lpad                     # pair reads as two letters, not one blob
+    lpad = max(_MIN_LEFT, slack // 3)          # small left gap, the rest BETWEEN the letters so the
+    mid = min(slack - lpad,                    # pair reads as two letters, not one blob; `extra`
+              slack - 2 * (slack // 3) + extra)   # comes out of the RIGHT bearing, never the left
     out = [[0]*W for _ in range(ROWS)]
     for r in range(ROWS):
         for c in range(lw):
@@ -287,16 +464,44 @@ _KANA_FREE2 = [
 # Re-authoring them would burn three slots to replace proven glyphs. `t!` `i!` `l!` exist too, so
 # the `!` set skips them for the same reason; the comma has no prior pairs, so it covers a-z.
 _PERIOD_SKIP = set("til")
-_PERIOD_LETTERS = [c for c in "abcdefghijklmnopqrstuvwxyz" if c not in _PERIOD_SKIP]
+# m (14 px) and w (20 px) are the only letters too wide to MOVE, so they would fall back to the
+# 20->14 squeeze -- the technique the operator rejected on hardware QA ("b is suffering a lot,
+# c/n/u a bit"). Excluded from every mark rather than shipped on trust: it costs 688 B in en and
+# 200 B in ca out of ~69 KB / ~56 KB of headroom, so the whole set now uses ONLY moved letters,
+# every pixel intact. `m.` `w,` etc. simply render as two cells, as they do today.
+_MARK_SKIP = set("mw") | set("aegovbcdkpq")
+# ...and every letter too WIDE to move without colliding with the letter BEFORE it. The font sets
+# its letters hard against the right of the cell (1 px right bearing, 7 px left), so the gap between
+# two letters is 8 px. Hanging a mark off a letter costs `shift` px of that gap, and for a 11-12 px
+# letter the shift is 4-5 px -> a 3-4 px gap, half the normal spacing: the pair reads as one word-
+# blob. Operator's hardware QA flagged e. e, e! a. a, a! o, g. d! -- exactly the letters whose left
+# bearing after the shift is <=3 px (a e g o v = 2 px; b c d k p q = 3 px). It cannot be tuned away:
+# 7 (bearing) + 12 (letter) + 2 (clearance) + 3 (mark) = 24 px in a 20 px cell. Measuring clearance
+# in the mark's own rows only was tried: `e` gains 1 px, `a` none, because the bowl is widest exactly
+# where the dot sits. So they render as two cells, at 2 B each (+5,474 B in en of ~66 KB free).
+# The narrow letters (f h n s u x y z r j, left bearing 4-6 px) keep their combos.
+_PERIOD_LETTERS = [c for c in "abcdefghijklmnopqrstuvwxyz" if c not in _PERIOD_SKIP | _MARK_SKIP]
 # One kind for every letter: `_period_r` decides per glyph whether it can be moved or must be
 # squeezed. No o/e special case -- that fudge existed to survive the squeeze this avoids.
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz"
 # (sequence, base letter, mark) for every one-cell letter+mark combo. The comma covers the whole
 # alphabet -- a comma that hugs some letters and not others reads as sloppy spacing, so partial
 # coverage is worse than none. `.` and `!` skip t/i/l, which already have tested composed pairs.
-_PSPEC = ([(c + ".", c, ".") for c in _PERIOD_LETTERS]
-          + [(c + ",", c, ",") for c in _ALPHABET]
-          + [(c + "!", c, "!") for c in _PERIOD_LETTERS])
+# Which letters carry a one-cell mark, decided by measuring against the stock font (and by the
+# operator's eye on hardware, which is what each note records):
+#   * `.` and `,` -- out when the corner is occupied (a g k m w: bowl or descender in columns 18-19)
+#     or when making room for the mark's 3 px of air would leave under 4 px of left bearing, i.e.
+#     the 12 px letters (e o v). Those two failure modes are the same complaint: a cramped pair.
+#   * `!` -- also out for every ASCENDER letter (b d f h k l t): the bang is a full-height stem, and
+#     beside an ascender it reads as a second stem of the letter ("h! is terrible").
+# i/l/t keep their proven composed `.`/`!` pairs from _CLEAN; the comma has no prior pair.
+_CORNER_MARK_SKIP = set("aegkmovw")
+_CORNER_BANG_SKIP = _CORNER_MARK_SKIP | set("bdfhklt") | set("p")   # p: its descender owns the corner
+_PSPEC = ([(c + ".", c, ".") for c in _ALPHABET
+           if c not in _PERIOD_SKIP and c not in _CORNER_MARK_SKIP]
+          + [(c + ",", c, ",") for c in _ALPHABET if c not in _CORNER_MARK_SKIP]
+          + [(c + "!", c, "!") for c in _ALPHABET
+             if c not in _PERIOD_SKIP and c not in _CORNER_BANG_SKIP])
 # 0x83D1 is NOT free: `_author_middot` draws the l·l geminate dot there. It sits at index 29, the
 # first slot the periods would take, and nothing proven lives past it, so dropping it here moves
 # only the new mark glyphs. (Same class of bug as the 0x83CA/'il' clash that killed l·l once.)
@@ -361,6 +566,99 @@ def _author_ellipsis(data):
     rec[BMP:BMP+ROWS*BPR] = encode(g)
     data[ell:ell + STRIDE] = rec
 
+def _author_unwrap(data):
+    """Rebuild the Latin glyphs that are WIDER than the 20 px cell, and centre them in it.
+
+    A G M O Q V W X Y (and lowercase w) overflow the cell, and the surplus is stored wrapped into
+    columns 0-2 of the SAME row -- so each of those letters carries a stray clump at its left edge.
+    In ordinary text the next letter is 8 px away and you never see it; put anything close (a quote,
+    a mark) and it reads as dirt.
+
+    Simply deleting the wrap leaves the letter lopsided: M's right stem ends flush against column 19
+    while its left stem sits at column 5. So instead: unwrap (the tail belongs at columns 20-22),
+    measure the REAL glyph, and set it back in the cell with the SAME bearing either side. Nothing is
+    redrawn -- every stroke keeps its shape, the letter just stops hanging out of its box.
+    """
+    for code in ([0x8260 + i for i in range(26)] + [0x8281 + i for i in range(26)]
+                 + [0x824F + i for i in range(10)]):
+        jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
+        off = jis_index(jhi, jlo) * STRIDE
+        rec = bytearray(data[off:off + STRIDE])
+        g = decode(bytearray(rec))
+        if not any(g[r][W - 1] and any(g[r][c] for c in (0, 1, 2)) for r in range(ROWS)):
+            continue                                    # fits the cell already: leave it alone
+        wide = [[0] * (W + 3) for _ in range(ROWS)]      # unwrap: cols 0-2 are really 20-22
+        for r in range(ROWS):
+            for c in range(3, W):
+                wide[r][c] = g[r][c]
+            for c in range(3):
+                wide[r][W + c] = g[r][c]
+        cols = [c for c in range(W + 3) if any(wide[r][c] for r in range(ROWS))]
+        lo, hi = min(cols), max(cols)
+        wd = hi - lo + 1
+        out = [[0] * W for _ in range(ROWS)]
+        if wd > W:                                      # still too wide (nothing here is today)
+            src = [[wide[r][c] for c in range(lo, hi + 1)] for r in range(ROWS)]
+            out = _resize(src, W)
+        else:
+            # RIGHT-aligned, not centred: this font sets every letter against the right of its cell
+            # (left bearing 6-7, right bearing 0-1), so a centred M or W sits a couple of px left of
+            # its neighbours and opens a hole after it -- "What" came out as W + a canyon + "hat".
+            # Ending at the same column the stock glyph ended at keeps the rhythm, and the letter is
+            # whole because the wrapped tail is back on its right side.
+            lpad = max(0, W - wd)
+            for r in range(ROWS):
+                for c in range(wd):
+                    out[r][lpad + c] = wide[r][lo + c]
+        rec[BMP:BMP + ROWS * BPR] = encode(out)
+        data[off:off + STRIDE] = rec
+
+
+def _author_quotes(open_code):
+    """Single quotes that hug the word they belong to, instead of floating mid-cell.
+
+    The game has no LEFT quote glyph, so an opening quote is the stock apostrophe (0x8166), whose
+    ink sits at columns 5-7. Against a following capital that leaves a canyon ("'Grandpa'?" on
+    hardware), while the closing quote rides the previous letter and hugs it -- lopsided. So:
+    0x8166 is redrawn hugging the LEFT (it is only ever a closing quote after `.` `,` `!` `?`),
+    and `open_code` gets the same shape hugging the RIGHT for the opening one. `_encode` picks
+    between them by what precedes the quote. English only: in Catalan the same glyph does elision
+    duty (`l'altre`), where centred is right.
+    """
+    def author(data):
+        src = jis_index(*sjis2jis(0x81, 0x66)) * STRIDE
+        rec = bytearray(data[src:src + STRIDE])
+        g = decode(bytearray(rec))
+        cols = [c for c in range(W) if any(g[r][c] for r in range(ROWS))]
+        lo, hi = min(cols), max(cols)
+
+        def solid(gg):
+            # the stock apostrophe is anti-aliased; at the cell edge its level-1/2 fringe reads as
+            # two grey specks against the next letter. Our authored marks are all solid level 3.
+            return [[3 if v >= 2 else 0 for v in row] for row in gg]
+
+        def moved(to_lo):
+            sh = lo - to_lo
+            if sh > 0:
+                return [row[sh:] + [0] * sh for row in g]
+            if sh < 0:
+                return [[0] * (-sh) + row[:W + sh] for row in g]
+            return [row[:] for row in g]
+
+        close = bytearray(rec); close[BMP:BMP + ROWS * BPR] = encode(solid(moved(1)))
+        data[src:src + STRIDE] = close                      # 0x8166 = closing quote, hugs the left
+        opn = bytearray(rec)
+        # Flush right (columns 16-18), so it hugs the word it opens: normal letter spacing is 8 px
+        # and this leaves 8. It only became safe once `_author_unwrap` pulled the over-wide capitals
+        # back inside their cells -- before that it sat next to the wrapped clump on A G M O Q V W X Y.
+        opn[BMP:BMP + ROWS * BPR] = encode(solid(moved(18 - (hi - lo))))
+        jhi, jlo = sjis2jis(open_code >> 8, open_code & 0xFF)
+        opn[0], opn[1] = jlo, jhi
+        off = jis_index(jhi, jlo) * STRIDE
+        data[off:off + STRIDE] = opn
+    return author
+
+
 # ── text encoder: language-neutral punctuation (shared by every profile) ─────────
 _PUNCT = {" ":0x8140, ".":0x8144, ",":0x8143, "!":0x8149, "?":0x8148,
          ":":0x8146, ";":0x8147, "(":0x8169, ")":0x816a, "'":0x8166, "’":0x8166, "/":0x815e,
@@ -397,7 +695,7 @@ def _author_it_apos(data):
 # keep working; `lang="ca"` is byte-for-byte the original (locked by test_fon_codec golden MD5s).
 class _Profile:
     def __init__(self, accent_spec, cspec, cslot, compose, oslot, clean, clslot,
-                 accents, extras, ellipsis_code):
+                 accents, extras, ellipsis_code, quote_open_code=None):
         self.accent_spec = accent_spec            # {char: (baseHi, baseLo, drawFn, clearRows, slotHi, slotLo)}
         self.cspec, self.cslot = cspec, cslot     # contraction combos + their slots
         self.compose, self.oslot = compose, oslot # two-letter composition glyphs + slots
@@ -405,9 +703,10 @@ class _Profile:
         self.accents = accents                    # encoder: char -> code (accents + authored hyphen/middot)
         self.extras = extras                      # bespoke-bitmap authors (hyphen/middot/ellipsis/...)
         self.ellipsis_code = ellipsis_code        # code fw emits for "..."
+        self.quote_open_code = quote_open_code    # code fw emits for an OPENING ' (None: stock)
 
 _CA = _Profile(ACCENT_SPEC, _CSPEC, _CSLOT, _COMPOSE, _OSLOT, _CLEAN, _CLSLOT,
-               _ACCENTS, [_author_hyphen, _author_middot, _author_ellipsis], 0x8394)
+               _ACCENTS, [_author_unwrap, _author_hyphen, _author_middot, _author_ellipsis], 0x8394)
 # ── English profile (en): base Latin A-Z/a-z is already in the stock font, so the ONLY authored ─
 # glyphs are the alphabet-wide `<letter>'` right-apostrophe combos (one cell each, same proven
 # technique as Catalan) -- so contractions AND possessive 's render after ANY letter -- plus the
@@ -419,10 +718,20 @@ _EN_WIDE = set("mnw")                        # widest lowercase letters -> squee
 # the squeeze changes which columns merge and keeps the plain letter's stroke weights (o 2/2, e 2/1);
 # the letter moves right 1 col, the apostrophe stays put, 2 cols of gap remain. English-only kind.
 _EN_SHIFT1 = set("oe")
+# m and w are NOT here: at 14 px and 20 px they cannot be moved, and the squeeze thins their stems
+# to 1 px ("m' still has a narrow right bar"). Nor is e: at 12 px it moves, but its bowl then sits
+# 2 px from the letter before it AND 2 px from the mark, which the operator read as crowded on
+# hardware ("e' is a problem", "also o'") -- a, g and v passed the same test, so they keep theirs.
+# They render as the letter plus a cell holding the hug-left quote glyph: full-width letter, normal
+# spacing, 2 B each. e' is 244 lines in en, m'/w' 23.
+# m (14 px) and w (20 px) are excluded: their body fills the cell, so the shoulder anchor lands over
+# the letter's own right leg and the mark reads as cramped ("m is not an option"). 23 lines in en;
+# they render as the letter plus a cell holding the hug-left quote glyph.
+_EN_APOS_SKIP = set("mw")
 _EN_CSPEC = ([("I'", "I", "r")] +            # I'm / I'll / I've / I'd (the one common capital combo)
              [(chr(c) + "'", chr(c),
                "rq" if chr(c) in _EN_WIDE else ("r1" if chr(c) in _EN_SHIFT1 else "r"))
-              for c in range(ord('a'), ord('z') + 1)])
+              for c in range(ord('a'), ord('z') + 1) if chr(c) not in _EN_APOS_SKIP])
 # free slots for en: the whole Greek block MINUS the authored-hyphen slot (0x83C9), + kana reserve.
 _EN_FREE = [c for c in range(0x839F, 0x83D7)
             if 0x40 <= (c & 0xFF) <= 0xFC and (c & 0xFF) != 0x7F and c != 0x83C9] \
@@ -458,8 +767,24 @@ _EN_PSLOT = _alloc(_EN_FREE, set(_EN_CSLOT.values()) | set(_EN_OSLOT.values())
 _EN_CSPEC = _EN_CSPEC + _PSPEC
 _EN_CSLOT.update(_EN_PSLOT)
 
+# Closing punctuation + quote in ONE cell: `.'` `,'` `!'` `?'`. Without them a quoted sentence ends
+# in two near-empty cells ("hello.' " reads as `. '` with a canyon between), and they are 37 lines
+# in en. Composed like ?!, so the period keeps the baseline and the quote the cap height.
+_EN_QUOTE_PAIRS = [(".'", 0x8144, 0x8166, None, None), (",'", 0x8143, 0x8166, None, None),
+                   ("!'", 0x8149, 0x8166, None, None), ("?'", 0x8148, 0x8166, None, None)]
+# these and the opening quote take the LAST free slots, via the allocator, so nothing proven moves
+_EN_LAST = _alloc(_EN_FREE, set(_EN_CSLOT.values()) | set(_EN_OSLOT.values())
+                  | set(_EN_CLSLOT.values()) | set(_EN_ACCENTS.values())
+                  | {0x83C9, 0x83D1, 0x8394},
+                  [("'open", None, None)] + [(n, None, None) for n, *_ in _EN_QUOTE_PAIRS])
+_EN_QUOTE_OPEN = _EN_LAST["'open"]
+_EN_COMPOSE = _EN_COMPOSE + _EN_QUOTE_PAIRS
+for _n, *_ in _EN_QUOTE_PAIRS:
+    _EN_OSLOT[_n] = _EN_CSLOT[_n] = _EN_LAST[_n]
+
 _EN = _Profile({}, _EN_CSPEC, _EN_CSLOT, _EN_COMPOSE, _EN_OSLOT, _CLEAN, _EN_CLSLOT,
-               _EN_ACCENTS, [_author_hyphen, _author_ellipsis, _author_it_apos], 0x8394)
+               _EN_ACCENTS, [_author_unwrap, _author_hyphen, _author_ellipsis, _author_it_apos,
+                             _author_quotes(_EN_QUOTE_OPEN)], 0x8394, _EN_QUOTE_OPEN)
 
 _PROFILES = {"ca": _CA, "en": _EN}
 LANGS = tuple(sorted(_PROFILES))
@@ -487,8 +812,10 @@ def _build(src_bytes, prof):
         g = decode(bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE]))
         if   kind == 'r':  g = _apos_r(g, False)
         elif kind == 'rq': g = _apos_r(g, True)
-        elif kind == 'r1': g = _apos_r([[0] + row[:W - 1] for row in g], False)   # letter 1 col right
-        elif kind in _MARKS: g = _mark_r(g, _MARKS[kind])
+        elif kind == 'rm': g = _mark_r(g, _PX_APOS)      # moved, not squeezed (see _PX_APOS)
+        elif kind == 'r1':                               # nudged right 1 col ONLY if it must move:
+            g = _apos_corner(g) or _apos_r([[0] + row[:W - 1] for row in g], False)
+        elif kind in _MARKS: g = _mark_corner(g, kind) or _mark_r(g, _MARKS[kind])
         rec = bytearray(data[jis_index(bhi,blo)*STRIDE:][:STRIDE])   # borrow base header
         rec[BMP:BMP+ROWS*BPR] = encode(g)
         code = prof.cslot[seq]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
@@ -498,6 +825,10 @@ def _build(src_bytes, prof):
     for name, lsj, rsj, lw, rw in prof.compose:
         g = _compose(_glyph(data, lsj >> 8, lsj & 0xFF),
                      _glyph(data, rsj >> 8, rsj & 0xFF), lw, rw)
+        if "!" in name:
+            g = _bold_bang_right(g)             # match the 3 px marks we author (see the helper)
+            if name.startswith("!"):            # "!!" and "!?" carry one on the left too
+                g = _bold_bang_left(g)
         rec = bytearray(data[jis_index(0x23, 0x61)*STRIDE:][:STRIDE])   # borrow 'a' header
         rec[BMP:BMP+ROWS*BPR] = encode(g)
         code = prof.oslot[name]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
@@ -505,7 +836,8 @@ def _build(src_bytes, prof):
         off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
     # clean glyph pairs (digraphs + narrow pairs), composed from their two letters
     for seq, lsj, rsj in prof.clean:
-        g = _compose(_glyph(data, lsj >> 8, lsj & 0xFF), _glyph(data, rsj >> 8, rsj & 0xFF))
+        g = _compose(_glyph(data, lsj >> 8, lsj & 0xFF), _glyph(data, rsj >> 8, rsj & 0xFF),
+                     extra=1 if seq.isalpha() else 0)   # digraphs get the extra px, mark pairs don't
         rec = bytearray(data[jis_index(0x23, 0x61)*STRIDE:][:STRIDE])
         rec[BMP:BMP+ROWS*BPR] = encode(g)
         code = prof.clslot[seq]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
@@ -524,9 +856,13 @@ def _encode(s, prof):
         if three in prof.cslot:     # 3-char one-cell glyph (en `it'`); ca has none, so ca is untouched
             o += prof.cslot[three].to_bytes(2,"big"); i += 3; continue
         two = s[i:i+2]
-        if two in prof.cslot and not (two[1] == "." and s[i+2:i+3] == "."):
+        if two in prof.cslot and not (two[1] == "." and s[i+2:i+3] == ".") \
+                and not (two[1] == "!" and s[i+2:i+3] in ("?", "!")):
             # contraction / `<letter>.` / ?! combo -> one glyph, 2B not 4B. NOT when another dot
-            # follows: "a..." must stay `a` + the ellipsis glyph, never `a.` + "..".
+            # follows: "a..." must stay `a` + the ellipsis glyph, never `a.` + "..". And `<letter>!`
+            # must NOT fire in front of a `?`: "sister!?" would be `r!` + `?` while "Jaiko!?" (wide
+            # letter, no combo) is `o` + the composed `!?` cell -- the same two marks drawn two
+            # different ways on one screen. The interrobang cell wins, always.
             o += prof.cslot[two].to_bytes(2,"big"); i += 2; continue
         if two in prof.clslot and not (two[1] == "." and s[i+2:i+3] == ".") \
                 and not (s[i+2:i+3] in ("'", "\u2019") and (two[1] + "'") in prof.cslot):
@@ -539,6 +875,8 @@ def _encode(s, prof):
         elif 0x41 <= c <= 0x5a: o += (0x8260+c-0x41).to_bytes(2,"big")
         elif 0x61 <= c <= 0x7a: o += (0x8281+c-0x61).to_bytes(2,"big")
         elif 0x30 <= c <= 0x39: o += (0x824f+c-0x30).to_bytes(2,"big")
+        elif ch == "'" and prof.quote_open_code and (i == 0 or s[i-1] in " ("):
+            o += prof.quote_open_code.to_bytes(2,"big")   # OPENING quote: hugs the word after it
         elif ch in _PUNCT:      o += _PUNCT[ch].to_bytes(2,"big")
         else: o += (0x8148).to_bytes(2,"big")   # ESCAPING: any glyph-less char -> full-width ？ (never crash the encoder)
         i += 1

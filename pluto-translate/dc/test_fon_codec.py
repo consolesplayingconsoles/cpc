@@ -140,7 +140,7 @@ def test_enclitic_via_vowel_right_apostrophe():
     codes = [(out[i] << 8) | out[i + 1] for i in range(0, len(out), 2)]
     assert f._CSLOT["a'"] in codes, "fw did not use the a' combo for canvia't: %s" % [hex(c) for c in codes]
     assert codes[-1] == 0x8294, "the enclitic letter 't' must follow the a' combo"
-    for seq in ("a'", "e'", "i'", "o'", "u'"):
+    for seq in ("a'", "i'", "u'", "n'", "t'"):
         off = _idx(f._CSLOT[seq]) * f.STRIDE
         g = f.decode(bytearray(data[off:off + f.STRIDE]))
         assert any(g[r][c] for r in range(6) for c in (16, 17, 18)), "%s: apostrophe not on the RIGHT" % seq
@@ -151,15 +151,38 @@ def test_enclitic_via_vowel_right_apostrophe():
 # altered the Catalan font/encoder bytes -- which the Catalan release (in maintenance) forbids.
 import hashlib
 
-# RE-BASELINED 2026-09-20, twice. Original: 3c41616c88a2620b92ab766fdc0c2220 / 24a0b531ec002af704
-# 4f77e1b8fadf02. Both languages gained the one-cell `<letter>.` `<letter>,` `<letter>!` combos, so
-# the Catalan font gains 72 glyphs AND -- unlike the first pass -- _GOLDEN_FW moved too: any Catalan
-# string containing a comma or an exclamation now encodes SHORTER (that is the point: it buys back
-# the byte budget the punctuation was costing). The accent/contraction/digraph slots are untouched.
-# These goldens now lock the DEV font, which is NOT byte-identical to the shipped v1.0 patch and is
+# RE-BASELINED 2026-09-20 (twice) and again 2026-09-24. Earlier values:
+#   3c41616c88a2620b92ab766fdc0c2220 / 24a0b531ec002af7044f77e1b8fadf02  (before any mark combos)
+#   3c19d7a81a7e87500771c53ec8c67eb0 / 1baeb289992d9f06f5885024c05cc310  (marks on every letter)
+# 2026-09-24 (seventh pass): hung marks get 3 px of daylight (_MARK_AIR) instead of sitting flush
+# against the letter, `!` also drops the ascenders (it read as a second stem: "h! is terrible"), and
+# the apostrophe starts one column PAST the letter instead of above its last stroke.
+# 2026-09-24 (sixth pass): the MARKS hang in the letter's bottom-right corner too, wherever it is
+# free (22 of 26 letters for . and , ; 16 for !), so the letter no longer moves and the wide letters
+# have their combos back. `!!` and `!?` render as one cell with both bangs drawn 3 px.
+# 2026-09-24 (fifth pass): the apostrophe hangs in the letter's own top-right corner now
+# anchored on each letter's own shoulder, m and w excluded (their body fills the cell)
+# (operator's idea: "you have a lot of space between the letter and the apostrophe and instead of
+# putting them closer, you just butcher the letter"). Cap height vs x-height never collide, so the
+# letter does not move or shrink at all -- and every letter, m and w included, carries one again.
+# 2026-09-24 (fourth pass): `_author_unwrap` -- A G M O Q V W X Y w are wider than the 20 px cell
+# and the stock font wraps their tail into columns 0-2 of the same row. They are now unwrapped and
+# re-centred with equal bearings, so the letters stop bleeding into whatever sits beside them.
+# 2026-09-24 (third pass): the apostrophe combos are MOVED too now -- the squeeze was thinning
+# the letter (`a` 12 px -> 9, `n` likewise: "narrow left n leg"), and only m/w still need it.
+# 2026-09-24 (second pass): the letter is now CENTRED between its neighbour and its mark (the
+# operator asked for both sides to look similarly wide), the interrobang's `!` is drawn 3 px like
+# our other marks, `!?`/`?!` always render as that one cell, and the digraphs take their extra px
+# from the RIGHT bearing -- moving the `i` of `it` to column 2 made it VANISH on hardware.
+# 2026-09-24: hardware QA rejected the marks on the WIDE letters (they crowd the letter before them,
+# see test_no_combo_crowds_the_previous_letter), so a e g o v b c d k p q lost theirs, and the
+# it/ti/ix/li/il digraphs gained a px of air. _GOLDEN_FW is back at the pre-mark value because every
+# word in this Catalan corpus ends in a wide letter -- the surviving combos (f h n s u x y z r j)
+# simply never fire on it.
+# These goldens lock the DEV font, which is NOT byte-identical to the shipped v1.0 patch and is
 # UNTESTED ON HARDWARE -- do not cut a release from it until the operator has seen it on a Dreamcast.
-_GOLDEN_FONT = "33861fbb6e1a9c91f69fbf5d779f702e"
-_GOLDEN_FW = "94b1fe65627afd46ecad6a212966fab4"
+_GOLDEN_FONT = "039a5d47cb9b2d28a99b124e622d0658"
+_GOLDEN_FW = "24a0b531ec002af7044f77e1b8fadf02"
 _FW_CORPUS = ["Doraemon", "Pa de la memòria", "Canvia't", "col·lecció", "Ves-te'n", "l'altre",
               "d'un", "Sí", "No", "què vols?", "tres...", "100%", "Gegant", "Això",
               "Nobita, l'amic", "de l'illa", "el tifó", "mig"]
@@ -200,9 +223,12 @@ def test_unknown_lang_raises():
 
 # ── English profile (en): alphabet-wide right-apostrophe combos, no accents/digraphs ────────────
 def test_en_round_combos_keep_their_left_stroke():
-    """o'/e' (hardware QA 2026-09-17): the 20->14 squeeze merged the round letter's 2 px LEFT stroke into
-    1 px, which read as cut off. The combo must keep at least as thick a left stroke as the plain letter,
-    with the apostrophe untouched at the right edge."""
+    """The round letters' apostrophe combos must keep the left stroke as thick as the plain letter.
+
+    History: the 20->14 squeeze merged their 2 px left stroke into 1 px and read as cut off (hardware
+    QA 2026-09-17). Nothing is squeezed any more, and o/e have since left the set entirely (their
+    12 px body crowded both neighbours, see _EN_APOS_SKIP), so this now guards the round letters that
+    remain -- c and g."""
     font = f.build_patched_font(_raw, "en")
     def grid(code):
         jhi, jlo = f.sjis2jis(code >> 8, code & 0xFF)
@@ -216,12 +242,17 @@ def test_en_round_combos_keep_their_left_stroke():
             while c < f.W and g[r][c] >= 2: w += 1; c += 1
             widths.append(w)
         return min(widths)
-    for ch in "oe":
+    for ch in "su":   # the letters with a bowl that are still in the set
         plain = f.decode(bytearray(font[f.jis_index(0x23, 0x61 + ord(ch) - 97) * f.STRIDE:][:f.STRIDE]))
         combo = grid(f._EN_CSLOT[ch + "'"])
         assert left_stroke(combo) >= left_stroke(plain), "%s' left stroke thinner than plain %s" % (ch, ch)
-        for r, c in ((0, 16), (1, 17), (2, 18), (3, 17), (4, 16)):     # apostrophe where it always was
-            assert combo[r][c] == 3, "%s' apostrophe moved (%d,%d)" % (ch, r, c)
+        # the apostrophe hangs on the letter's own SHOULDER now (see _apos_corner): solid ink in the
+        # cap-height rows, ending at or after the letter's right edge and never past the cell.
+        mark = [c for c in range(f.W) if all(combo[r][c] == 3 for r in range(3))]
+        body = [c for c in range(f.W) if any(plain[r][c] for r in range(6, f.ROWS))]
+        assert mark, "%s': no apostrophe" % ch
+        assert max(mark) >= max(body) - 1, "%s': apostrophe sits left of the letter's shoulder" % ch
+        assert max(mark) <= f.W - 1, "%s': apostrophe runs off the cell" % ch
 
 
 def test_en_font_builds_and_places_every_combo_distinctly():
@@ -230,7 +261,9 @@ def test_en_font_builds_and_places_every_combo_distinctly():
     assert len(data) == len(_raw)
     slots = list(f._EN_CSLOT.values())
     assert len(slots) == len(set(slots)), "en combo slot collision"
-    assert len(f._EN_CSPEC) == 27 + len(f._PSPEC), "expected 26 lowercase + I' apostrophes, plus the marks"
+    want = 1 + len([c for c in "abcdefghijklmnopqrstuvwxyz" if c not in f._EN_APOS_SKIP]) + len(f._PSPEC)
+    assert len(f._EN_CSPEC) == want, \
+        "expected I' + the lowercase apostrophes that fit (m/w excluded, see _EN_APOS_SKIP), plus the marks"
     allowed = set(f._KANA_FREE) | set(f._KANA_FREE2) | {0x838e, 0x8390, 0x8391, 0x8395, 0x8361}
     for code in slots:
         assert 0x839F <= code <= 0x83D6 or code in allowed, "%04X is outside the reserved slots" % code
@@ -248,8 +281,10 @@ def test_en_encoder_uses_combos_for_contractions_and_possessives():
     for contractions AND possessive 's after any letter (never a standalone/left apostrophe)."""
     # "it's" resolves to the THREE-char `it'` cell (cheaper still); every other word uses the
     # preceding letter's right-apostrophe combo. Either way the mark rides a letter.
-    cases = {"I'm": "I'", "don't": "n'", "it's": "it'", "he's": "e'",
-             "you're": "u'", "dog's": "g'", "o'clock": "o'", "James's": "s'"}
+    # e/o/m/w are not in the set (see _EN_APOS_SKIP), so their contractions legitimately spend a
+    # cell on the hug-left quote glyph instead; the combos below are the ones that do ride a letter.
+    cases = {"I'm": "I'", "don't": "n'", "it's": "it'", "that's": "t'",
+             "you're": "u'", "James's": "s'", "night's": "t'"}
     bad = []
     for word, combo in cases.items():
         out = f.fw(word, "en")
@@ -282,7 +317,9 @@ def test_period_combo_makes_the_terminal_dot_free():
     """A `<letter>.` is ONE cell in both languages, so a terminal period costs nothing -- the whole
     point of the glyph set (both scripts were budget-stripped of their periods)."""
     for lang in ("ca", "en"):
-        for word in ("sleep", "Mom", "now", "va", "here"):
+        # every word ends in a letter NARROW enough to keep its combo (see _MARK_SKIP): the wide
+        # ones render as two cells on purpose, so a `p.`/`a.`/`e.` ending would fail this by design.
+        for word in ("not", "again", "yes", "you", "her", "half"):
             bare, dotted = f.fw(word, lang), f.fw(word + ".", lang)
             assert len(dotted) == len(bare), "%s: %r. costs more than %r" % (lang, word, word)
 
@@ -315,15 +352,16 @@ def test_period_glyph_sits_at_the_baseline_right():
         code = f._EN_CSLOT[seq]
         off = _idx(code) * f.STRIDE
         g = f.decode(bytearray(data[off:off + f.STRIDE]))
-        assert any(g[r][c] for r in (16, 17, 18) for c in (16, 17, 18)), "%s: no dot at baseline right" % seq
-        assert not any(g[r][c] for r in range(f.ROWS) for c in (14, 15)), "%s: letter crowds the dot" % seq
+        assert any(g[r][c] for r in (16, 17, 18) for c in (16, 17, 18, 19)), "%s: no dot at baseline right" % seq
 
 
 def test_every_mark_is_one_cell_in_both_languages():
     """`,` and `!` ride the preceding letter exactly as `.` does, so punctuation is free."""
     for lang in ("ca", "en"):
-        for word, mark in (("adeu", ","), ("prou", "!"), ("sleep", "."),
-                           ("a", ","), ("hi", "!"), ("mom", ".")):
+        # every word ends in a letter that KEEPS its combo; the wide letters (and m/w) are excluded
+        # from every mark (see _MARK_SKIP), so punctuation after them legitimately costs its own cell.
+        for word, mark in (("adeu", ","), ("prou", "!"), ("yes", "."),
+                           ("hi", "!"), ("her", ","), ("half", ".")):
             assert len(f.fw(word + mark, lang)) == len(f.fw(word, lang)), \
                 "%s: %r%s is not free" % (lang, word, mark)
 
@@ -332,26 +370,116 @@ def test_marks_never_swallow_a_doubled_punctuation():
     """`!!` and `..` must stay two cells: the combo may only take a SINGLE trailing mark, or
     "Ja!!" would render as `a!` + `!` -- right glyph count, wrong shape."""
     for lang in ("ca", "en"):
-        assert len(f.fw("Ja!!", lang)) // 2 == 3, "!! collapsed wrongly"   # J + a! + !
+        # en renders "!!" as its own cell (both bangs identical, see _bold_bang_left/right), so the
+        # `n!` combo must not fire in front of it: R + u + n + [!!]. ca has no !! cell: n! + !.
+        want = 4 if lang == "en" else 5   # ca has no !! cell: R + u + n! + !
+        assert len(f.fw("Run!!", lang)) // 2 == want, "!! collapsed wrongly"
         assert len(f.fw("no..", lang)) // 2 == 4, ".. collapsed wrongly"
 
 
-def test_comma_covers_the_whole_alphabet():
-    """Partial coverage is worse than none: a comma that hugs some letters and not others reads
-    as broken spacing. Every a-z carries one (unlike . and !, which reuse the tested t/i/l pairs)."""
+def test_comma_covers_every_letter_that_can_be_moved():
+    """The comma takes every letter EXCEPT the ones that cannot be moved without crowding the
+    letter before them (m, w, and the wide set: see _MARK_SKIP and
+    test_no_combo_crowds_the_previous_letter)."""
     for lang in ("ca", "en"):
-        missing = [c for c in "abcdefghijklmnopqrstuvwxyz" if (c + ",") not in f._PROFILES[lang].cslot]
+        want = [c for c in "abcdefghijklmnopqrstuvwxyz" if c not in f._MARK_SKIP]
+        missing = [c for c in want if (c + ",") not in f._PROFILES[lang].cslot]
         assert not missing, "%s: no comma combo for %s" % (lang, missing)
+
+
+def test_no_shipped_combo_is_scaled():
+    """THE rule the operator set on hardware: a squeezed glyph is not acceptable. Every mark combo
+    must be the MOVED kind, i.e. its letter pixels must appear unchanged from the stock glyph."""
+    raw = _raw
+    data = f.build_patched_font(raw, "en")
+    for seq, ch, mark in f._PSPEC:
+        bhi, blo = f._basejis(ch)
+        g0 = f.decode(bytearray(raw[f.jis_index(bhi, blo) * f.STRIDE:][:f.STRIDE]))
+        cols = [c for c in range(f.W) if any(g0[r][c] for r in range(f.ROWS))]
+        code = f._EN_CSLOT[seq]
+        g1 = f.decode(bytearray(data[_idx(code) * f.STRIDE:][:f.STRIDE]))
+        # the letter is MOVED, and `_balance` decides how far, so look for the shift that reproduces
+        # it exactly: if no whole-pixel shift matches, the glyph was scaled, which is the rule's point.
+        def moved_by(sh):
+            return all(g1[r][c - sh] == g0[r][c]
+                       for r in range(f.ROWS) for c in range(min(cols), max(cols) + 1)
+                       if 0 <= c - sh < f.W)
+        assert any(moved_by(sh) for sh in range(0, f.W)), "%s: letter pixels were altered (scaled?)" % seq
+
+
+def test_every_mark_is_either_hung_in_the_corner_or_properly_cleared():
+    """Two shapes are legal, and nothing in between.
+
+    HUNG: the mark sits in the letter's own bottom-right corner (columns 18-19) and the letter is
+    byte-identical to the plain one -- no crowding at all, which is the whole point.
+    MOVED: the letter had to shift (its corner was occupied), and then it must end by column 13 so
+    two columns stay clear -- a 1 px gap is what the game's 2bpp blit merges."""
+    data = f.build_patched_font(_raw, "en")
+    for seq, ch, _ in f._PSPEC:
+        g = f.decode(bytearray(data[_idx(f._EN_CSLOT[seq]) * f.STRIDE:][:f.STRIDE]))
+        bhi, blo = f._basejis(ch)
+        plain = f.decode(bytearray(data[f.jis_index(bhi, blo) * f.STRIDE:][:f.STRIDE]))
+        # HUNG: mark at columns 18-19, letter nudged left only far enough to leave _MARK_AIR px
+        # of daylight. MOVED (the fallback): mark at 16-18, letter ends by 13.
+        hung = not any(g[r][c] for r in range(f.ROWS) for c in range(18 - f._MARK_AIR, 18))
+        if hung:
+            assert any(g[r][c] for r in range(f.ROWS) for c in (18, 19)), "%s: no mark" % seq
+            continue
+        assert not any(g[r][c] for r in range(f.ROWS) for c in (14, 15)), \
+            "%s: moved, but only 1 column of clearance before the mark" % seq
 
 
 def test_bang_glyph_clears_the_letter_vertically():
     """`!` is full height, unlike the dot. It still must not touch the letter: the letter ends by
     col 13 and the mark owns 16-18, so cols 14-15 stay empty at EVERY row."""
     data = f.build_patched_font(_raw, "en")
-    for seq in ("a!", "g!", "m!", "w!"):
+    for seq in ("n!", "s!", "u!", "z!"):
         g = f.decode(bytearray(data[_idx(f._EN_CSLOT[seq]) * f.STRIDE:][:f.STRIDE]))
-        assert any(g[r][17] for r in range(3, 14)), "%s: no stem" % seq
-        assert not any(g[r][c] for r in range(f.ROWS) for c in (14, 15)), "%s: letter touches the mark" % seq
+        assert any(g[r][18] or g[r][17] for r in range(3, 14)), "%s: no stem" % seq
+        # the bang hangs at columns 18-19 with _MARK_AIR px of daylight, so the letter must stop
+        # before that daylight starts
+        stop = 18 - f._MARK_AIR
+        assert not any(g[r][c] for r in range(f.ROWS) for c in range(stop, 18)), \
+            "%s: letter runs into the mark's air" % seq
+
+
+def test_no_combo_crowds_the_previous_letter():
+    """The operator's second hardware QA: `e. e, e! a. a, a! o, g. d!` all read as one blob with the
+    letter before them. Cause: the font sets its letters against the RIGHT of the cell (1 px right
+    bearing, 7 px left), so two letters sit 8 px apart; the mark's shift eats that gap, and a 11-12 px
+    letter shifts 4-5 px -> 2-3 px of left bearing left. The rule that came out of it: a combo ships
+    only if its letter still has >= 4 px of left bearing after the shift."""
+    data = f.build_patched_font(_raw, "en")
+    for seq, ch, kind in f._PSPEC:
+        bhi, blo = f._basejis(ch)
+        g0 = f.decode(bytearray(_raw[f.jis_index(bhi, blo) * f.STRIDE:][:f.STRIDE]))
+        if f._mark_corner([row[:] for row in g0], kind) is not None:
+            continue                      # hung in the corner: the letter never moves, so no crowding
+        cols = [c for c in range(f.W) if any(g0[r][c] for r in range(f.ROWS))]
+        lb = min(cols) - max(0, max(cols) - 13)
+        assert lb >= 4, "%s: only %d px of left bearing after the shift -- it will crowd the previous letter" % (seq, lb)
+
+
+def test_digraph_pairs_keep_a_px_of_air():
+    """The it/ti/ix/li/il pairs are composed with an extra px BETWEEN the two letters (operator read
+    the even 3 px split as one blob on a CRT). The mark pairs (t. i! ...) are proven and untouched."""
+    data = f.build_patched_font(_raw, "en")
+    for seq in ("it", "ti", "ix", "li", "il"):
+        g = f.decode(bytearray(data[_idx(f._EN_CSLOT[seq] if seq in f._EN_CSLOT else f._PROFILES["en"].clslot[seq]) * f.STRIDE:][:f.STRIDE]))
+        cols = [c for c in range(f.W) if any(g[r][c] for r in range(f.ROWS))]
+        gaps, run = [], 0
+        for c in range(min(cols), max(cols) + 1):
+            if any(g[r][c] for r in range(f.ROWS)):
+                if run: gaps.append(run)
+                run = 0
+            else:
+                run += 1
+        if run: gaps.append(run)
+        # ix is 3: x is a px wider than t/l, and the pair may not start left of column 3 (see
+        # _MIN_LEFT -- the `i` of `it` vanished on hardware at column 2), so that px has to come
+        # from the gap. Everything else gets 4.
+        want = 3 if seq == "ix" else 4
+        assert gaps and max(gaps) >= want, "%s: the two letters are only %s px apart" % (seq, gaps)
 
 
 def test_en_does_not_perturb_ca():
