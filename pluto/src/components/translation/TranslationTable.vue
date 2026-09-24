@@ -835,7 +835,8 @@ async function runBuild() {
   if (building.value || !curPath.value) return
   building.value = true; buildMsg.value = ''; buildFailed.value = false
   const startedAt = Date.now()
-  const buildOut = openRun('Build ' + (selGameName.value || 'game'), { raw: '', ok: null, step: 'building on batocera', startedAt })
+  // Language first: two projects can share a game, and a narrow drawer tab only shows the start.
+  const buildOut = openRun(`Build ${langName(selLang.value)}: ${selGameName.value || 'game'}`, { raw: '', ok: null, step: 'building on batocera', startedAt })
   try {
     const data = await translationApi.run(curPath.value, selLang.value)
     buildOut.value = { ...buildOut.value, raw: data.log || '(the box returned no log)' }
