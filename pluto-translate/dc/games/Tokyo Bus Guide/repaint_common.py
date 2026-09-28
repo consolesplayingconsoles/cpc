@@ -24,7 +24,12 @@ RED, WHITE = (255, 0, 0, 255), (255, 255, 255, 255)
 LABELS = [
     ((448, 128, 512, 160), 450, 511, 131, 148, "FINISH"),     # 完走
     ((384, 160, 448, 192), 386, 447, 162, 180, "FIRST"),      # 初走
-    ((448, 160, 512, 192), 450, 511, 162, 180, "RIDERS"),     # 乗客
+    ((448, 160, 512, 192), 450, 511, 162, 180, "FARES"),      # 乗客, and "fares"
+    # rather than "passengers": this label gets a 61px tile run and every label in the
+    # table is drawn at one size, the largest that fits them all. At the table's 18pt
+    # only RIDERS, FARES, PICKED and PAX fit; "PASSENGERS" drags the whole results
+    # screen down to 10pt and "ABOARD" to 15pt, both smaller than the Japanese they
+    # replace. A driver's fares are their passengers, so FARES keeps the size.
     ((0, 256, 96, 288),      2,  95, 259, 276, "BADGE"),      # バッジ獲得
     ((0, 288, 176, 320),     3, 172, 290, 307, "DRIVER POINTS"), # ドライバーズポイント
 ]

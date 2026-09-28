@@ -11,6 +11,13 @@ disc rebuild writes the whole track, so file sizes may change (unlike 1ST_READ.B
 
     pack(orig, blocks, encode, box=None, keep_size=True) -> bytes
         encode    : str -> bytes    (the game's Shift-JIS full-width encoder)
+
+    One trap in that encoder: the apostrophe. Mapping ASCII into the full-width block the
+    obvious way sends ' to U+FF07, which cp932 encodes as 0xEEFB, in the NEC/IBM EXTENDED
+    area -- the font draws an unrelated glyph there, and it shipped in 1.0 as a large X in
+    every "Odaiba's", "I'll", "don't". Use U+2019 (0x8166) instead, which is core JIS X
+    0208 punctuation. Everything else we set (, . : ; ! ? ... - ( ) and the Latin letters)
+    already lands in 0x81xx/0x82xx and is fine.
         box       : wrap width in full-width characters; None = leave the text alone
         keep_size : pad back to the original length when the result is shorter
 """
