@@ -45,21 +45,21 @@ OME = ("A climb into the hills: the nearer the end, the sharper the curves and t
        "the slope. Traffic is very light.")
 
 # chunk -> cards, in the order LAYOUT lists them.
-# (title, distance, stops, riders, traffic, difficulty, [paragraphs])
+# (title, distance, stops, passengers, traffic, difficulty, [paragraphs])
 CARDS = {
     0: [("WANGAN DAY", "11.7km", "14", 1, 2, 1,
-         [WANGAN, "Light traffic, few riders: one for beginners. Most of them live in the flats nearby."]),
+         [WANGAN, "Light traffic, few passengers: one for beginners. Most of them live in the flats nearby."]),
         ("WANGAN EVENING", "11.7km", "14", 3, 2, 2,
-         [WANGAN, "Riders are people working in Odaiba, office workers, and couples out on dates."]),
+         [WANGAN, "Passengers are people working in Odaiba, office workers, and couples out on dates."]),
         ("WANGAN NIGHT", "11.7km", "14", 2, 1, 3,
          [WANGAN, "Office workers heading home, couples back from a night out."])],
     2: [("SHINJUKU NIGHT", "7.3km", "22", 3, 4, 4,
-         [SHINJUKU, "Riders are office workers on their way home."]),
+         [SHINJUKU, "Passengers are office workers on their way home."]),
         ("SHINJUKU EVENING", "7.3km", "22", 5, 5, 4,
-         [SHINJUKU, "Traffic and crowds are heaviest now: take the greatest care. Riders are mostly students and shoppers."]),
+         [SHINJUKU, "Traffic and crowds are heaviest now: take the greatest care. Passengers are mostly students and shoppers."]),
         ("SHINJUKU DAY", "7.3km", "22", 4, 3, 3,
-         [SHINJUKU, "Most riders are out shopping."])],
-    3: [("OME DAY", "11.7km", "22", 1, 2, 1, [OME, "Riders are mostly people who live nearby."]),
+         [SHINJUKU, "Most passengers are out shopping."])],
+    3: [("OME DAY", "11.7km", "22", 1, 2, 1, [OME, "Passengers are mostly people who live nearby."]),
         ("OME EVENING", "11.7km", "22", 2, 2, 2, [OME, "Plenty of schoolchildren and shoppers."]),
         ("OME NIGHT", "11.7km", "22", 1, 1, 2, [OME, "Mostly commuters heading home."])],
 }
@@ -96,7 +96,7 @@ def wrap(draw, text, font, width):
     return lines
 
 
-def paint(card, star, size, usable, title, dist, stops, riders, traffic, diff, paras):
+def paint(card, star, size, usable, title, dist, stops, passengers, traffic, diff, paras):
     dr = ImageDraw.Draw(card)
     bold = ImageFont.truetype(BOLD, 16)
     book = ImageFont.truetype(BOOK, size)
@@ -124,11 +124,11 @@ def paint(card, star, size, usable, title, dist, stops, riders, traffic, diff, p
                 x += dr.textlength(part, font=bold) + 5
         return x
 
-    # Five stars of riders and five of traffic never share a row in English, so
+    # Five stars of passengers and five of traffic never share a row in English, so
     # distance and stops share the first row instead and traffic gets its own.
     x = row(0, ["DISTANCE", dist])
     dr.text((max(x + 10, 120), STATS[0] - 1), "STOPS  " + stops, font=bold, fill=INK)
-    row(1, ["RIDERS", riders])
+    row(1, ["PASSENGERS", passengers])
     row(2, ["TRAFFIC", traffic])
     row(3, ["DIFFICULTY", diff])
 
