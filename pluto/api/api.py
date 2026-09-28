@@ -5739,7 +5739,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(500, {"ok": False, "error": "translate failed", "log": out})
             return
         dcp = self._make_release_patch(game_dir, system, lang, dest) if dest else {"skipped": "no DONE: line"}
-        self._send(200, {"ok": True, "dest": dest, "log": out, "dcp": dcp})
+        cdi = self._make_release_cdi(game_dir, system, lang, dest) if dest else {"skipped": "no DONE: line"}
+        self._send(200, {"ok": True, "dest": dest, "log": out, "dcp": dcp, "cdi": cdi})
 
     def _make_release_patch(self, game_dir, system, lang, dest):
         """Write this build's Universal Dreamcast Patcher .dcp next to the game's releases:
@@ -5768,6 +5769,65 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if r.returncode != 0:
             return {"error": (log.strip().splitlines() or ["make_dcp.py failed"])[-1], "log": log}
         return {"path": out_path, "log": log}
+
+    def _make_release_cdi(self, game_dir, system, lang, dest):
+        """Build the translated CDI and write its patch beside the .dcp, so one Build ROM produces
+        both formats. Needs a base CDI at dist/translate-cdi/<game>.cdi (ROM data: gitignored, never
+        in a repo); without one this is simply skipped, like the .dcp is without originals.
+
+        The patch is a whole-image xdelta, not a .dcp: Universal Dreamcast Patcher takes .gdi/.cue/.chd
+        and will not open a CDI, so a per-file patch would have nothing to apply it. An xdelta only
+        fits the exact dump it was made from, which is why the source hash is reported here and
+        belongs in the release notes. Anything missing is reported, never fatal to the build."""
+        import shutil, hashlib
+
+        def md5(path):
+            h = hashlib.md5()
+            with open(path, "rb") as f:
+                for block in iter(lambda: f.read(1 << 20), b""):
+                    h.update(block)
+            return h.hexdigest()
+
+        releases = (self.__class__.config.get("RELEASES_DIR") or "").strip()
+        if not releases:
+            return {"skipped": "RELEASES_DIR is not set in pluto/.env"}
+        base = os.path.join(_dist_dir(), "translate-cdi", game_dir + ".cdi")
+        if not os.path.isfile(base):
+            return {"skipped": "no base CDI at %s" % base}
+        script = os.path.join(os.path.dirname(self.__class__.base_dir), "pluto-translate", "dc", "build_cdi.py")
+        if not os.path.isfile(script):
+            return {"skipped": "build_cdi.py not on this host"}
+        xdelta = shutil.which("xdelta3")
+        if not xdelta:
+            return {"skipped": "xdelta3 not found (brew install xdelta)"}
+        originals = os.path.join(_dist_dir(), "translate-originals", game_dir)
+        if not os.path.isdir(originals):
+            return {"skipped": "no extracted originals at %s" % originals}
+        textures = os.path.join(_translations_root(), "%s [%s]" % (game_dir, lang), "textures")
+        name = os.path.basename(dest)                       # same build name the GDI folder carries
+        out_cdi = os.path.join(_dist_dir(), "translate-cdi", name + ".cdi")
+        try:
+            r = subprocess.run([sys.executable, script, "%s [%s]" % (game_dir, lang), base, originals,
+                                textures, out_cdi, "http://localhost:%d" % PORT],
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=1800)
+        except subprocess.TimeoutExpired:
+            return {"error": "build_cdi.py timed out"}
+        log = r.stdout.decode(errors="replace")
+        if r.returncode != 0:
+            return {"error": (log.strip().splitlines() or ["build_cdi.py failed"])[-1], "log": log}
+        patch_path = os.path.join(releases, system, game_dir, lang, "dist", name + ".cdi.xdelta")
+        os.makedirs(os.path.dirname(patch_path), exist_ok=True)
+        try:
+            # -B must cover the whole source or xdelta windows it and the patch balloons.
+            d = subprocess.run([xdelta, "-e", "-9", "-f", "-B", str(os.path.getsize(base) + (1 << 20)),
+                                "-s", base, out_cdi, patch_path],
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=1800)
+        except subprocess.TimeoutExpired:
+            return {"error": "xdelta3 timed out", "image": out_cdi}
+        if d.returncode != 0:
+            return {"error": d.stdout.decode(errors="replace").strip()[-300:], "image": out_cdi}
+        return {"image": out_cdi, "patch": patch_path,
+                "source_md5": md5(base), "built_md5": md5(out_cdi), "log": log}
 
     # ── Node / connection builders ────────────────────────────────────────────
 
