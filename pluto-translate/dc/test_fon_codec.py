@@ -303,13 +303,18 @@ def test_en_plain_latin_uses_no_greek_slots():
     assert all(not (0x839F <= c <= 0x83D6) for c in codes), "plain text must not hit authored Greek slots"
 
 
-def test_en_multi_punctuation_is_one_cell():
-    """English !! ?! !? must each encode to ONE glyph (2B), authored to distinct slots."""
-    for seq in ("?!", "!?", "!!"):
+def test_en_multi_punctuation_splits_the_question_mark_out():
+    """`!!` is ONE cell; `?!` and `!?` are TWO.
+
+    All three used to share the one-cell treatment. Two marks in the width of one left the question
+    mark a 1 px curve beside the bang's 3 px bar, and on a CRT the operator could not see it at all
+    ("is that question mark rendered? i did not notice it"). `!!` is two identical bars and survives
+    the squeeze, so it keeps its cell; the question mark gets its own, at 2 bytes per occurrence."""
+    assert len(f.fw("!!", "en")) == 2, "!! should stay one glyph (2B) in en"
+    for seq in ("?!", "!?"):
         b = f.fw(seq, "en")
-        assert len(b) == 2, "%r should be one glyph (2B) in en, got %dB" % (seq, len(b))
-    slots = [f._EN_CSLOT[s] for s in ("?!", "!?", "!!")]
-    assert len(set(slots)) == 3, "en punctuation combos must not share a slot"
+        assert len(b) == 4, "%r should be two glyphs (4B) in en, got %dB" % (seq, len(b))
+        assert b == f.fw(seq[0], "en") + f.fw(seq[1], "en"), "%r should be its two stock cells" % seq
     f.build_patched_font(_raw, "en")   # builds without error (glyphs composed)
 
 

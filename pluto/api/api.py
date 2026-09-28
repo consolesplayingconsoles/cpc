@@ -5714,11 +5714,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = self._read_json_body()
         path = ((body or {}).get("path") or "").strip()
         lang = ((body or {}).get("lang") or "").strip()
+        # The release version. It names the GDI folder AND, through it, both patch files, so without
+        # it a 1.1 build ships four artifacts called v1.0 and collides with the release before it.
+        # Empty means "whatever translate.sh defaults to", which keeps old callers working.
+        ver = ((body or {}).get("ver") or "").strip()
         if not path:
             self._send(400, {"error": "path required"})
             return
         if not lang:
             self._send(400, {"error": "lang required"})
+            return
+        if ver and not re.match(r"^v[0-9][0-9.]*$", ver):
+            self._send(400, {"error": "ver must look like v1.1"})
             return
         # The build names its output like the catalogue does, author included: the credit
         # comes from catalogue/<system>/variants.json for "<game>/T-<Code>".
@@ -5729,7 +5736,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         game_key = catalogue.names.key(catalogue.names.parse(game_dir + ".gdi")["title"])
         author = ((credits.get(catalogue.names.variant_key(game_key, {"kind": "translation", "name": code}))) or {}).get("author") or ""
         rc, out = self._node_ssh("batocera",
-                                 ["env", "AUTHOR=" + author, "sh", "/userdata/cpc-scripts/translate.sh", path, lang],
+                                 ["env", "AUTHOR=" + author] + (["VER=" + ver] if ver else [])
+                                 + ["sh", "/userdata/cpc-scripts/translate.sh", path, lang],
                                  timeout=600)
         dest = ""
         for line in out.splitlines():
