@@ -30,8 +30,8 @@ W = H = 256
 BOXES = [((1, 36, 128, 61), 0.95), ((1, 67, 128, 92), 0.95), ((1, 98, 180, 123), 0.90), ((4, 192, 124, 218), 0.95)]
 # per language: the 4 menu labels (in BOXES order) + the translation credit on the sky
 TEXT = {
-    "ca": (["COMENÇA", "CONTINUA", "INTERNET", "OPCIONS"], "Traduït per CPC"),
-    "en": (["START", "CONTINUE", "INTERNET", "OPTIONS"], "Translated by CPC"),
+    "ca": (["COMENÇA", "CONTINUA", "INTERNET", "OPCIONS"], "Pedaç de traducció fet per cpc"),
+    "en": (["START", "CONTINUE", "INTERNET", "OPTIONS"], "Translation patch by cpc"),
 }
 # the 2-line Dream Passport note (its own colour sampled from its band)
 DPNOTE = [((4, 131, 246, 158), "Cal registrar-se amb"),
@@ -116,9 +116,12 @@ def main():
     SKY = 0xd0
     sky = Image.fromarray(pv.decode_argb4444(bytes(d), SKY + 16, 512, 512), "RGBA")
     sd = ImageDraw.Draw(sky); sf = ImageFont.truetype(ARIAL, 20)
-    l, t, r, b = sf.getbbox(credit); cx = 420 - (r - l) // 2; cy = 212   # up + right, off COMENÇA
-    if lang != "ca":                   # a longer credit clipped at the screen edge (en, in-game): end it where ca ends
-        cl, _, cr, _ = sf.getbbox(TEXT["ca"][1]); cx = 420 - (cr - cl) // 2 + (cr - cl) - (r - l)
+    # Every credit ENDS at the same column and grows LEFTWARD. It used to be centred on x=420 for
+    # Catalan, with English right-aligned to wherever that landed -- which meant the Catalan string's
+    # width set the layout for both, and a longer Catalan credit ran off the 512 px texture (the
+    # screen edge clips it). Anchoring the right edge instead lets either language say what it wants.
+    CREDIT_RIGHT, cy = 496, 212                              # 496 = where both credits have always ended
+    l, t, r, b = sf.getbbox(credit); cx = CREDIT_RIGHT - (r - l)
     for dx in (-1, 0, 1):
         for dy in (-1, 0, 1):
             if dx or dy: sd.text((cx + dx, cy + dy), credit, font=sf, fill=(0, 0, 0, 255))
