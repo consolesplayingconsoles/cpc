@@ -298,6 +298,82 @@ def _bold_bang_right(g):
     return g
 
 
+def _author_dot(data, prof=None):
+    """Redraw the full stop in every `<letter>.` cell as a squat block (ENGLISH ONLY).
+
+    The stock font's period is a round five-row blob and its comma is that same blob with a tail,
+    so at CRT resolution `e.` and `g.` read as commas -- and `.'` at the end of a quote read as the
+    American comma-inside-the-quote. The shapes themselves (`_PX_DOT`, `_PX_DOT_C`) are shared with
+    Catalan, whose font is byte-identical by contract and must not drift, so this runs as an English
+    author pass over the built glyphs instead of changing the marks for both languages.
+
+    Only the MARK's own columns are touched: scan in from the right edge to the blank column that
+    `_MARK_AIR` guarantees, so a descender (g p q y) keeps every pixel."""
+    if prof is None:
+        return data
+    # The STANDALONE period first. Letters with no `<letter>.` combo (e, g, and every letter after
+    # a space or a digit) fall back to this stock glyph, so leaving it round means `e.` and `g.`
+    # still read as commas however many combos get fixed.
+    g = _glyph(data, 0x81, 0x44)
+    ink = [(r, c) for r in range(ROWS) for c in range(W) if g[r][c]]
+    if ink:
+        left = min(c for _, c in ink)
+        for r, c in ink:
+            g[r][c] = 0
+        for r in (17, 18):
+            for c in range(left, min(left + 3, W)):
+                g[r][c] = 3
+        off = jis_index(*sjis2jis(0x81, 0x44)) * STRIDE
+        rec = bytearray(data[off:off + STRIDE])
+        rec[BMP:BMP + ROWS * BPR] = encode(g)
+        data[off:off + STRIDE] = rec
+    for seq, code in sorted(prof.cslot.items()):
+        if not seq.endswith(".") or len(seq) != 2:
+            continue
+        jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
+        off = jis_index(jhi, jlo) * STRIDE
+        g = _glyph(data, code >> 8, code & 0xFF)
+        right = max((c for c in range(W) if any(g[r][c] for r in range(12, ROWS))), default=-1)
+        if right < 0:
+            continue
+        left = right
+        while left > 0 and any(g[r][left - 1] for r in range(12, ROWS)):
+            left -= 1
+        if right - left + 1 > 4:          # that is the letter, not a hung mark: leave it alone
+            continue
+        for r in range(12, ROWS):
+            for c in range(left, right + 1):
+                g[r][c] = 0
+        for r in (17, 18):
+            for c in range(left, right + 1):
+                g[r][c] = 3
+        rec = bytearray(data[off:off + STRIDE])
+        rec[BMP:BMP + ROWS * BPR] = encode(g)
+        data[off:off + STRIDE] = rec
+    return data
+
+
+def _dot_left(g):
+    """The LEFT mark of `.'`, redrawn as a compact solid full stop.
+
+    Same trap as the bangs, the other way round: the stock font's period is a five-row round blob
+    and its comma is that same blob with a tail, so composed into `.'` and `,'` the two cells are
+    all but identical. On a CRT the operator read `wonderful.'` as `wonderful,'` and reported the
+    comma as being inside the quote -- the text was right, the glyph was lying. A squat two-row
+    block sits on the baseline and cannot be mistaken for the comma's descending taper."""
+    cols = [c for c in range(W) if any(g[r][c] for r in range(12, ROWS))]
+    if not cols:
+        return g
+    left = min(cols)
+    for r in range(12, ROWS):
+        for c in range(W):
+            g[r][c] = 0
+    for r in (17, 18):
+        for c in range(left, min(left + 3, W)):
+            g[r][c] = 3
+    return g
+
+
 def _bold_bang_left(g):
     """The LEFT half of `!!` / `!?`, drawn 3 px like its partner so the pair is symmetric.
 
@@ -738,8 +814,11 @@ _EN_FREE = [c for c in range(0x839F, 0x83D7)
            + [0x838e, 0x8390, 0x8391, 0x8395, 0x8361]
 _EN_CSLOT = {seq: _EN_FREE[i] for i, (seq, _, _) in enumerate(_EN_CSPEC)}
 # multi-punctuation composed into one cell (English uses !! ?! !? heavily) -> 2B not 4B.
-_EN_COMPOSE = [("?!", 0x8148, 0x8149, None, None), ("!?", 0x8149, 0x8148, None, None),
-               ("!!", 0x8149, 0x8149, None, None)]
+# `!!` only. `?!` and `!?` used to be composed into one cell too, but two marks in the width of one
+# left the question mark a 1 px curve beside a 3 px bar, and on a CRT it did not read at all. They
+# now emit their two stock cells (2 bytes more per occurrence), which every scene has room for once
+# a handful of lines drop to a single mark. `!!` is two identical bars and stays legible squeezed.
+_EN_COMPOSE = [("!!", 0x8149, 0x8149, None, None)]
 _EN_OSLOT = {name: _EN_FREE[len(_EN_CSPEC) + i] for i, (name, *_) in enumerate(_EN_COMPOSE)}
 for _n in _EN_OSLOT:
     _EN_CSLOT[_n] = _EN_OSLOT[_n]             # encoder emits the one-cell glyph for the pair
@@ -785,6 +864,7 @@ for _n, *_ in _EN_QUOTE_PAIRS:
 _EN = _Profile({}, _EN_CSPEC, _EN_CSLOT, _EN_COMPOSE, _EN_OSLOT, _CLEAN, _EN_CLSLOT,
                _EN_ACCENTS, [_author_unwrap, _author_hyphen, _author_ellipsis, _author_it_apos,
                              _author_quotes(_EN_QUOTE_OPEN)], 0x8394, _EN_QUOTE_OPEN)
+_EN.late_extras = [_author_dot]     # squat full stops; Catalan keeps the stock round one
 
 _PROFILES = {"ca": _CA, "en": _EN}
 LANGS = tuple(sorted(_PROFILES))
@@ -825,10 +905,15 @@ def _build(src_bytes, prof):
     for name, lsj, rsj, lw, rw in prof.compose:
         g = _compose(_glyph(data, lsj >> 8, lsj & 0xFF),
                      _glyph(data, rsj >> 8, rsj & 0xFF), lw, rw)
-        if "!" in name:
+        # Which END the bang is on, not merely whether the name contains one: `!?` has its bang on
+        # the LEFT, and bolding the right mark there overdrew the question mark with a second bang,
+        # so `!?` rendered as `!!` and the question mark was simply absent from the game.
+        if name.endswith("!"):                  # "?!" and "!!"
             g = _bold_bang_right(g)             # match the 3 px marks we author (see the helper)
-            if name.startswith("!"):            # "!!" and "!?" carry one on the left too
-                g = _bold_bang_left(g)
+        if name.startswith("!"):                # "!!" and "!?"
+            g = _bold_bang_left(g)
+        if name.startswith("."):                # ".'" -- see the helper
+            g = _dot_left(g)
         rec = bytearray(data[jis_index(0x23, 0x61)*STRIDE:][:STRIDE])   # borrow 'a' header
         rec[BMP:BMP+ROWS*BPR] = encode(g)
         code = prof.oslot[name]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
@@ -843,6 +928,10 @@ def _build(src_bytes, prof):
         code = prof.clslot[seq]; jhi, jlo = sjis2jis(code >> 8, code & 0xFF)
         rec[0], rec[1] = jlo, jhi
         off = jis_index(jhi, jlo)*STRIDE; data[off:off+STRIDE] = rec
+    # LATE authors, after every combo cell exists (prof.extras runs before they are built, so a
+    # pass that edits combos has to come here instead). Only English registers any.
+    for author in getattr(prof, "late_extras", ()):
+        author(data, prof)
     return bytes(data)
 
 def _encode(s, prof):
