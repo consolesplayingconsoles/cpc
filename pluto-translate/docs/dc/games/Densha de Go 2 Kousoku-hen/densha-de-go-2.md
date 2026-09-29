@@ -55,17 +55,21 @@ cleanly from `CG1.ROM`; 953 have it set and render as garbage from `CG1.ROM`. `V
 
 - `CG2.ROM` = u32 count (17396), then that many u32 offsets, then one compressed 16x16 tile per entry (5 to 278
   bytes). Highest flagged tile id is 17272, so the ids fit.
-- An entry is a type byte (1 or 2) then byte-oriented runs: control `c < 0x80` = repeat the next byte c+1 times,
-  `c >= 0x80` = copy the next (c & 0x7F)+1 bytes. Every entry but one decodes to exactly 256 bytes and ends on
-  its last byte, so this layer is right.
-- **Not solved: what those 256 bytes mean.** Read as 8-bit palette indices, row by row, the tiles come out
-  sheared. Compared against the same picture from `VQ_TBL.ROM` (868 flagged records have a same-shaped twin
-  there, e.g. `OBJdejic01`), value 0x0F fills areas that are black in the truth and repeated rows are offset.
-  Likely a second layer (row-copy or delta commands) on top of the runs. The twins are the ground truth to crack
-  it with.
-- `PAL.DAT` = 52 palettes of 256 ARGB1555 colours (512 bytes each; palette 1 is a grey ramp). Which palette a
-  flagged sprite uses is not in its record. Tiles are deduplicated, so a texture on its own looks like shredded strips: render the record,
-not the texture.
+- An entry is a type byte then a stream of controls, decoding to 256 palette indices, row-major 16x16.
+  `c >= 0x80`: copy the next (c & 0x7F)+1 bytes as they are. `c < 0x80`, **type 1**: repeat the next byte c+1
+  times (run-length). `c < 0x80`, **type 2**: copy c+1 bytes from (next byte + 1) back in the output (LZ77;
+  distance 1 repeats the last pixel). 2220 tiles are type 1, 15176 type 2; all decode to exactly 256.
+  `ddg_assets.cg2_decode`.
+- Cracked 2026-09-29 against ground truth: 868 flagged records have a same-shaped twin in `VQ_TBL.ROM` (names
+  from `TBL.OUT` by index) that renders cleanly. Uniform tiles line up 12331 to 5; decoded tiles match their
+  twin's colours (the misses are VQ's own loss). Worth remembering: a first guess (every control below 0x80 is a
+  run) also summed to 256 on every tile and was wrong for type 2. Summing right is not proof; the twins are.
+- `PAL.DAT` = 52 palettes of 256 ARGB1555 colours (512 bytes each). Palette 1 is the UI palette (0 transparent,
+  1 black, 7 white, 10 yellow, 15 red) and matches the twins. Which palette a record uses is not in the record,
+  so some records draw in odd colours with palette 1 (the grey section headers come out white and yellow). A
+  repaint does not need the palette: it reuses the index values the original's text and shadow already use.
+
+Tiles are deduplicated, so a texture on its own looks like shredded strips: render the record, not the texture.
 
 ```
 ddg_assets.py render SPRITE.LST TBL.ROM CG1.ROM OBJz_mainmenu mainmenu.png
@@ -116,6 +120,12 @@ Lessons from the main menu. Read this before starting a screen.
 5. **Verify three ways, every time:** the repaint re-rendered from the OUTPUT files equals the preview; every other
    record renders byte-identical; the files read back from the patched track equal the outputs.
 6. **Disc:** `inplace.py` per file (same size, no rebuild), as for Boku.
+7. **Flagged records (`CG2.ROM`) are a different repaint.** No texture to redraw: re-tile, compress each new
+   tile, rewrite the record's ids. Every one of the 17396 slots is used and the file has 89 spare bytes, so new
+   tiles take the ids the old Japanese tiles free (only tiles no other record uses; tile 0 is the blank shared by
+   all), and the rebuilt `CG2.ROM` must fit the original size: that needs a compressor at least as tight as
+   Taito's. Draw with the index values the original text and shadow use, so the record's unknown palette does
+   not matter.
 
 ## Screens and their DDG64 counterparts
 
@@ -143,9 +153,18 @@ Clean, `CG1.ROM`, repaintable now:
 - `OBJz_haikei` = the clean "3000" background tile behind Game Setting and Load/Save.
 - Train fronts on Route select are `OBJ200`-`OBJ701b` (pictures, no text).
 
-Not found among the clean records, so almost certainly flagged (`CG2.ROM`), blocked on the codec: the section
-headers (路線選択, ゲーム設定, ロード・セーブ), the 選択/キャンセル/決定 legend, 北陸路線/東北路線/関東路線, the Game
-Setting items and values, ロードする/セーブする, and the Ranking footer. Candidates by name: `OBJz_submenu*`,
-`OBJz_font*`, `OBJz_ranking*`, `OBJz_kettei`, `OBJz_juuji*`, `OBJselect*`.
+Flagged (`CG2.ROM`), found with the codec:
+
+| Record | Holds |
+|---|---|
+| `OBJz_submenu`, `OBJz_submenu2` | the section headers: メインメニュー, ゲーム設定, ロード・セーブ, 路線選択, 電車選択, the Game Setting item names, ロードする / セーブする |
+| `OBJz_font`, `OBJz_font2` | Game Setting items and every value (ツーハンドルA-D, ワンハンドルA/B, 専用コントローラ, イージー ... ベリーハード, 切弱並強, ステレオ/モノラル, 非表示 / cm 表示 / m 表示 / デカデジ, ポートA/B拡張ソケット1), two styles (normal, highlighted) |
+| `OBJz_kettei` | legend: 選択, キャンセル, 決定, おわり |
+| `OBJz_ranking`, `OBJz_ranking2` | Ranking footer: (A) 次に進む, (B) メニューに戻る; and the B/C variant |
+| `OBJexsel01` group | route select regions: 北陸路線, 東北路線, 関東路線 |
+| `OBJpret01` | a chrome 路線選択 header |
+| `OBJz_pause` | pause menu (運転再開, 運転中止, 始発駅に戻る, 画面位置調整) |
+| `OBJz_mes*` | memory card messages |
+| `OBJsou*` | route diagrams with station names |
 
 `ddg_assets.py sheets` draws every record on named contact sheets; filter on the bit to see only the clean ones.
