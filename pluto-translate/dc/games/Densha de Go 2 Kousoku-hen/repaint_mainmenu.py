@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Repaint the main menu (OBJz_mainmenu): each button's Japanese label and small English subtitle become
-one large English label.
+"""Repaint the main menu (OBJz_mainmenu): on each button with a DDG64 match, the Japanese label and Taito's small
+English subtitle become one large label in Zoinkity's English. Buttons without a match are left as they are.
 
     repaint_mainmenu.py <SPRITE.LST> <orig TBL.ROM> <orig CG1.ROM> <out TBL.ROM> <out CG1.ROM> [preview.png]
 
@@ -11,7 +11,7 @@ take the menu's own freed slots, then the free slots no record uses. The record 
 both files keep their sizes, so the disc can be patched in place.
 
 Only the grey text pixels right of each coloured bar are touched: the frames, bars and numbers are kept.
-Wording is Taito's own English from the buttons (see FLAGS.md in the workbench for Zoinkity's DDG64 set).
+Wording is Zoinkity's DDG64 English only (LABELS below); buttons without a DDG64 match keep their original art.
 """
 import os, struct, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
@@ -22,7 +22,13 @@ from dc import pvr_codec as P
 import ddg_assets as A
 
 RECORD = "OBJz_mainmenu"
-LABELS = ["Arcade Mode", "Game Setting", "Ranking", "Load and Save", "Love Express Komachi"]
+# A port (CLAUDE.md section 11): Zoinkity's DDG64 English, matched on the same Japanese, texture number noted.
+# None = no DDG64 match: the button's original art (Japanese + Taito's small English) is left untouched.
+LABELS = ["Arcade Mode",          # アーケードモード 1019
+          "Options",              # ゲーム設定       1021
+          "Rankings",             # ランキングを見る 1022
+          None,                   # ロード・セーブ   no DDG64 match
+          None]                   # LOVE特急こまち   no DDG64 match
 FONT = "/System/Library/Fonts/Supplemental/Arial Narrow Bold.ttf"
 BG, FG = 8, 189                 # the buttons' near-black and text grey
 BUTTON_H = 96
@@ -49,6 +55,8 @@ def label(text, w, h):
 def repaint(rgba):
     out = rgba.copy()
     for i, text in enumerate(LABELS):
+        if text is None:
+            continue
         y0, y1 = i * BUTTON_H + TEXT_Y0, i * BUTTON_H + TEXT_Y1
         reg = out[y0:y1, TEXT_X0:TEXT_X1]
         c = reg[..., :3].astype(int)
@@ -119,7 +127,7 @@ def main(lst_p, tbl_p, cg_p, out_tbl, out_cg, preview=None):
         cg[o + 16:o + 16 + 256 * 256 * 2] = P._untwiddle_to_bytes(u16[tx], 256, 256)
     open(out_tbl, "wb").write(tbl); open(out_cg, "wb").write(cg)
     if preview:
-        Image.fromarray(new, "RGBA").save(preview)
+        Image.fromarray(P._unpack(packed, 0), "RGBA").save(preview)   # as the game will show it (5-bit colour)
 
 
 if __name__ == "__main__":

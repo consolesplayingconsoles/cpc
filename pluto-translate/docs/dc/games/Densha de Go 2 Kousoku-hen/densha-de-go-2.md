@@ -95,8 +95,9 @@ the three plain ARGB1555 twiddled textures (not VQ), so they encode exactly. No 
 Free slots in 86-88: 19 (all in 88). A repaint re-tiles the new 512x480 picture, deduplicates, writes the
 tiles into the menu's own slots, and rewrites `OBJz_mainmenu`'s ids in place (same size).
 
-Done 2026-09-29 by `repaint_mainmenu.py` (Taito's wording, Arial Narrow Bold, grey 189 on 8): 543 unique tiles,
-144 kept as they were, 399 rewritten, 44 slots spare. Only `OBJz_mainmenu` and `CG1.ROM` 86-88 change; every
+Done 2026-09-29 by `repaint_mainmenu.py`: buttons 1-3 in Zoinkity's English (1019, 1021, 1022), buttons 4-5
+left as the original art (no DDG64 match); Arial Narrow Bold, grey 189 on 8. 509 unique tiles, 321 kept as they
+were, 188 rewritten, 78 slots spare. Only `OBJz_mainmenu` and `CG1.ROM` 86-88 change; every
 other record renders byte-identical. The patched `CG1.ROM` / `TBL.ROM` sit in the workbench `textures/` and go
 onto the disc with `inplace.py` (same size, no rebuild). Tested in Flycast 2026-09-29: works.
 
@@ -112,8 +113,9 @@ Lessons from the main menu. Read this before starting a screen.
 2. **Triage before painting.** For the record's tiles, find: which textures (plain ARGB1555 twiddled in `CG1.ROM`
    86-88 encodes exactly; VQ does not, it needs a new codebook), whether any other record shares them, and how
    many free slots those textures have. Main menu: plain, unshared, 19 free = the easy case.
-3. **Wording first from the game, then from DDG64.** Taito put small English on some DC buttons; Zoinkity's
-   DDG64 set covers most shared screens. Coin only what neither has, and log it in the workbench `FLAGS.md`.
+3. **Wording is Zoinkity's only (a port, cpc `CLAUDE.md` section 11).** A label gets English only when DDG64 has
+   the same Japanese (match by texture number); otherwise it stays the original art and goes on the gap list in
+   the workbench `FLAGS.md`. Never Taito's small English, never our own.
 4. **Erasing by colour needs a flat background.** Replacing grey pixels with the black worked on the menu's flat
    black. Text with a drop shadow over the patterned "3000" background (Game Setting, Load/Save) needs the
    background rebuilt from a clean copy, not a colour fill.
@@ -129,18 +131,15 @@ Lessons from the main menu. Read this before starting a screen.
 
 ## Screens and their DDG64 counterparts
 
-Seen in game 2026-09-29 (screenshots in the workbench `reference/`). Numbers are Zoinkity's `007gg4` files.
+This is a port (cpc `CLAUDE.md` section 11): English only where Zoinkity's DDG64 has the same Japanese, matched by
+texture number (`mld82r/Images/<n>.bin.png` Japanese vs `007gg4/<n>.bin.png` English). The authoritative table
+(every ported string with its texture number) and the gap list are the workbench `FLAGS.md`; the scripts carry
+the same numbers next to each string.
 
-| Screen | Japanese | DDG64 match |
-|---|---|---|
-| Header legend (every screen) | 選択 / キャンセル / 決定 | "Select: + Pad / Decide: A Button" (`686-689`), "Back / Choose" (`871`). Cancel is not there |
-| Route select header | 路線選択 | "Route Select" (`868`), different style |
-| Route select groups | 北陸路線 / 東北路線 / 関東路線 | none: DDG64 names each line (`690-697`), the DC groups by region |
-| Game Setting header | ゲーム設定 | "Options" (`1031`) |
-| Game Setting items | コントロール, 難易度, 振動, サウンド, 速度メーター, 距離メーター | Controls, Difficulty, Sound, Speedometer, Distances (`1032-1036`); 振動 (Vibration) is DC only |
-| Game Setting values | ツーハンドルA, ノーマル, 並, ステレオ, ノーマル, m 表示 | Two-Handed A/B, One-Handed, Train Controller, Easy/Normal/Hard/Very Hard, Stereo/Mono, Normal/Digital, Meters (`1038-1062`); 並 (vibration strength) is DC only |
-| Ranking | 秋田新幹線, E3系, 次に進む, メニューに戻る | "Akita Shinkansen" (`697`), "E3 Series" (`722`), "(A) Next" (`728`), "(B) Main Menu" (`729`) |
-| Load/Save | ロード・セーブ, ロードする, セーブする | none (Controller Pak strings only: "DATA SAVING", "Now Saving...") |
+Find a match by rendering both sets side by side by number, never from contact sheets with labels under the
+images: that is how 686-689, 728-729 and 871 got misread here once (the legend is really 870, the Ranking footer
+738-741). Useful ranges: main menu 1019-1023, options 1031-1061, Route/Train Select 868-869, legend 870-871,
+Ranking footer 738-741, pause 878-879.
 
 ## Which records the screens use (found 2026-09-29)
 
@@ -170,18 +169,23 @@ Flagged (`CG2.ROM`), found with the codec:
 `ddg_assets.py sheets` draws every record on named contact sheets (pass `CG2.ROM PAL.DAT` to include the
 flagged ones).
 
-## Section headers and legend (CG2 repaint)
+## Section screens (CG2 repaint)
 
-Done 2026-09-29 by `repaint_cg2.py`, on top of the main menu's `TBL.ROM`: `OBJz_submenu`, `OBJz_submenu2`
-(headers, 48-pixel bands, fill 92 with antialiasing 91/90/89; palette 22 shows them grey) and `OBJz_kettei`
-(legend, 32-pixel bands, fill 7 with 78/77/4). Wording in the workbench `FLAGS.md`.
+Done 2026-09-29 by `repaint_cg2.py`, on top of the main menu's `TBL.ROM`. Records: `OBJz_submenu`,
+`OBJz_submenu2` (headers, 48-pixel bands, fill 92, antialiasing 91/90/89, no shadow: the engine adds one),
+`OBJz_kettei` (legend, 32-pixel bands, fill 7, 78/77/4), `OBJz_font` / `OBJz_font2` (Game Setting items and values,
+32-pixel bands in two columns, fill 92 / 90, antialiasing 91-90-89 / 89-93-94, hard shadow index 88 at +3,+3),
+`OBJz_ranking` / `OBJz_ranking2` (footer, fill 6, antialiasing 4/5, shadow 3 at +3,+3; the button icons at x 1-30
+and 161-190 stay). The game draws each label as its own box sized to the Japanese, so every English label stays
+inside its Japanese label's extent (squeezed to 80%, then scaled down). Gap labels are left byte-identical.
 
-- 395 tile ids freed (used by no other record), 373 new tiles, 22 spare.
-- The English tiles compress worse than the Japanese: `CG2.ROM` came out 3552 bytes over. `cg2_encode` beats
-  Taito's compressor by about 1.4 bytes a tile, so recompressing 512 other tiles (largest first, each checked to
-  decode to the same pixels) reclaimed 5333 bytes; 1781 to spare. Expect to lean on this for every CG2 repaint.
-- Checks: repainted records re-read from the outputs equal the previews; all 950 other flagged records decode to
-  identical pixels; the three files read back from the patched track equal the outputs.
+- 1159 tile ids freed, 494 kept (gap labels, shared shapes), 663 new, 2 spare: close to the limit. The next CG2
+  batch may have to take ids from records it repaints with gaps turned to blanks, or free more.
+- The English needs more bytes than the Japanese: recompressing 1280 other tiles (each checked to decode to the
+  same pixels) reclaimed 8651 bytes; 912 to spare.
+- Checks: every repainted record re-read from the outputs equals its preview; every other record is unchanged;
+  every gap label is identical to the original; the three files read back from the patched track equal the
+  outputs. Before a test build, list per screen what should read English and what stays Japanese.
 
 Tools in the translate API (`pluto-translate/openapi.yaml`): `GET /files?path=<gdi>` lists the data track's files
 without an extract (`dc/gdi_files.py`, stdlib); `GET /sprites?path=<gdi>` lists every record of both tables;

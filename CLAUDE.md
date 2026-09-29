@@ -97,3 +97,9 @@ To keep production application logic perfectly clean and free of testing conditi
 
 * **Production Entrypoint (`pluto-python-tui/main.py`)**: Runs the strict live logic. It parses the namespace-targeted `.env` file, evaluates real host infrastructure, executes live pings, and dynamically hides/strips UI menus based on physical hardware availability.
 * **Development Entrypoint (`pluto-python-tui/dev.py`)**: A dedicated wrapper script used solely for local interface testing (the python equivalent to running `yarn dev`). It completely bypasses the live infrastructure pipeline and force-feeds a complete layout matrix directly into the UI engine. This ensures all menus and text inputs remain visible and editable locally without requiring a production host context or physical devices attached.
+
+### 11. Translation Ports (0% AI wording)
+A port of someone else's translation (e.g. Zoinkity's Densha de Go! 64 English onto the Dreamcast Densha de Go! 2) must be honestly describable as **not ours and not AI**.
+* **Every string comes verbatim from the source translation.** Match by the Japanese: a DC string takes the English only when the source translation has the same Japanese (e.g. the same-numbered texture in the source's original and translated sets). No near-equivalents, no composing, no choosing between the source and the original game's own English.
+* **Claude writes no wording** — no proposals, no coinings, no "suggested" English in notes or tables. Claude's part is technical: decoding, repainting supplied strings, building.
+* **Anything without an exact source equivalent stays in the original Japanese** (the original art is left untouched) and goes on the **gap list**: Japanese only, by screen and record, no English. The gap list is release-notes material.
