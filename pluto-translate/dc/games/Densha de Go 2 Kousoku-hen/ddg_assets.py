@@ -5,6 +5,8 @@
     ddg_assets.py lst     <SPRITE.LST | TBL.OUT> <TBL.ROM | VQ_TBL.ROM>   # check the list names the container
     ddg_assets.py record  <SPRITE.LST> <TBL.ROM> <name>       # one sprite record as u16s
     ddg_assets.py render  <SPRITE.LST> <TBL.ROM> <CG1.ROM> <name> <out.png>   # reassemble a sprite
+    ddg_assets.py sheets  <SPRITE.LST | TBL.OUT> <TBL.ROM | VQ_TBL.ROM> <CG1.ROM | VQ_CG.ROM> <out-dir>
+                                                              # every record rendered, named, 48 per sheet
 
 Inputs are files from the extracted disc (buildgdi -extract). No text lives in this game's files:
 every on-screen word is a texture, so the repaint path is the only one (see
@@ -81,19 +83,63 @@ def tilemap(tbl, o):
     return w, h, list(struct.unpack_from("<%dH" % (w * h), tbl, o + 2))
 
 
+class Sprites:
+    """A sprite table + its texture container. Names come from the listing by INDEX (TBL.OUT's offsets
+    are from an older build), offsets from the table itself."""
+
+    def __init__(self, lst_path, tbl_path, cg_path):
+        self.tbl = open(tbl_path, "rb").read()
+        self.cg = open(cg_path, "rb").read()
+        self.ents = rom2(self.cg)
+        names = [a for a, o, s in lst(open(lst_path, encoding="latin-1").read())]
+        self.records = dict(zip(names, (o for o, s in rom2(self.tbl))))
+        self.texs = {}
+
+    def tilemap(self, name):
+        return tilemap(self.tbl, self.records[name])
+
+    def texture(self, i):
+        from PIL import Image
+        if i not in self.texs:
+            self.texs[i] = Image.fromarray(P.decode_pvrt(self.cg, self.ents[i][0]), "RGBA")
+        return self.texs[i]
+
+    def render(self, name):
+        from PIL import Image
+        w, h, ids = self.tilemap(name)
+        im = Image.new("RGBA", (w * 16, h * 16))
+        for k, t in enumerate(ids):
+            x, y = (t % 16) * 16, (t % 256 // 16) * 16
+            im.paste(self.texture(t // 256).crop((x, y, x + 16, y + 16)), ((k % w) * 16, (k // w) * 16))
+        return im
+
+
 def render(lst_path, tbl_path, cg_path, name, out):
-    from PIL import Image
-    names = {a: o for a, o, s in lst(open(lst_path, encoding="latin-1").read())}
-    w, h, ids = tilemap(open(tbl_path, "rb").read(), names[name])
-    cg = open(cg_path, "rb").read(); ents = rom2(cg); texs = {}
-    im = Image.new("RGBA", (w * 16, h * 16))
-    for k, t in enumerate(ids):
-        if t // 256 not in texs:
-            texs[t // 256] = Image.fromarray(P.decode_pvrt(cg, ents[t // 256][0]), "RGBA")
-        x, y = (t % 16) * 16, (t % 256 // 16) * 16
-        im.paste(texs[t // 256].crop((x, y, x + 16, y + 16)), ((k % w) * 16, (k // w) * 16))
-    im.save(out)
-    print("%s: %dx%d tiles from textures %s -> %s" % (name, w, h, sorted(texs), out))
+    sp = Sprites(lst_path, tbl_path, cg_path)
+    sp.render(name).save(out)
+    w, h, ids = sp.tilemap(name)
+    print("%s: %dx%d tiles from textures %s -> %s" % (name, w, h, sorted({t // 256 for t in ids}), out))
+
+
+def sheets(lst_path, tbl_path, cg_path, out):
+    """Every record on labelled contact sheets, so a screen can be found by eye."""
+    from PIL import Image, ImageDraw
+    sp = Sprites(lst_path, tbl_path, cg_path)
+    os.makedirs(out, exist_ok=True)
+    names = list(sp.records)
+    cols, cw, ch, per = 6, 256, 160, 48
+    for k in range(0, len(names), per):
+        chunk = names[k:k + per]
+        sheet = Image.new("RGB", (cols * cw, ((len(chunk) + cols - 1) // cols) * (ch + 14)), (40, 40, 40))
+        dr = ImageDraw.Draw(sheet)
+        for j, n in enumerate(chunk):
+            im = sp.render(n); im.thumbnail((cw - 4, ch - 4))
+            bg = Image.new("RGBA", im.size, (90, 0, 90, 255)); bg.alpha_composite(im)
+            x, y = (j % cols) * cw, (j // cols) * (ch + 14)
+            sheet.paste(bg.convert("RGB"), (x + 2, y + 2))
+            dr.text((x + 2, y + ch), n, fill=(255, 255, 0))
+        sheet.save(os.path.join(out, "sheet_%02d.png" % (k // per)))
+    print("%d records on %d sheets -> %s" % (len(names), (len(names) + per - 1) // per, out))
 
 
 def record(lst_path, rom, name):
@@ -109,6 +155,8 @@ if __name__ == "__main__":
         dump(sys.argv[2], sys.argv[3])
     elif cmd == "lst" and len(sys.argv) == 4:
         check_lst(sys.argv[2], sys.argv[3])
+    elif cmd == "sheets" and len(sys.argv) == 6:
+        sheets(*sys.argv[2:6])
     elif cmd == "render" and len(sys.argv) == 7:
         render(*sys.argv[2:7])
     elif cmd == "record" and len(sys.argv) == 5:
