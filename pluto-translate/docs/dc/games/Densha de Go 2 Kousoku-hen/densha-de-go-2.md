@@ -42,13 +42,29 @@ order but from an older build (every size 2 bytes larger), so use its names by i
 
 A sprite record is a u16 header then tile ids:
 
-- header low byte & 0x7F = width in tiles, bit 7 = a flag not yet understood, high byte = height in tiles;
+- header low byte & 0x7F = width in tiles, bit 7 = tile source (below), high byte = height in tiles;
 - then width x height u16 tile ids, row by row.
 
 Tiles are 16x16, 256 per 256x256 texture, row-major: tile id → texture `id // 256`, x `(id % 16) * 16`,
 y `(id % 256 // 16) * 16`. `TBL.ROM` ids index `CG1.ROM` (highest id 22764, 89 textures = 22784 tiles),
 `VQ_TBL.ROM` ids index `VQ_CG.ROM` (highest 33387, 131 textures = 33536). Every one of the 2417 records fits
-this layout. Tiles are deduplicated, so a texture on its own looks like shredded strips: render the record,
+this layout.
+
+**Header bit 7 = the tiles come from `CG2.ROM`, not `CG1.ROM`.** 299 `TBL.ROM` records have it clear and render
+cleanly from `CG1.ROM`; 953 have it set and render as garbage from `CG1.ROM`. `VQ_TBL.ROM` never sets it.
+
+- `CG2.ROM` = u32 count (17396), then that many u32 offsets, then one compressed 16x16 tile per entry (5 to 278
+  bytes). Highest flagged tile id is 17272, so the ids fit.
+- An entry is a type byte (1 or 2) then byte-oriented runs: control `c < 0x80` = repeat the next byte c+1 times,
+  `c >= 0x80` = copy the next (c & 0x7F)+1 bytes. Every entry but one decodes to exactly 256 bytes and ends on
+  its last byte, so this layer is right.
+- **Not solved: what those 256 bytes mean.** Read as 8-bit palette indices, row by row, the tiles come out
+  sheared. Compared against the same picture from `VQ_TBL.ROM` (868 flagged records have a same-shaped twin
+  there, e.g. `OBJdejic01`), value 0x0F fills areas that are black in the truth and repeated rows are offset.
+  Likely a second layer (row-copy or delta commands) on top of the runs. The twins are the ground truth to crack
+  it with.
+- `PAL.DAT` = 52 palettes of 256 ARGB1555 colours (512 bytes each; palette 1 is a grey ramp). Which palette a
+  flagged sprite uses is not in its record. Tiles are deduplicated, so a texture on its own looks like shredded strips: render the record,
 not the texture.
 
 ```
@@ -115,3 +131,21 @@ Seen in game 2026-09-29 (screenshots in the workbench `reference/`). Numbers are
 | Game Setting values | ツーハンドルA, ノーマル, 並, ステレオ, ノーマル, m 表示 | Two-Handed A/B, One-Handed, Train Controller, Easy/Normal/Hard/Very Hard, Stereo/Mono, Normal/Digital, Meters (`1038-1062`); 並 (vibration strength) is DC only |
 | Ranking | 秋田新幹線, E3系, 次に進む, メニューに戻る | "Akita Shinkansen" (`697`), "E3 Series" (`722`), "(A) Next" (`728`), "(B) Main Menu" (`729`) |
 | Load/Save | ロード・セーブ, ロードする, セーブする | none (Controller Pak strings only: "DATA SAVING", "Now Saving...") |
+
+## Which records the screens use (found 2026-09-29)
+
+Clean, `CG1.ROM`, repaintable now:
+
+- `OBJtopl01-07` line banners (田沢湖線, 東海道本線, 京浜東北線, ほくほく線, 奥羽本線, 秋田新幹線, 山手線) and `OBJtopr01-11`
+  series banners (209系 ... HK-100形): the Ranking screen header is one of each (秋田新幹線 + E3系).
+- `OBJtop09` 乗務記録, `OBJtop10` "選択：ブレーキ / 決定：スタートボタン".
+- `OBJstart*` departure-board signs (stations, 快速, 普通, series), `OBJtuuti01` the 運転評価 score card.
+- `OBJz_haikei` = the clean "3000" background tile behind Game Setting and Load/Save.
+- Train fronts on Route select are `OBJ200`-`OBJ701b` (pictures, no text).
+
+Not found among the clean records, so almost certainly flagged (`CG2.ROM`), blocked on the codec: the section
+headers (路線選択, ゲーム設定, ロード・セーブ), the 選択/キャンセル/決定 legend, 北陸路線/東北路線/関東路線, the Game
+Setting items and values, ロードする/セーブする, and the Ranking footer. Candidates by name: `OBJz_submenu*`,
+`OBJz_font*`, `OBJz_ranking*`, `OBJz_kettei`, `OBJz_juuji*`, `OBJselect*`.
+
+`ddg_assets.py sheets` draws every record on named contact sheets; filter on the bit to see only the clean ones.
