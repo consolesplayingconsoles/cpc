@@ -117,5 +117,7 @@ Patched GD-ROM"** (Original GDI + a Modified-files folder containing just the PV
   hard edges *shimmer* under the pulse where the soft original blurred it.
 - **Centre within the original label box** (step 4.2) or it clips/off-centres.
 - **ARGB4444 round-trips exactly** (4-bit ×17 ⇄ >>4); other formats may not.
-- **TWIDDLED** is the common case here; VQ/PAL formats need a codebook (not covered).
+- **TWIDDLED** is the common case here. **VQ** (data format 3) decodes with `pvr_codec.decode_vq`
+  (2 KB codebook of 2x2 blocks + one index byte per block, twiddled over the block grid); re-encoding VQ
+  is not covered. PAL formats are not covered. Densha de Go! 2 is mostly VQ: see its game notes.
 - Mirror of the codec/encoder also lives in memory `project_dc_translation_extraction.md`.

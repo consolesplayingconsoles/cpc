@@ -14,6 +14,7 @@ import struct
 import numpy as np
 
 PIXFMT = {0: "ARGB1555", 1: "RGB565", 2: "ARGB4444"}
+DATATYPE = {1: "twiddled", 3: "VQ"}          # PVRT byte 9; only the types met so far
 
 def twiddle_table(n):
     """Morton spread: output[i] = bits of i interleaved into even positions.
@@ -81,9 +82,69 @@ def encode_rgb565(rgba):
     return _untwiddle_to_bytes((r << 11) | (g << 5) | b, w, h)
 
 
+def _unpack(v, pf):
+    """(..) u16 texels -> (.., 4) uint8 RGBA for pixel format pf (0 ARGB1555, 1 RGB565, 2 ARGB4444)."""
+    v = v.astype(np.uint16)
+    if pf == 0:
+        a = np.where(v & 0x8000, 255, 0)
+        r = (v >> 10) & 0x1F; g = (v >> 5) & 0x1F; b = v & 0x1F
+        r = (r << 3) | (r >> 2); g = (g << 3) | (g >> 2); b = (b << 3) | (b >> 2)
+    elif pf == 1:
+        r = (v >> 11) & 0x1F; g = (v >> 5) & 0x3F; b = v & 0x1F
+        r = (r << 3) | (r >> 2); g = (g << 2) | (g >> 4); b = (b << 3) | (b >> 2)
+        a = np.full_like(r, 255)
+    elif pf == 2:
+        a = ((v >> 12) & 0xF) * 17; r = ((v >> 8) & 0xF) * 17
+        g = ((v >> 4) & 0xF) * 17;  b = (v & 0xF) * 17
+    else:
+        raise ValueError("pixel format %d not supported" % pf)
+    return np.stack([r, g, b, a], -1).astype(np.uint8)
+
+
+def decode_argb1555(d, off, w, h):
+    """Twiddled ARGB1555 (pixfmt 0) -> (h, w, 4) uint8 RGBA. 1-bit alpha: 0 or 255."""
+    return _unpack(_twiddled_u16(d, off, w, h), 0)
+
+
+def decode_vq(d, off, w, h, pf):
+    """Twiddled VQ (PVRT data type 3) -> (h, w, 4) uint8 RGBA.
+
+    `off` is the start of the data (16 bytes after PVRT): a 256-entry codebook of four u16
+    texels each (2 KB), then one index byte per 2x2 block, (w/2)*(h/2) of them, twiddled over
+    the block grid exactly like pixels. A codebook entry's texels run top-left, bottom-left,
+    top-right, bottom-right (the twiddle order inside a 2x2). Densha de Go! 2's VQ_CG.ROM and
+    most of CG1.ROM are this, ARGB1555. Decode only: re-encoding VQ means building a new
+    codebook, which nothing needs yet.
+    """
+    cb = np.frombuffer(d, dtype="<u2", count=256 * 4, offset=off).reshape(256, 4)
+    bw, bh = w // 2, h // 2
+    raw = np.frombuffer(d, dtype="u1", count=bw * bh, offset=off + 2048)
+    sx = twiddle_table(bw); sy = twiddle_table(bh)
+    e = cb[raw[((sx[None, :] << 1) | sy[:, None]).ravel()]].reshape(bh, bw, 4)
+    v = np.zeros((h, w), dtype=np.uint16)
+    v[0::2, 0::2] = e[..., 0]; v[1::2, 0::2] = e[..., 1]
+    v[0::2, 1::2] = e[..., 2]; v[1::2, 1::2] = e[..., 3]
+    return _unpack(v, pf)
+
+
+def decode_pvrt(d, at=0):
+    """The PVRT chunk starting at d[at] -> (h, w, 4) uint8 RGBA, for the data types met so far:
+    1 twiddled and 3 VQ. Header: 'PVRT', u32 size, u8 pixel format, u8 data type, u16 pad,
+    u16 w, u16 h, then the data."""
+    if d[at:at + 4] != b"PVRT":
+        raise ValueError("no PVRT at %d" % at)
+    pf, dt = d[at + 8], d[at + 9]
+    w, h = struct.unpack_from("<HH", d, at + 12)
+    if dt == 1:
+        return _unpack(_twiddled_u16(d, at + 16, w, h), pf)
+    if dt == 3:
+        return decode_vq(d, at + 16, w, h, pf)
+    raise ValueError("PVRT data type %d not supported" % dt)
+
+
 def decode_argb4444(d, off, w, h):
-    """Twiddled ARGB4444 -> (h, w, 4) uint8 RGBA. (ARGB1555 is similar; add its unpack if
-    needed — see textures.md. RGB565 is `decode_rgb565`.)"""
+    """Twiddled ARGB4444 -> (h, w, 4) uint8 RGBA. (ARGB1555 is `decode_argb1555`, RGB565 is
+    `decode_rgb565`, VQ is `decode_vq`.)"""
     raw = np.frombuffer(d, dtype="<u2", count=w * h, offset=off)
     sx = twiddle_table(w); sy = twiddle_table(h)
     idx = (sx[None, :] << 1) | sy[:, None]          # src twiddled index per (x, y)

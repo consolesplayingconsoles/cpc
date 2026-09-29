@@ -25,6 +25,8 @@ docs/
         BUGS.md  flags.md  mn-hud.md  names.md
       Tokyo Bus Guide/
         tokyo-bus-guide.md
+      Densha de Go 2 Kousoku-hen/
+        densha-de-go-2.md        #   textures only: ROM2 containers, tilemap sprites
   gba/
     extract.md
     games/
