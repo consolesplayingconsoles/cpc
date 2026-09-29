@@ -182,6 +182,81 @@ paths:
           description: path or file missing
         '502':
           description: measure failed / source not cached
+  /files:
+    get:
+      summary: Files on the disc's data track, read in place (no extract)
+      description: >
+        Walks the ISO9660 volume of the high-density track (LBA 45000) straight off the
+        GDI, so it answers in well under a second where a buildgdi extract takes minutes.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Absolute GDI path.
+          schema: { type: string }
+      responses:
+        '200':
+          description: '{ files: [ {path, lba, size} ] }'
+        '400':
+          description: path missing
+        '502':
+          description: not a readable GDI / no ISO9660 volume
+  /sprites:
+    get:
+      summary: Sprite records of a disc with Taito ROM2 sprite tables (Densha de Go! 2)
+      description: >
+        Every record of both tables: TBL (named by SPRITE.LST, tiles in CG1.ROM, or CG2.ROM
+        when the record's flag is set) and VQ_TBL (named by TBL.OUT, tiles in VQ_CG.ROM).
+        On-screen text in this game lives only in these sprites. Needs numpy + PIL in the
+        interpreter running the API.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Absolute GDI path.
+          schema: { type: string }
+      responses:
+        '200':
+          description: '{ records: [ {name, table, w, h, source} ] }, w/h in pixels'
+        '400':
+          description: path missing
+        '502':
+          description: disc has no sprite tables / tool failed
+  /sprite:
+    get:
+      summary: One sprite record rendered as PNG
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Absolute GDI path.
+          schema: { type: string }
+        - name: name
+          in: query
+          required: true
+          description: Record name, e.g. OBJz_mainmenu.
+          schema: { type: string }
+        - name: table
+          in: query
+          required: false
+          description: TBL (default) or VQ_TBL.
+          schema: { type: string, enum: [TBL, VQ_TBL], default: TBL }
+        - name: palette
+          in: query
+          required: false
+          description: >
+            PAL.DAT palette for CG2.ROM records (default 1, the UI palette). The record does
+            not name its palette, so other palettes may be needed for true colours.
+          schema: { type: integer, default: 1 }
+      responses:
+        '200':
+          description: '{ name, table, w, h, source, palette, png (base64) }'
+        '400':
+          description: path or name missing
+        '404':
+          description: no such record in that table
+        '502':
+          description: tool failed
 components:
   schemas:
     Source:

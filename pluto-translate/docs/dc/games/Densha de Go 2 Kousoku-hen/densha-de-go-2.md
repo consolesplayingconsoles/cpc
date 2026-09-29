@@ -120,7 +120,7 @@ Lessons from the main menu. Read this before starting a screen.
 5. **Verify three ways, every time:** the repaint re-rendered from the OUTPUT files equals the preview; every other
    record renders byte-identical; the files read back from the patched track equal the outputs.
 6. **Disc:** `inplace.py` per file (same size, no rebuild), as for Boku.
-7. **Flagged records (`CG2.ROM`) are a different repaint.** No texture to redraw: re-tile, compress each new
+7. **Flagged records (`CG2.ROM`) are a different repaint** (`repaint_cg2.py` is the template). No texture to redraw: re-tile, compress each new
    tile, rewrite the record's ids. Every one of the 17396 slots is used and the file has 89 spare bytes, so new
    tiles take the ids the old Japanese tiles free (only tiles no other record uses; tile 0 is the blank shared by
    all), and the rebuilt `CG2.ROM` must fit the original size: that needs a compressor at least as tight as
@@ -167,4 +167,23 @@ Flagged (`CG2.ROM`), found with the codec:
 | `OBJz_mes*` | memory card messages |
 | `OBJsou*` | route diagrams with station names |
 
-`ddg_assets.py sheets` draws every record on named contact sheets; filter on the bit to see only the clean ones.
+`ddg_assets.py sheets` draws every record on named contact sheets (pass `CG2.ROM PAL.DAT` to include the
+flagged ones).
+
+## Section headers and legend (CG2 repaint)
+
+Done 2026-09-29 by `repaint_cg2.py`, on top of the main menu's `TBL.ROM`: `OBJz_submenu`, `OBJz_submenu2`
+(headers, 48-pixel bands, fill 92 with antialiasing 91/90/89; palette 22 shows them grey) and `OBJz_kettei`
+(legend, 32-pixel bands, fill 7 with 78/77/4). Wording in the workbench `FLAGS.md`.
+
+- 395 tile ids freed (used by no other record), 373 new tiles, 22 spare.
+- The English tiles compress worse than the Japanese: `CG2.ROM` came out 3552 bytes over. `cg2_encode` beats
+  Taito's compressor by about 1.4 bytes a tile, so recompressing 512 other tiles (largest first, each checked to
+  decode to the same pixels) reclaimed 5333 bytes; 1781 to spare. Expect to lean on this for every CG2 repaint.
+- Checks: repainted records re-read from the outputs equal the previews; all 950 other flagged records decode to
+  identical pixels; the three files read back from the patched track equal the outputs.
+
+Tools in the translate API (`pluto-translate/openapi.yaml`): `GET /files?path=<gdi>` lists the data track's files
+without an extract (`dc/gdi_files.py`, stdlib); `GET /sprites?path=<gdi>` lists every record of both tables;
+`GET /sprite?path=<gdi>&name=<OBJ>[&table=VQ_TBL][&palette=N]` renders one as base64 PNG. The sprite tools need
+numpy + PIL in the interpreter serving the API.
