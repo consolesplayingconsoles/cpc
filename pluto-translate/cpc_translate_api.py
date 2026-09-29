@@ -14,6 +14,7 @@ ThreadingHTTPServer) to match the house rules even though the box runs 3.12.
 import json
 import os
 import subprocess
+import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
@@ -32,7 +33,14 @@ ROUTES = {
     ("GET", "/sources"): "_r_sources",
     ("GET", "/extract"): "_r_extract",
     ("POST", "/measure"): "_r_measure",
+    ("GET", "/files"):   "_r_files",
+    ("GET", "/sprites"): "_r_sprites",
+    ("GET", "/sprite"):  "_r_sprite",
 }
+
+# Game tools the API fronts. Taito's ROM2 sprite tables (Densha de Go! 2): SPRITE.LST / TBL.OUT name every
+# record. The tools need numpy + PIL, so they run under the interpreter serving the API (sys.executable).
+DDG = os.path.join(SCRIPTS, "dc", "games", "Densha de Go 2 Kousoku-hen", "ddg_assets.py")
 
 
 def _run(argv, timeout=300, inp=None):
@@ -155,6 +163,48 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, _last_json(out))
         except Exception:
             self._send(502, {"error": "extract failed", "detail": out[-500:]})
+
+
+    def _r_files(self, qs):
+        """GET /files?path=<gdi> -> {"files": [{path, lba, size}]}, read off the data track, no extract."""
+        path = (qs.get("path") or [""])[0]
+        if not path:
+            self._send(400, {"error": "path required"})
+            return
+        rc, out = _run(["python3", os.path.join(SCRIPTS, "dc", "gdi_files.py"), path], timeout=60)
+        try:
+            self._send(200, _last_json(out))
+        except Exception:
+            self._send(502, {"error": "files failed", "detail": out[-500:]})
+
+    def _r_sprites(self, qs):
+        """GET /sprites?path=<gdi> -> {"records": [{name, table, w, h, source}]} for a disc with Taito's
+        ROM2 sprite tables."""
+        path = (qs.get("path") or [""])[0]
+        if not path:
+            self._send(400, {"error": "path required"})
+            return
+        rc, out = _run([sys.executable, DDG, "api-records", path], timeout=120)
+        try:
+            self._send(200, _last_json(out))
+        except Exception:
+            self._send(502, {"error": "sprites failed", "detail": out[-500:]})
+
+    def _r_sprite(self, qs):
+        """GET /sprite?path=<gdi>&name=<OBJ...>[&table=TBL|VQ_TBL][&palette=N] -> the record as base64 PNG."""
+        path = (qs.get("path") or [""])[0]
+        name = (qs.get("name") or [""])[0]
+        if not path or not name:
+            self._send(400, {"error": "path and name required"})
+            return
+        table = (qs.get("table") or ["TBL"])[0]
+        pal = (qs.get("palette") or ["1"])[0]
+        rc, out = _run([sys.executable, DDG, "api-sprite", path, name, table, pal], timeout=120)
+        try:
+            res = _last_json(out)
+            self._send(404 if "error" in res else 200, res)
+        except Exception:
+            self._send(502, {"error": "sprite failed", "detail": out[-500:]})
 
 
 class Server(ThreadingMixIn, HTTPServer):

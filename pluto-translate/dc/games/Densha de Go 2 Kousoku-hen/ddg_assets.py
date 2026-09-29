@@ -4,6 +4,8 @@
     ddg_assets.py dump    <CG1.ROM | VQ_CG.ROM> <out-dir>     # every PVRT entry -> NNN.png + sheet.png
     ddg_assets.py lst     <SPRITE.LST | TBL.OUT> <TBL.ROM | VQ_TBL.ROM>   # check the list names the container
     ddg_assets.py record  <SPRITE.LST> <TBL.ROM> <name>       # one sprite record as u16s
+    ddg_assets.py api-records <gdi>                           # JSON: every record, both tables (API)
+    ddg_assets.py api-sprite  <gdi> <name> [TBL|VQ_TBL] [palette]   # JSON: one record as base64 PNG (API)
     ddg_assets.py render  <SPRITE.LST> <TBL.ROM> <CG1.ROM> <name> <out.png> [CG2.ROM PAL.DAT]
     ddg_assets.py sheets  <SPRITE.LST | TBL.OUT> <TBL.ROM | VQ_TBL.ROM> <CG1.ROM | VQ_CG.ROM> <out-dir> [CG2.ROM PAL.DAT]
                                                               # every record rendered, named, 48 per sheet
@@ -112,20 +114,97 @@ def cg2_decode(kind, body):
     return (list(out) + [0] * 256)[:256]
 
 
+def cg2_encode(px):
+    """256 palette indices -> the smallest CG2.ROM tile (type byte + controls), trying both types.
+    Shortest-path parse: a literal run costs 1 + n bytes (n <= 128); a type-1 run or a type-2 copy
+    costs 2 (length <= 128, copy distance <= 256 and inside what is already written)."""
+    px = list(px)
+    n = len(px)
+    best = None
+    for kind in (1, 2):
+        cost = [0] * (n + 1)
+        step = [None] * (n + 1)
+        for i in range(n - 1, -1, -1):
+            c, st = None, None
+            for L in range(1, min(128, n - i) + 1):                     # literals
+                v = 1 + L + cost[i + L]
+                if c is None or v < c:
+                    c, st = v, ("lit", L, 0)
+            if kind == 1:
+                L = 1
+                while i + L < n and L < 128 and px[i + L] == px[i]:
+                    L += 1
+                for m in range(1, L + 1):
+                    v = 2 + cost[i + m]
+                    if v < c:
+                        c, st = v, ("run", m, 0)
+            else:
+                for dist in range(1, min(256, i) + 1):
+                    m = 0
+                    while i + m < n and m < 128 and px[i + m] == px[i + m - dist]:
+                        m += 1
+                    for k in range(m, 0, -1):
+                        v = 2 + cost[i + k]
+                        if v < c:
+                            c, st = v, ("copy", k, dist)
+            cost[i], step[i] = c, st
+        out, i = bytearray([kind]), 0
+        while i < n:
+            op, L, dist = step[i]
+            if op == "lit":
+                out.append(0x80 | (L - 1)); out += bytes(px[i:i + L])
+            elif op == "run":
+                out += bytes([L - 1, px[i]])
+            else:
+                out += bytes([L - 1, dist - 1])
+            i += L
+        if best is None or len(out) < len(best):
+            best = bytes(out)
+    return best
+
+
+def cg2_build(tiles):
+    """[(type, body)] -> CG2.ROM bytes (u32 count, offsets, tiles)."""
+    n = len(tiles)
+    head = 4 + 4 * n
+    offs, pos = [], head
+    for kind, body in tiles:
+        offs.append(pos); pos += 1 + len(body)
+    return struct.pack("<I%dI" % n, n, *offs) + b"".join(bytes([k]) + b for k, b in tiles)
+
+
 class Sprites:
     """A sprite table + its texture container. Names come from the listing by INDEX (TBL.OUT's offsets
     are from an older build), offsets from the table itself. A record with header bit 7 set takes its
     tiles from CG2.ROM (paletted, PAL.DAT) instead of the PVR textures; pass cg2_path/pal_path to draw them."""
 
     def __init__(self, lst_path, tbl_path, cg_path, cg2_path=None, pal_path=None):
-        self.tbl = open(tbl_path, "rb").read()
-        self.cg = open(cg_path, "rb").read()
-        self.ents = rom2(self.cg)
-        names = [a for a, o, s in lst(open(lst_path, encoding="latin-1").read())]
+        """Each argument is a file path or the file's bytes (see from_gdi)."""
+        def load(x):
+            return x if isinstance(x, bytes) else open(x, "rb").read() if x else None
+        self.tbl = load(tbl_path)
+        self.cg = load(cg_path) or b""
+        self.ents = rom2(self.cg) if self.cg else []
+        names = [a for a, o, s in lst(load(lst_path).decode("latin-1"))]
         self.records = dict(zip(names, (o for o, s in rom2(self.tbl))))
         self.texs = {}
-        self.cg2 = cg2_tiles(open(cg2_path, "rb").read()) if cg2_path else None
-        self.pal = open(pal_path, "rb").read() if pal_path else None
+        self.cg2 = cg2_tiles(load(cg2_path)) if cg2_path else None
+        self.pal = load(pal_path)
+
+    TABLES = {"TBL": ("SPRITE.LST", "TBL.ROM", "CG1.ROM", "CG2.ROM", "PAL.DAT"),
+              "VQ_TBL": ("TBL.OUT", "VQ_TBL.ROM", "VQ_CG.ROM", None, None)}
+
+    @classmethod
+    def from_gdi(cls, gdi, table="TBL"):
+        """Read the table's files straight off the disc (dc/gdi_files.py), no extract."""
+        from dc import gdi_files
+        disc = gdi_files.Disc(gdi)
+        return cls(*[disc.file(f) if f else None for f in cls.TABLES[table]])
+
+    def source(self, name):
+        if self.flagged(name):
+            return "CG2.ROM"
+        return "CG1.ROM" if self.cg2 is not None else "VQ_CG.ROM"
 
     def flagged(self, name):
         return bool(struct.unpack_from("<H", self.tbl, self.records[name])[0] & 0x80)
@@ -200,6 +279,33 @@ def sheets(lst_path, tbl_path, cg_path, out, cg2_path=None, pal_path=None):
     print("%d records on %d sheets -> %s" % (len(names), (len(names) + per - 1) // per, out))
 
 
+def api_records(gdi):
+    """JSON for the API: every sprite record of both tables on the disc."""
+    import json
+    out = []
+    for table in Sprites.TABLES:
+        sp = Sprites.from_gdi(gdi, table)
+        for n in sp.records:
+            w, h, ids = sp.tilemap(n)
+            out.append({"name": n, "table": table, "w": w * 16, "h": h * 16, "source": sp.source(n)})
+    print(json.dumps({"records": out}))
+
+
+def api_sprite(gdi, name, table="TBL", pal="1"):
+    """JSON for the API: one record rendered as a base64 PNG."""
+    import base64, io, json
+    sp = Sprites.from_gdi(gdi, table)
+    if name not in sp.records:
+        print(json.dumps({"error": "no record %s in %s" % (name, table)}))
+        return
+    buf = io.BytesIO()
+    im = sp.render(name, int(pal))
+    im.save(buf, "PNG")
+    print(json.dumps({"name": name, "table": table, "w": im.width, "h": im.height, "source": sp.source(name),
+                      "palette": int(pal) if sp.flagged(name) else None,
+                      "png": base64.b64encode(buf.getvalue()).decode("ascii")}))
+
+
 def record(lst_path, rom, name):
     names = {a: (o, s) for a, o, s in lst(open(lst_path, encoding="latin-1").read())}
     o, s = names[name]
@@ -217,6 +323,10 @@ if __name__ == "__main__":
         sheets(*sys.argv[2:])
     elif cmd == "render" and len(sys.argv) in (7, 9):
         render(*sys.argv[2:])
+    elif cmd == "api-records" and len(sys.argv) == 3:
+        api_records(sys.argv[2])
+    elif cmd == "api-sprite" and 4 <= len(sys.argv) <= 6:
+        api_sprite(*sys.argv[2:])
     elif cmd == "record" and len(sys.argv) == 5:
         record(sys.argv[2], sys.argv[3], sys.argv[4])
     else:
