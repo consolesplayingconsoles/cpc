@@ -106,6 +106,20 @@ def decode_argb1555(d, off, w, h):
     return _unpack(_twiddled_u16(d, off, w, h), 0)
 
 
+def pack_argb1555(rgba):
+    """(h, w, 4) uint8 RGBA -> (h, w) u16 ARGB1555 (alpha >= 128 is opaque). Exact inverse of the
+    decode's bit replication, so decoded texels pack back to the same u16."""
+    r = rgba[..., 0].astype(np.uint16) >> 3; g = rgba[..., 1].astype(np.uint16) >> 3
+    b = rgba[..., 2].astype(np.uint16) >> 3; a = (rgba[..., 3] >= 128).astype(np.uint16)
+    return (a << 15) | (r << 10) | (g << 5) | b
+
+
+def encode_argb1555(rgba):
+    """(h, w, 4) uint8 RGBA -> twiddled ARGB1555 bytes. Inverse of decode_argb1555."""
+    h, w, _ = rgba.shape
+    return _untwiddle_to_bytes(pack_argb1555(rgba), w, h)
+
+
 def decode_vq(d, off, w, h, pf):
     """Twiddled VQ (PVRT data type 3) -> (h, w, 4) uint8 RGBA.
 

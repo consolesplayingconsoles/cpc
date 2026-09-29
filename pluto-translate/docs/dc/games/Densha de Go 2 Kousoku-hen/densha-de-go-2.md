@@ -75,5 +75,43 @@ the three plain ARGB1555 twiddled textures (not VQ), so they encode exactly. No 
 Free slots in 86-88: 19 (all in 88). A repaint re-tiles the new 512x480 picture, deduplicates, writes the
 tiles into the menu's own slots, and rewrites `OBJz_mainmenu`'s ids in place (same size).
 
+Done 2026-09-29 by `repaint_mainmenu.py` (Taito's wording, Arial Narrow Bold, grey 189 on 8): 543 unique tiles,
+144 kept as they were, 399 rewritten, 44 slots spare. Only `OBJz_mainmenu` and `CG1.ROM` 86-88 change; every
+other record renders byte-identical. The patched `CG1.ROM` / `TBL.ROM` sit in the workbench `textures/` and go
+onto the disc with `inplace.py` (same size, no rebuild). Tested in Flycast 2026-09-29: works.
+
 `OBJz_menuber0-3` are a background pattern, not menu text. The header legend (メインメニュー, 選択,
 キャンセル, 決定) is in another record; not found yet.
+
+## Method: how to do the next screen
+
+Lessons from the main menu. Read this before starting a screen.
+
+1. **Find the record, render it, never read a texture directly.** Textures are deduplicated tile pools and look
+   shredded. `ddg_assets.py render` (or a contact sheet of every record) shows the screen as the player sees it.
+2. **Triage before painting.** For the record's tiles, find: which textures (plain ARGB1555 twiddled in `CG1.ROM`
+   86-88 encodes exactly; VQ does not, it needs a new codebook), whether any other record shares them, and how
+   many free slots those textures have. Main menu: plain, unshared, 19 free = the easy case.
+3. **Wording first from the game, then from DDG64.** Taito put small English on some DC buttons; Zoinkity's
+   DDG64 set covers most shared screens. Coin only what neither has, and log it in the workbench `FLAGS.md`.
+4. **Erasing by colour needs a flat background.** Replacing grey pixels with the black worked on the menu's flat
+   black. Text with a drop shadow over the patterned "3000" background (Game Setting, Load/Save) needs the
+   background rebuilt from a clean copy, not a colour fill.
+5. **Verify three ways, every time:** the repaint re-rendered from the OUTPUT files equals the preview; every other
+   record renders byte-identical; the files read back from the patched track equal the outputs.
+6. **Disc:** `inplace.py` per file (same size, no rebuild), as for Boku.
+
+## Screens and their DDG64 counterparts
+
+Seen in game 2026-09-29 (screenshots in the workbench `reference/`). Numbers are Zoinkity's `007gg4` files.
+
+| Screen | Japanese | DDG64 match |
+|---|---|---|
+| Header legend (every screen) | 選択 / キャンセル / 決定 | "Select: + Pad / Decide: A Button" (`686-689`), "Back / Choose" (`871`). Cancel is not there |
+| Route select header | 路線選択 | "Route Select" (`868`), different style |
+| Route select groups | 北陸路線 / 東北路線 / 関東路線 | none: DDG64 names each line (`690-697`), the DC groups by region |
+| Game Setting header | ゲーム設定 | "Options" (`1031`) |
+| Game Setting items | コントロール, 難易度, 振動, サウンド, 速度メーター, 距離メーター | Controls, Difficulty, Sound, Speedometer, Distances (`1032-1036`); 振動 (Vibration) is DC only |
+| Game Setting values | ツーハンドルA, ノーマル, 並, ステレオ, ノーマル, m 表示 | Two-Handed A/B, One-Handed, Train Controller, Easy/Normal/Hard/Very Hard, Stereo/Mono, Normal/Digital, Meters (`1038-1062`); 並 (vibration strength) is DC only |
+| Ranking | 秋田新幹線, E3系, 次に進む, メニューに戻る | "Akita Shinkansen" (`697`), "E3 Series" (`722`), "(A) Next" (`728`), "(B) Main Menu" (`729`) |
+| Load/Save | ロード・セーブ, ロードする, セーブする | none (Controller Pak strings only: "DATA SAVING", "Now Saving...") |
