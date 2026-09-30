@@ -658,10 +658,10 @@ RECORDS = {
 
 
 # Records tested in game without the HUD glitch (2026-09-30, split builds): the menus, the first HUD round, the
-# departure calls and station names, and the signal windows. The glitch is somewhere in the rest of the second HUD
-# round (distance panels, time box, time panels, results, banners); that and the later batches build with --all.
+# departure calls and station names, the signal windows, the time box and the distance panels. The glitch is somewhere
+# in the rest of the second HUD round (time panels, results, banners); that and the later batches build with --all.
 STABLE = re.compile(r"^OBJ(z_submenu|z_font|z_kettei|z_ranking|exsel|greena|sp|jikoku[abc]$|moti|hyou20$|z_tuuka$"
-                    r"|z_pause$|z_[12]han|eki|win)")
+                    r"|z_pause$|z_[12]han|eki|win|time0c|dist|z_gstop|z_gover)")
 
 
 def coverage(text, cap, w, h):
