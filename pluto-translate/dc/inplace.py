@@ -9,16 +9,33 @@ is byte-identical to the original except the file's own sector user-windows.
 Mode-1 raw sector = [0:12] sync, [12:16] header, [16:2064] 2048B user data, [2064:2352] EDC/ECC.
 A file's user data is spread across consecutive sectors' [16:2064] windows. We find the file by its
 original first-2048 bytes (contiguous in sector 0), then rewrite each sector's user window with the
-patched bytes. EDC/ECC left as-is -- Flycast/ODEs don't verify it. mmap so an 865MB track never
+patched bytes, and recompute that sector's EDC and P/Q parity (fix_sector): stale error-correction
+bytes made a test image fail to start now and then (DDG2, 2026-09-30). mmap so an 865MB track never
 loads into RAM (matters on the box).
 
     inplace.py <track> <orig-file> <patched-file>     # patches <track> IN PLACE
 
 `orig-file` (to locate) and `patched-file` (to write) MUST be the same length.
 """
-import sys, os, mmap
+import sys, os, mmap, struct
+from inplace_cdi import edc, _parity
 
 SECTOR, USER_OFF, USER = 2352, 16, 2048
+
+
+def fix_sector(sector):
+    """Refresh EDC + P/Q for a 2352-byte Mode-1 sector whose user data you just rewrote. Mode 1 differs
+    from the CDI's Mode 2: the EDC covers sync + header + data and sits at 2064, and the parity keeps
+    the real header."""
+    s = bytearray(sector)
+    struct.pack_into("<I", s, 2064, edc(bytes(s[0:2064])))
+    s[2068:2076] = bytes(8)
+    buf = bytes(s[12:2076])
+    p = bytearray(172); _parity(buf, 86, 24, 2, 86, p)
+    q = bytearray(104); _parity(buf + bytes(p), 52, 43, 86, 88, q)
+    s[2076:2248] = p
+    s[2248:2352] = q
+    return bytes(s)
 
 
 def main():
@@ -58,6 +75,7 @@ def main():
         for i in range(0, n, USER):
             chunk = patch[i:i + USER]                       # last chunk may be < USER; leave the rest of
             mm[sec + USER_OFF: sec + USER_OFF + len(chunk)] = chunk   # that sector's padding untouched
+            mm[sec: sec + SECTOR] = fix_sector(mm[sec: sec + SECTOR])
             sec += SECTOR
         mm.flush()
         # round-trip verify straight from the mapping
