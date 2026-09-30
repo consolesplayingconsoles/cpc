@@ -11,9 +11,8 @@ Two things differ from `inplace.py`, and they are the whole reason this is a sep
     user window starts at byte 16. A CDI is Mode 2 Form 1: 12 sync + 4 header + 8 subheader + 2048
     user + 280 EDC/ECC, so the window starts at 24. Get this wrong and you write 8 bytes off into
     the tail of the previous sector.
-  * EDC/ECC. `inplace.py` leaves the error-correction bytes stale, because Flycast and the ODEs
-    that read a GDI do not check them. A CDI is what a real burner writes to a CD-R, and the drive
-    DOES care, so every sector you touch gets its EDC and its P/Q parity recomputed here.
+  * EDC/ECC. Both tools recompute them for every sector they touch (`inplace.py` for Mode 1, here
+    for Mode 2 Form 1): a GDI with stale ones failed to start now and then, and a CD-R drive checks them.
 
     inplace_cdi.py <image> <orig-file> <patched-file>
     inplace_cdi.py --chunk <image> <orig-PAC> <chunk-bin> <chunk-index>

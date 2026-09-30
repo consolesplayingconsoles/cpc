@@ -114,9 +114,13 @@ def cg2_decode(kind, body):
     return (list(out) + [0] * 256)[:256]
 
 
+MAX_LITERAL = 84   # the longest literal run in Taito's own CG2.ROM: controls 0xD4-0xFF never occur there,
+                   # and tiles using them broke in game (2026-09-30). Stay inside what the original uses.
+
+
 def cg2_encode(px):
     """256 palette indices -> the smallest CG2.ROM tile (type byte + controls), trying both types.
-    Shortest-path parse: a literal run costs 1 + n bytes (n <= 128); a type-1 run or a type-2 copy
+    Shortest-path parse: a literal run costs 1 + n bytes (n <= MAX_LITERAL); a type-1 run or a type-2 copy
     costs 2 (length <= 128, copy distance <= 256 and inside what is already written)."""
     px = list(px)
     n = len(px)
@@ -126,7 +130,7 @@ def cg2_encode(px):
         step = [None] * (n + 1)
         for i in range(n - 1, -1, -1):
             c, st = None, None
-            for L in range(1, min(128, n - i) + 1):                     # literals
+            for L in range(1, min(MAX_LITERAL, n - i) + 1):             # literals
                 v = 1 + L + cost[i + L]
                 if c is None or v < c:
                     c, st = v, ("lit", L, 0)

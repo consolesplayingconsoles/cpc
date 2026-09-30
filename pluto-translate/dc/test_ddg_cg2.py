@@ -43,6 +43,20 @@ def test_encode_round_trips_and_does_not_lose_to_the_original():
     assert len(e) <= len(REAL), (len(e), len(REAL))
 
 
+def test_encoder_stays_inside_taitos_controls():
+    """No literal longer than 84 (control above 0xD3): Taito's file never has one, and they broke in game."""
+    rnd = random.Random(11)
+    for _ in range(30):
+        px = [rnd.randrange(256) for _ in range(256)]            # noise: all literals
+        e = A.cg2_encode(px)
+        i = 1
+        while i < len(e):
+            c = e[i]; i += 1
+            assert c <= 0xD3 or not (c & 0x80), hex(c)
+            i += ((c & 0x7F) + 1) if c & 0x80 else 1
+        assert A.cg2_decode(e[0], e[1:]) == px
+
+
 def test_build_reads_back():
     tiles = [(1, bytes([0x7F, 0, 0x7F, 0])), (REAL[0], REAL[1:])]
     assert A.cg2_tiles(A.cg2_build(tiles)) == tiles

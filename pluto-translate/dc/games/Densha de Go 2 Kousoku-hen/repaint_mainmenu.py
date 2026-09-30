@@ -23,11 +23,12 @@ import ddg_assets as A
 
 RECORD = "OBJz_mainmenu"
 # A port (CLAUDE.md section 11): Zoinkity's DDG64 English, matched on the same Japanese, texture number noted.
-# None = no DDG64 match: the button's original art (Japanese + Taito's small English) is left untouched.
+# "operator" = the operator's own curation of a gap. None = still a gap: the button's original art (Japanese +
+# Taito's small English) is left untouched.
 LABELS = ["Arcade Mode",          # アーケードモード 1019
           "Options",              # ゲーム設定       1021
           "Rankings",             # ランキングを見る 1022
-          None,                   # ロード・セーブ   no DDG64 match
+          "Load & Save",          # ロード・セーブ   operator
           None]                   # LOVE特急こまち   no DDG64 match
 FONT = "/System/Library/Fonts/Supplemental/Arial Narrow Bold.ttf"
 BG, FG = 8, 189                 # the buttons' near-black and text grey
