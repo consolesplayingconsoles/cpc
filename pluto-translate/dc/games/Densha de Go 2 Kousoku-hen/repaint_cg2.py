@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Repaint flagged sprite records (tiles in CG2.ROM) with Zoinkity's Densha de Go! 64 English.
+"""Repaint flagged sprite records (tiles in CG2.ROM) with Zoinkity and mikeryan's Densha de Go! 64 English.
 
     repaint_cg2.py <SPRITE.LST> <orig TBL.ROM> <orig CG2.ROM> <PAL.DAT> <out TBL.ROM> <out CG2.ROM> [preview-dir] [--all]
 
 By default only the STABLE records are repainted (tested in game without the HUD glitch); --all repaints every
 record in RECORDS, including the ones not yet proven.
 
-This is a PORT (CLAUDE.md section 11): English strings with a number are Zoinkity's, taken from the DDG64
+This is a PORT (CLAUDE.md section 11): English strings with a number are Zoinkity and mikeryan's, from the DDG64
 texture whose original Japanese is the same text (`mld82r/Images/<n>.bin.png` -> `007gg4/<n>.bin.png`, same
 <n>). Strings marked `operator` are the operator's own curation of a gap (2026-09-29). None = still a gap: the
 original Japanese art is left untouched. No wording here is Claude's.
@@ -79,11 +79,11 @@ ITEMS_RIGHT = {0: "Two-Handed A",            # ツーハンドルA 1044
                4: "One-Handed A",            # ワンハンドルA operator: 1046 ワンハンドル One-Handed + letter
                5: "One-Handed B",            # ワンハンドルB operator
                9: "Port A, exp. socket 1",   # ポートA拡張ソケット1 operator
+               6: "Train Controller",        # 専用コントローラ operator (2026-09-30)
                11: "Port B, exp. socket 1"}  # ポートB拡張ソケット1 operator
-               # 専用コントローラ: gap
 
 # --- HUD, pause and controls (2026-09-30). Box styles measured from the originals. ---
-BUBBLE = dict(cap=10, bg=7, keep={7, 28, 0}, clear=(0, 0, 224, 64), fill=1, ramp=[1], pal=1)
+BUBBLE = dict(cap=12, bg=7, keep={7, 28, 0}, clear=(0, 0, 224, 64), fill=1, ramp=[1], pal=1, lead=1.35)
 # tips: black text on white; every pixel but the white, the green border and the transparent corners is text
 CLOCK  = dict(cap=11, bg=1, fill=17, ramp=[17, 17], pal=1)   # 現在時刻, 次駅到着時刻; two colours only, so fill down to 35%: stems stay 2 px
 CLOCK2 = dict(cap=11, bg=1, fill=74, pal=1)                                          # 次駅通過時刻
@@ -97,6 +97,7 @@ CTRL   = dict(cap=13, ramp="auto", pal=1)                                       
 # --- second HUD round: distance panels, results ledger, banners (2026-09-30) ---
 PANEL_T = dict(cap=20, bg="rows", dither=True, text={31}, fill=31, outline=1, pal=1)             # green label straight on the checker
 PANEL_B = dict(cap=20, fill="template", pal=1)                           # checker label inside a green/red box
+MADE    = dict(PANEL_T, text={7}, fill=7)                                # the white まで under 通過駅
 SEC_W   = dict(cap=15, bg="rows", text={7}, fill=7, pal=1)               # 秒 box, white (the line behind is restored)
 SEC_Y   = dict(SEC_W, text={10}, fill=10)                                # 秒 box, yellow
 JIKO_O  = dict(cap=12, bg=1, text={17}, fill=17, pal=1, align="left")   # 定刻 / 到着時刻 / 通過時刻, orange
@@ -113,11 +114,55 @@ MEISY   = dict(cap=18, bg=7, ramp="auto", pal=1, margin=(3, 0))          # landm
 LVL     = dict(cap=20, fill="template", rings=[(1, 1)], pal=1)           # chrome difficulty badges on their colour
 TETU    = dict(cap=16, bg=7, fill=1, ramp=[1, 2, 3, 4], pal=1, lead=1.35)  # conductor's advice: black, grey shading
 
+# --- third round (2026-09-30) ---
+UNI     = "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"          # for the ▲ ▼ of the gradient signs
+ROUTE_LIST = dict(cap=20, bg="rows", diag=16, text=set(range(1, 256)) - {63}, fill=7, rings=[(1, 1)], pal=1)
+FROMTO  = dict(cap=12, bg=1, fill=7, ramp="auto", pal=1)                  # 発 / 着 on the route bars (on black)
+GOODW   = dict(cap=22, bg=0, text={28, 1}, fill=28, outline=1, pal=1)             # 乗務完了 over the assistant
+WATCH   = dict(cap=18, bg=0, text={10, 15}, fill=10, outline=15, inpaint=True, pal=1)   # 持ち時間注意! (over the hat)
+POLE    = [(56, 64, 80, 96, {2, 3, 5, 6, 7})]                                     # the sign pole behind the label
+COUPLE  = dict(cap=22, bg=7, fill=15, ramp=[15, 15], pal=1, lead=1.3)            # red on the white bubble
+LEVERS  = dict(cap=20, bg=0, text={58, 3}, fill=58, ramp=[58, 58], drop=(3, 2, 2), pal=1, lead=1.3)
+CHROME  = dict(cap=28, bg=0, fill="template", rings=[(1, 1)], pal=1)             # 仕業検査
+CAR     = dict(cap=9, bg="rows", text={7}, fill=7, ramp=[7, 6], pal=1, lead=1.3)  # car-type tiles; the line behind stays
+PLATE   = dict(cap=28, bg="rows", dither=True, text={1, 3, 4, 6, 7}, fill="template", rings=[(1, 1)], pal=1)
+SUPPORT = dict(cap=11, bg=1, text={2, 3, 4, 5, 6, 7}, fill=7, ramp=[7, 6, 4, 2], pal=1)   # (the DDG64 note sits on empty black)
+# --- fourth round: the operator's wordings for the gaps (cpc, 2026-10-01) ---
+LIMIT2  = dict(cap=18, bg=15, text={10}, fill=10, ramp=[10, 10], pal=1, margin=(4, 0))   # speeding banner, 2nd line
+PINKS   = dict(cap=20, bg=0, text={58, 3}, fill=58, ramp=[58, 58], drop=(3, 2, 2), pal=1)   # pink, dark drop shadow
+BLUEO   = dict(cap=20, bg=0, text={62, 1}, fill=62, outline=1, pal=1)                    # blue, black outline
+GOLD    = dict(cap=16, bg=0, fill="template", rings=[(1, 1)], pal=1, lead=1.3)            # gradient words, black edge
+DEDUCT  = dict(cap=16, bg=0, fill=10, rings=[(15, 1), (1, 1)], pal=1)                     # 減点: yellow, red and black edges
+COINS   = dict(cap=12, bg=1, fill=18, ramp=[18, 18], pal=1, lead=1.2)                     # red on the black bubble
+TAG     = dict(cap=16, bg=4, fill="template", rings=[(1, 1)], pal=1, margin=(6, 2))      # train-select tags, embossed grey
+TAG_BEVEL = [("OBJpuret03", (173, 3, 175, 46))]   # the right bevel, where 量産先行車 etc. run over it: from the plain tag
+TAG3000 = dict(cap=26, bg=0, fill="template", rings=[(15, 1), (1, 1)], pal=1)            # the gold 3000番台
+BIG3000 = dict(cap=110, bg=0, fill=31, ramp=[31, 31], pal=1, margin=(10, 4))            # the big green 3000番台
+NOTCH   = dict(cap=10, bg=1, text=set(), over=True, fill=78, ramp=[78, 6, 5], rings=[(1, 1)], pal=1, lead=1.15)
+LEGEND2 = dict(cap=14, bg=0, ramp="auto", pal=1, align="left")                            # the name-entry legend
+# --- fifth round: the rest of DDG64, and the picture labels (2026-10-01) ---
+CHROME_V = [7, 6, 6, (5, 6), 5, (4, 5), 4, (3, 4), 3, (2, 3), 2]                  # the kanji's own top-to-bottom shading
+COMPLETE = dict(cap=40, bg="rows", text=set(range(1, 256)) - {62}, vgrad=CHROME_V, rings=[(1, 1), (18, 2)], pal=1)
+SUBT    = dict(cap=13, bg=0, text=set(), vgrad=[7, 7, 6, 6, (5, 6), 5, 4], rings=[(1, 1)], pal=1)       # under the 定通 / ボーナス art
+ACC_T   = dict(cap=40, bg=15, text={10}, fill=10, ramp=[10, 10], pal=1, margin=(8, 4))  # 事故: yellow on red
+ACC_B   = dict(cap=18, bg=15, text={10, 12}, fill=10, outline=12, pal=1, margin=(6, 0))      # 速度の出し過ぎ: dark red edge
+CABTOP  = dict(cap=9, bg=10, text={1}, fill=1, ramp=[1, 1], pal=1)                       # 車内信号 on its yellow strip
+WEBN    = dict(cap=16, bg=0, fill=23, ramp=[23, 35], rings=[(32, 1), (253, 2)], pal=15)   # blue, dark and gold glow
+TYUUI   = dict(cap=22, bg=17, text={7, 65, 66}, fill=7, ramp=[7, 66, 65], pal=1, lead=1.35)                 # white on the orange box
+MEMC    = dict(bg=116, text=set(range(256)) - {116}, fill=26, ramp=[26, 68], rings=[(197, 1)], pal=22)  # dark, light edge
+CABARR  = dict(cap=11, bg=15, text={10, 1}, fill=10, outline=1, pal=1, margin=(2, 0))                   # 知らせ灯 in the red arrow
+
+ROUTE_BARS = {n: (16, 312) for n in ("OBJsouaa01", "OBJsouba01", "OBJsouba01b", "OBJsouca01", "OBJsouca01b",
+                                       "OBJsouda01", "OBJsouea01", "OBJsoufa01", "OBJsouga01", "OBJsouha01",
+                                       "OBJsouia01", "OBJsouia01b", "OBJsouma01")}
+ROUTE_BARS.update({n: (9, 319) for n in ("OBJsouca01c", "OBJsouja01", "OBJsouja01b", "OBJsouka01", "OBJsoula01")})
+# (x of 発, x of 着): each glyph is 23 px wide, rows 8-24
+
 EKI = [  # DDG64 217-308, verbatim
     'Departing',  # 217
     'Passing',  # 218
     'Stop at',  # 219
-    'Station',  # 220
+    'St.',  # 駅: DDG64 220 "Station"; "St." operator (2026-10-01)
     'Akita',  # 221
     'Yotsugoya',  # 222
     'Wada',  # 223
@@ -157,7 +202,7 @@ EKI = [  # DDG64 217-308, verbatim
     'Misashima',  # 257
     'Uonuma-Kyuryo',  # 258
     'Muikamachi',  # 259
-    'Shiozawa',  # 260: Zoinkity's reads "Shizowa", a typo for 塩沢 (shio + sawa); operator-approved fix
+    'Shiozawa',  # 260: DDG64 "Shizowa"; 塩沢 is shio + sawa (operator)
     'Osawa',  # 261
     'Ishiuchi',  # 262
     'Echigo-Yuzawa',  # 263
@@ -209,11 +254,25 @@ EKI = [  # DDG64 217-308, verbatim
 ]
 
 
+def _bubble(bands, lines, right=372, **extra):
+    """The memory card and Dream Passport bubbles: one box per original line band (so the はい/いいえ and menu
+    cursors still line up), the size from the band's height."""
+    assert len(bands) == len(lines)
+    rights = right if isinstance(right, list) else [right] * len(bands)
+    return dict(style=MEMC, boxes=[((10, b0 - 1, r, b1 + 1), t, dict(MEMC, cap=min(20, round((b1 - b0) * 0.75))))
+                                   for (b0, b1), t, r in zip(bands, lines, rights)], **extra)
+
+
+PORT = {"a": "[Port A, exp. socket 1]", "b": "[Port B, exp. socket 1]"}   # as in Game Settings (operator)
+B3 = [(39, 59), (62, 83), (86, 107)]
+B2 = [(43, 69), (86, 107)]
+
+
 def _eki(n, v):
     """Station/call record n: green (28; 22 for the signal calls 90-92) on grey, or yellow (10; 15) on blue (61) for s.
     Two colours and an outline only: fill down to 35% so the squeezed long names keep their strokes."""
     c = (22 if n >= 90 else 28) if not v else (15 if n >= 90 else 10)
-    return dict(cap=18, bg=61 if v else 0, fill=c, ramp=[c, c], outline=1, pal=1)
+    return dict(cap=18, bg=61 if v else 0, fill=c, ramp=[c, c], outline=1, pal=1, baseline=True)   # one baseline
 
 
 def _sig(c):
@@ -227,7 +286,7 @@ def _plate(v):
 
 
 
-TIPS = {                                   # OBJgreenaNN: Zoinkity's bubble, his line breaks
+TIPS = {                                   # OBJgreenaNN: the DDG64 bubble and line breaks
     1: ("When the train doors\nclose, the cab signal\nlight will turn on.", 583),
     2: ("Abide the speed limit\nuntil it is cancelled.", 584),
     3: ("Act promptly when\nmultiple speed limit\nsignals are given.", 585),
@@ -240,6 +299,7 @@ TIPS = {                                   # OBJgreenaNN: Zoinkity's bubble, his
     11: ("Don't mistakingly set\nboth the brakes and\nthe master control.", 592),
     13: ("Decelerate as soon\nas you see a blinking\nspeed limit warning.", 594),
     14: ("The speed limit\nis in effect once\nit stops blinking.", 595),
+    15: ("The speed limit has\nbeen lifted, but obey\nthe 70 km/h signal.", 596),
     16: ("The coupling\nis too poor.", 597),
     17: ("Enjoy a high-speed\nATC-assisted\nbonus route!", 598),
     18: ("Please follow the\nschedule when\npassing stations.", 599),
@@ -252,14 +312,14 @@ TIPS = {                                   # OBJgreenaNN: Zoinkity's bubble, his
     25: ("Your operating\nspeed should be\n110 ~ 120 km/h.", 606),
     26: ("Even when passing\nstations you should\nfollow the schedule.", 607),
     27: ("Service will resume\nmomentarily after\ncoupling is complete.", 608),
-    28: ("As the ATC updates\nfollow the indicated\nspeed changes.", 609),   # DC ends in 。, his does not
+    28: ("As the ATC updates\nfollow the indicated\nspeed changes.", 609),   # DC ends in 。, DDG64 does not
     29: ("Your operating\nspeed should be\nabout 120 km/h.", 610),
     30: ("The next station is\na passing station!", 611),
     31: ("You'll be stopping\nat the next station!", 612),
     32: ("Your operating\nspeed should be\nabout 80 km/h.", 613),
     33: ("You're running late.\nPlease accelerate\na little to catch up.", 614),
     34: ("You're ahead of\nschedule. Please\nslow down a bit.", 615),
-}   # gaps: 10 (picture), 12 警笛は足元のペダルです, 15 制限標識は解除されましたが… (DDG64's Japanese differs)
+}   # 10 (picture) and 12 (operator) are below; 15: DDG64 596 has 速度制限 for 制限標識 (greenlit by the operator)
 LINES = ["Yamanote Line 205 S.", "Tokaido Line 223 S.", "Tokaido Line 221 S.", "Tokaido Line 207 S.",   # 33-36
          "Tokaido Line 201 S.", "Keihin-Tohoku L. 209 S.", "Akita Shinkansen E3 S.",                    # 37-39
          "Tohoku Shinkansen 200", "Tohoku Shinkansen E2", "Hokuhoku Line HK100 M.",                     # 40-42
@@ -325,7 +385,8 @@ RECORDS = {
        for i, t in enumerate(LINES)},                                                  # line names 33-47
     "OBJhyou20": dict(style=BANNER, boxes=[((4, 0, 380, 64),
                       "You are signaled to proceed.\nSet the train in motion.")]),   # 146
-    "OBJz_tuuka": dict(style=PASS, boxes=[((0, 0, 160, 30), "Passing")]),             # 通過駅 119; まで: gap
+    "OBJz_tuuka": dict(style=PASS, boxes=[((0, 0, 160, 30), "Passing"),               # 通過駅 119
+                                          ((0, 38, 40, 64), "in", MADE)]),            # まで 114
     "OBJz_pause": dict(style=PAUSE, boxes=[
         ((0, 32, 340, 64), "Do you want to quit?"),            # 運転を中止しますか？ 884
         ((0, 64, 340, 96), "Do you want to restart?"),         # 始発駅に戻りますか？ 883
@@ -333,7 +394,10 @@ RECORDS = {
         ((0, 128, 191, 159), "Quit"), ((192, 128, 384, 159), "Quit"),                # 運転中止 879
         ((0, 160, 191, 190), "Retry Route"), ((192, 160, 384, 190), "Retry Route"),  # 始発駅に戻る 880
         ((0, 226, 96, 255), "Yes"), ((96, 226, 191, 255), "No"),                     # はい いいえ 881 882
-        ((192, 226, 288, 255), "Yes"), ((288, 226, 384, 255), "No"),                 # 画面位置調整, 標準に戻す, 調整終了: gaps
+        ((192, 226, 288, 255), "Yes"), ((288, 226, 384, 255), "No"),
+        ((0, 192, 191, 224), "Screen Position"), ((192, 192, 384, 224), "Screen Position"),  # 画面位置調整 operator
+        ((0, 386, 176, 417), "Reset"), ((192, 386, 368, 417), "Reset"),                      # 標準に戻す operator
+        ((0, 417, 176, 448), "Done"), ((192, 417, 368, 448), "Done"),                        # 調整終了 operator
         *[((x, y, x + 84, y + 32), t, dict(PAUSE, align="left", margin=(4, 0)))   # 上 下 左 右 next to the arrows: operator
           for y, t in ((256, "Up"), (288, "Down"), (320, "Left"), (352, "Right")) for x in (88, 280)]]),
     "OBJz_2hana": dict(style=CTRL, boxes=_pad("Off", "Full", "Full", "Off")),       # 切る/加速, 非常/解除
@@ -352,14 +416,21 @@ RECORDS = {
 
     # distance panels (top label only; あと / まで / m / Cm / OVER stay)
     "OBJdist40": dict(style=PANEL_T, boxes=[((0, 3, 128, 30), "Stopping"), ((0, 38, 40, 64), "in")]),   # 停止位置 117, あと 814
-    "OBJdist41": dict(style=PASS, boxes=[((1, 1, 127, 31), "Passing")]),         # 通過駅 119
+    "OBJdist41": dict(style=PASS, boxes=[((1, 1, 127, 31), "Passing"),           # 通過駅 119
+                                         ((0, 38, 40, 64), "in", MADE)]),        # まで 114
     **{"OBJdist%d" % n: dict(style=PANEL_B, boxes=[((1, 1, 127, 31), "Success")] +   # 合格範囲 116
                                  ([((0, 38, 40, 64), "in", PANEL_T)] if n in (42, 43) else []))  # あと 814
        for n in (42, 43, 44, 45)},
-    **{"OBJdist%d" % n: dict(style=PANEL_T, boxes=[((0, 38, 40, 64), "in")]) for n in (47, 48)},   # あと 814; 連結位置: gap
+    **{"OBJdist%d" % n: dict(style=PANEL_T, boxes=[((0, 3, 128, 30), "Coupling Position", dict(PANEL_T, margin=(4, 0))),   # 連結位置 operator
+                                                   ((0, 38, 40, 64), "in")]) for n in (47, 48)},   # あと 814
     "OBJdist46": dict(style=PANEL_B, boxes=[((1, 1, 127, 31), "Overrun")]),      # 過走 118
     "OBJz_gover": dict(style=PANEL_B, boxes=[((1, 1, 151, 31), "Success")]),     # 合格範囲 116
     "OBJz_gstop": dict(style=PANEL_T, boxes=[((0, 3, 152, 30), "Stopping"), ((0, 38, 40, 64), "in")]),   # 117, 814
+    "OBJz_gato": dict(style=PANEL_B, boxes=[((1, 1, 151, 31), "Success"),        # 合格範囲 116
+                                            ((0, 38, 40, 64), "in", PANEL_T)]),   # あと 814
+    "OBJz_kasou": dict(style=PANEL_B, boxes=[((1, 1, 151, 31), "Overrun")]),     # 過走 118
+    "OBJz_renketu": dict(style=PANEL_T, boxes=[((0, 3, 152, 30), "Coupling Position", dict(PANEL_T, margin=(4, 0))),   # 連結位置 operator
+                                               ((0, 38, 40, 64), "in")]),                # あと 814
     "OBJtime0c": dict(style=SEC_W, boxes=[((6, 1, 42, 38), "Sec")]),             # 秒 178
     "OBJtime0cy": dict(style=SEC_Y, boxes=[((6, 1, 42, 38), "Sec")]),            # 秒 178
     "OBJjikokuz1": dict(style=JIKO_O, boxes=[((0, 0, 96, 16), "OnTime!"), ((0, 16, 96, 32), "Arrival Time")]),  # 1114 1115
@@ -398,7 +469,7 @@ RECORDS = {
     "OBJhyou34": dict(style=LEDGER, boxes=[((0, 0, 130, 32), "Stop Position"),   # 停止位置 181
                                            ((372, 0, 476, 32), "Pass!", METAL)]),    # 合格!! 137
     # signal windows (label under the lamps, on the checker). 停止信号, 制限 and 進行 alone: gaps (DDG64 190, 194, 198);
-    # the 場/出 plates stay (DDG64 215, 216 keep them). Gradient signs 勾配なし/上り勾配/下り勾配 (85/87/83) wait.
+    # the 場/出 plates stay (DDG64 215, 216 keep them). Gradient signs 勾配なし/上り勾配/下り勾配 (85/87/83): below.
     **{n: dict(style=_sig(15), boxes=[((0, 104, 96, 136), "Warning")])                   # 緊急停止 184-188
        for n in ("OBJwin001", "OBJwin002", "OBJwin003", "OBJwin004", "OBJwin005")},
     **{n + v: dict(style=_sig(31), boxes=[((0, y, 96, y + 26), "Proceed")], protect=_plate(v))   # 進行信号 90/189
@@ -413,21 +484,25 @@ RECORDS = {
     "OBJwin040": dict(style=_sig(31), boxes=[((0, 119, 96, 144), "Express")]),            # 高速進行 191
     "OBJwin041": dict(style=_sig(7), boxes=[((0, 96, 96, 120), "Stop", _sig(15)),         # 停止 193
                                             ((0, 120, 96, 144), "Relay")]),               # 中継信号 192
-    "OBJwin042": dict(style=_sig(7), boxes=[((0, 120, 96, 144), "Relay")]),               # 制限: gap; 中継信号 192
+    "OBJwin042": dict(style=_sig(7), boxes=[((0, 96, 96, 120), "Limit", _sig(75)),        # 制限 operator (DDG64 194: Japanese)
+                                            ((0, 120, 96, 144), "Relay")]),               # 中継信号 192
     "OBJwin042a": dict(style=_sig(7), boxes=[((0, 96, 96, 120), "Limit 25km/h", _sig(15)), ((0, 120, 96, 144), "Relay")]),  # 197
     "OBJwin042b": dict(style=_sig(7), boxes=[((0, 96, 96, 120), "Limit 45km/h", _sig(75)), ((0, 120, 96, 144), "Relay")]),  # 195
     "OBJwin042c": dict(style=_sig(7), boxes=[((0, 96, 96, 120), "Limit 70km/h", _sig(75)), ((0, 120, 96, 144), "Relay")]),  # 196
-    "OBJwin043": dict(style=_sig(7), boxes=[((0, 120, 96, 144), "Relay")]),               # 進行: gap; 中継信号 192
+    "OBJwin043": dict(style=_sig(7), boxes=[((0, 96, 96, 120), "Proceed", _sig(31)),      # 進行 operator (DDG64 198: none)
+                                            ((0, 120, 96, 144), "Relay")]),               # 中継信号 192
+    **{n + v: dict(style=_sig(15), boxes=[((0, y, 96, y + 30), "Stop Signal")], protect=_plate(v))  # 停止信号 operator
+       for n, y in (("OBJwin008", 103), ("OBJwin035", 110)) for v in ("", "j", "s")},     # (DDG64 190: none)
     "OBJwin044": dict(style=_sig(7), boxes=[((0, 95, 96, 120), "Express", _sig(31)), ((0, 120, 96, 144), "Relay")]),  # 191 192
     **{"OBJwin%03d" % i: dict(style=_sig(10), boxes=[((0, 63, 96, 96), "Speed Limit")])   # 速度制限 89
        for i in list(range(17, 33)) + list(range(48, 54))},
     "OBJwin033": dict(style=_sig(28), boxes=[((0, 64, 96, 96), "No Limit")]),             # 制限解除 79
     "OBJwin034": dict(style=_sig(10), boxes=[((0, 63, 96, 96), "Horn")]),                 # 警笛鳴せ 81
     # departure calls and station names (OBJeki001-092 = DDG64 217-308, same Japanese in the same order); the plain
-    # record is green on grey, the s one yellow on blue. 260 塩沢 fixes Zoinkity's "Shizowa" typo (operator).
+    # record is green on grey, the s one yellow on blue. 260 塩沢: DDG64 "Shizowa", here Shiozawa (operator).
     **{"OBJeki%03d" % (i + 1) + v: dict(style=_eki(i + 1, v), boxes=[((0, 0, 999, 32), t)])
        for i, t in enumerate(EKI) for v in ("", "s")},
-    # route boards: each station column -> Zoinkity's name (EKI numbers), turned 90 degrees; see board()
+    # route boards: each station column -> the DDG64 name (EKI numbers), turned 90 degrees; see board()
     'OBJsouab01': dict(style=dict(pal=1), board=[30, 31, 32, 33, 34, 35, 36, 37, 38, 39]),
     'OBJsouab02': dict(style=dict(pal=1), board=[39, 40, 41, 42, 43]),
     'OBJsouab03': dict(style=dict(pal=1), board=[43, 44, 45, 46, 47]),
@@ -568,12 +643,12 @@ RECORDS = {
     'OBJmeisyf03': dict(style=MEISY, boxes=[((0, 0, 999, 32), 'Shibuya Route')]),   # 342
     'OBJmeisyf04': dict(style=MEISY, boxes=[((0, 0, 999, 32), 'Meiji Shrine')]),   # 343
     'OBJmeisyf05': dict(style=MEISY, boxes=[((0, 0, 999, 32), 'Shinjuku Route')]),   # 344
-    # E3 coupling HUD (DDG64 813-817); 813's "Tohoka" is a typo for 東北 (operator-approved fix, cf. 319 Tohoku)
+    # E3 coupling HUD (DDG64 813-817); 東北: DDG64 813 "Tohoka", 319 "Tohoku"; here Tohoku (operator)
     "OBJheigo01": dict(style=dict(cap=18, bg=62, text={7}, fill=7, ramp=[7, 7], pal=1), boxes=[((214, 1, 306, 31), "Tohoku")]),
     "OBJheigo02": dict(style=dict(cap=18, bg=1, text={7}, fill=7, ramp=[7, 7], pal=1), boxes=[((0, 0, 62, 32), "in")]),   # あと 814
     "OBJheigo03": dict(style=dict(cap=20, bg=28, text={1}, fill=1, ramp=[1, 1], pal=1), boxes=[((0, 0, 160, 32), "Ready")]),     # 併合準備完了 815
     "OBJheigo04": dict(style=dict(cap=20, bg=28, text={1}, fill=1, ramp=[1, 1], pal=1), boxes=[((0, 0, 160, 32), "Complete")]),  # 併合完了 816
-    "OBJheigo05": dict(style=dict(cap=20, bg=1, text={10}, fill=10, ramp=[10, 10], pal=1), boxes=[((0, 0, 160, 32), "Caution")]),  # 距離注意 817 (his ‖ bars left out)
+    "OBJheigo05": dict(style=dict(cap=20, bg=1, text={10}, fill=10, ramp=[10, 10], pal=1), boxes=[((0, 0, 160, 32), "Caution")]),  # 距離注意 817 (the DDG64 ‖ bars left out)
     # coupling bonus game (DDG64 823-830)
     "OBJrenk01": dict(style=GRAD2, boxes=[((0, 0, 320, 48), "Bonus Game")]),        # ボーナスゲーム 823
     "OBJrenk03": dict(style=dict(cap=24, bg="rows", text={58, 63}, fill=58, outline=63, pal=1), boxes=[
@@ -585,12 +660,13 @@ RECORDS = {
     'OBJrenk07': dict(style=GRAD2, boxes=[((0, 0, 999, 48), 'Ready')]),   # 829
     'OBJrenk08': dict(style=GRAD2, boxes=[((0, 0, 999, 48), 'Start')]),   # 830
     # difficulty (DDG64 525-529)
-    "OBJselect08": dict(style=dict(cap=10, bg=0, fill=15, outline=17, pal=1), boxes=[((0, 0, 64, 16), "Difficulty")]),   # 難易度 525
+    "OBJselect08": dict(style=dict(cap=9, bg=0, fill=15, outline=17, pal=1, margin=(0, 1)),     # 難易度 525: kept clear of
+                        boxes=[((0, 0, 64, 16), ""), ((0, 2, 64, 16), "Difficulty")]),        # the rating balls above
     'OBJselect13': dict(style=LVL, boxes=[((0, 0, 64, 32), 'Lvl.1')]),   # 526
     'OBJselect14': dict(style=LVL, boxes=[((0, 0, 64, 32), 'Lvl.2')]),   # 527
     'OBJselect15': dict(style=LVL, boxes=[((0, 0, 64, 32), 'Lvl.3')]),   # 528
     "OBJselect16": dict(style=dict(LVL, face="/System/Library/Fonts/Supplemental/Arial Unicode.ttf"), boxes=[((0, 0, 64, 32), "Lvl.☆")]),   # 529: ☆ needs Arial Unicode
-    # conductor's advice (OBJtetu* = DDG64 565-577 in order; 08 and 09 are near misses, held)
+    # conductor's advice (OBJtetu* = DDG64 565-577 in order; 08 and 09 are near matches, greenlit by the operator)
     "OBJtetu01": dict(style=TETU, boxes=[((3, 20, 190, 118), 'Please stop at\nthe station as\ninstructed.')]),   # 565
     "OBJtetu02": dict(style=TETU, boxes=[((3, 20, 190, 118), 'Try not to brake\nso roughly.')]),   # 566
     "OBJtetu03": dict(style=TETU, boxes=[((3, 20, 190, 118), 'Please obey\nthe signals.')]),   # 567
@@ -598,6 +674,8 @@ RECORDS = {
     "OBJtetu05": dict(style=TETU, boxes=[((3, 20, 190, 118), 'Please coast.')]),   # 569
     "OBJtetu06": dict(style=TETU, boxes=[((3, 20, 190, 118), 'Overrunning a\ncrossing is very\ndangerous. Check\nthe driver is safe!')]),   # 570
     "OBJtetu07": dict(style=TETU, boxes=[((3, 20, 190, 118), 'Press Start\nto continue.')]),   # 571
+    "OBJtetu08": dict(style=TETU, boxes=[((3, 20, 190, 118), "Don't release the\nbrake until the\ncab signal is lit.")]),   # 572
+    "OBJtetu09": dict(style=TETU, boxes=[((3, 20, 190, 118), 'Try to be mindful\nof how you apply\nthe brakes...')]),   # 573
     "OBJtetu10": dict(style=TETU, boxes=[((3, 20, 190, 118), 'Great coasting!')]),   # 574
     "OBJtetu11": dict(style=TETU, boxes=[((3, 20, 190, 118), 'Iron-chan is\nimpressed!')]),   # 575
     "OBJtetu12": dict(style=TETU, boxes=[((3, 20, 190, 118), 'When operating\nthe train, always\nbe punctual.')]),   # 576
@@ -634,11 +712,11 @@ RECORDS = {
     "OBJz_submenu2": dict(style=HEADER, band=48, cols=[(0, 288)], labels={(i, 0): t for i, t in enumerate(
         HEADERS + ["Train Select",         # 電車選択 869
                    "Route Select"])}),     # 路線選択 868
-    "OBJz_kettei":   dict(style=LEGEND, band=32, cols=[(0, 112)], labels={
+    "OBJz_kettei":   dict(style=LEGEND, band=32, cols=[(0, 112)], left=2, labels={   # Back / Choose / Exit line up
         (0, 0): "Select",                  # 選択       870
         (1, 0): "Back",                    # キャンセル 870
         (2, 0): "Choose",                  # 決定       870
-        (3, 0): None}),                    # おわり     gap
+        (3, 0): "Exit"}),                  # おわり     operator (2026-09-30)
     "OBJz_font":  dict(style=ITEM, band=32, cols=[(0, 190), (190, 432)], labels=dict(
         [((i, 0), t) for i, t in enumerate(ITEMS_LEFT)] + [((i, 1), t) for i, t in ITEMS_RIGHT.items()])),
     "OBJz_font2": dict(style=ITEM_H, band=32, cols=[(0, 190), (190, 432)], labels=dict(
@@ -654,6 +732,130 @@ RECORDS = {
     "OBJz_ranking2": dict(style=FOOTER, band=32, cols=[(33, 158), (193, 384)], labels={
         (0, 0): "Next",                    # 次に進む       740
         (0, 1): "Main Menu"}),             # メニューに戻る 741
+
+    # --- third round (2026-09-30) ---
+    # route list: the route names of DDG64 717-723, white on the blue stripes (rebuilt under the English)
+    "OBJex001": dict(style=ROUTE_LIST, boxes=[((0, 32 * i, 160, 32 * i + 32), t) for i, t in enumerate(
+        ["Tokaido Main",                   # 東海道本線 718
+         "Yamanote",                       # 山手線     723
+         "Ouu Main",                       # 奥羽本線   721
+         "Tazawako",                       # 田沢湖線   717
+         "Hokuhoku",                       # ほくほく線 720
+         "Keihin-Tohoku"])]),              # 京浜東北線 719
+    # route bars over the diagrams: 発 ... 着 = DDG64 451 From ... To
+    **{n: dict(style=FROMTO, boxes=[((l, 8, l + 74, 25), "From", dict(FROMTO, align="left")),
+                                     ((r - 6, 8, min(344, r + 25), 25), "To")])
+       for n, (l, r) in ROUTE_BARS.items()},
+    # the assistant's windows
+    "OBJwin012": dict(style=GOODW, boxes=[((0, 0, 128, 32), "Good Work")]),               # 乗務完了 624
+    "OBJwin013": dict(style=GOODW, boxes=[((0, 0, 128, 32), "Good Work")]),               # 乗務完了 625
+    "OBJwin045": dict(style=dict(WATCH, cap=13), boxes=[((0, 3, 96, 20), "Watch the time!")]),   # 持ち時間注意! 626
+    "OBJwin45": dict(style=WATCH, boxes=[((0, 5, 128, 27), "Watch the time!")]),          # 持ち時間注意! 626
+    # gradient signs; the sign pole comes back wherever the English is not
+    "OBJwin014": dict(style=dict(_sig(28), cap=18), boxes=[((0, 64, 96, 96), "Level")], protect=POLE),    # 勾配なし 85
+    "OBJwin015": dict(style=dict(_sig(10), cap=18, face=UNI), boxes=[((0, 64, 96, 96), "▲Grade▲")],
+                      protect=POLE),                                                      # 上り勾配 87
+    "OBJwin016": dict(style=dict(_sig(10), cap=18, face=UNI), boxes=[((0, 64, 96, 96), "▼Grade▼")],
+                      protect=POLE),                                                      # 下り勾配 83
+    # 駅進入速度超過 (the first line) 167; the second line 制限 NNKm/h まで is a gap
+    "OBJmes19": dict(style=REDB, boxes=[((0, 0, 224, 32), "Speeding at Station"),
+                                        ((0, 32, 224, 64), "Limit up to 75 km/h", LIMIT2)]),   # operator
+    "OBJmes20": dict(style=REDB, boxes=[((0, 0, 224, 32), "Speeding at Station"),
+                                        ((0, 32, 224, 64), "Limit up to 70 km/h", LIMIT2)]),   # operator
+    "OBJrenk02": dict(style=COUPLE, boxes=[((12, 16, 266, 92), "Couple the cars,\nminimizing shock")]),   # 622
+    # lever inspection: DDG64 1078 (title and instruction)
+    "OBJmes04": dict(style=CHROME, boxes=[((0, 0, 176, 48), "Inspection")]),              # 仕業検査
+    "OBJmes03": dict(style=LEVERS, boxes=[((0, 0, 352, 64),
+                     "Set each lever to its initial\nposition as shown above.")]),        # 各レバーをスタート位置に…
+    # car-type tiles: DDG64 686-694 (終 696 is a glyph that can't be read at 16 px: kept)
+    **{"OBJname" + k: dict(style=CAR, boxes=[((3, 3, 29, 29), t)]) for k, t in (
+        ("19", "Ki\nHa"), ("20", "Sa\nHa"), ("21", "Ku\nHa"), ("22", "Mo\nHa"),        # キハ サハ クハ モハ 686-689
+        ("23", "Ku\nRo"), ("24", "Ki\nRo"), ("25", "Sa\nRo"))},                          # クロ キロ サロ 690-692
+    "OBJname00": dict(style=dict(CAR, cap=16), boxes=[((3, 3, 29, 29), "S.")]),           # 系 693
+    "OBJname29": dict(style=dict(CAR, cap=16), boxes=[((3, 3, 29, 29), "M")]),            # 形 694
+    # controls legend: only its third line has DDG64 Japanese (716's first line); the others are gaps
+    "OBJz_name": dict(style=LEGEND2, boxes=[
+        ((0, 0, 176, 32), "Select: Left/Right\ndirectional buttons", dict(LEGEND2, cap=10, lead=1.25)),  # operator
+        ((0, 32, 62, 64), "Confirm:"), ((100, 32, 176, 64), "button"),   # 決定：Ⓐボタン operator; the A button stays
+        ((0, 64, 176, 96), "Select: Brake"),                             # 選択：ブレーキ 716
+        ((0, 96, 62, 128), "Confirm:"), ((100, 96, 176, 128), "button")]),   # 決定：Ⓑボタン operator
+    "OBJpret01": dict(style=PLATE, boxes=[((18, 4, 224, 60), "Route Select")]),           # 路線選択 868
+    # --- fourth round (cpc, 2026-10-01): the operator's wordings, and the notch icons rebuilt ---
+    "OBJhyou13": dict(style=DEDUCT, boxes=[((0, 0, 64, 32), "Deduction")]),              # 減点 operator
+    "OBJhyou26": dict(style=DEDUCT, boxes=[((0, 0, 64, 32), "Deduction")]),              # 減点 operator
+    "OBJkei09": dict(style=REDB, boxes=[((0, 0, 256, 32), "Catching up to the preceding train")]),   # 先行列車追いつき
+    "OBJmes01": dict(style=PINKS, boxes=[((0, 0, 432, 32), "Please press the start button.")]),
+    "OBJmes02": dict(style=BLUEO, boxes=[((0, 0, 400, 32), "Thank you for riding.")]),
+    "OBJmes15": dict(style=GOLD, boxes=[((0, 6, 208, 52), "Please purchase\na ticket.")]),   # INSERT COIN(S) stays
+    "OBJmes16": dict(style=COINS, boxes=[((14, 36, 52, 68), ""), ((70, 34, 128, 70), "Coins\nneeded")]),  # あと ▯ コイン
+    "OBJmes24": dict(style=dict(GOLD, cap=20), boxes=[((0, 0, 192, 32), "One-day pass")]),   # FREE PLAY stays
+    "OBJrenk09": dict(style=GRAD2, boxes=[((0, 0, 352, 48), "Bonus Round")]),             # ボーナスラウンド transcribed
+    "OBJgreena12": dict(style=BUBBLE, boxes=[((12, 6, 212, 58), "The horn is operated\nby a pedal at your feet.")]),
+    "OBJpuret01": dict(style=TAG, boxes=[((4, 4, 173, 45), "Pre-production model")], patch=TAG_BEVEL),     # 量産先行車
+    "OBJpuret02": dict(style=TAG, boxes=[((4, 4, 173, 45), "3000 series")], patch=TAG_BEVEL),             # 3000番台
+    "OBJpuret03": dict(style=TAG, boxes=[((4, 4, 173, 45), "Mass-production model")], patch=TAG_BEVEL),    # 量産車
+    "OBJpuret04": dict(style=TAG, boxes=[((4, 4, 173, 45), "Chartered special train")], patch=TAG_BEVEL),  # 団体臨時列車
+    "OBJex002": dict(style=TAG3000, boxes=[((0, 0, 192, 48), "3000 series")]),           # 3000番台
+    "OBJtunac01": dict(style=BIG3000, boxes=[((0, 0, 480, 160), "3000 series")]),        # 3000番台
+    # notch icons: the kanji's box rebuilt from the 1 / 8 icon (the same bars) and the 0 digit from 解除's own
+    "OBJbmt00": dict(style=NOTCH, rebuild=dict(sib="OBJbmt01", box=(0, 24, 48, 49), bar=62, scale=2),
+                     boxes=[((1, 25, 48, 48), "Brake\nReady")]),                         # 解除: DDG64 0
+    "OBJbmt09": dict(style=dict(NOTCH, cap=18), rebuild=dict(sib="OBJbmt08", box=(0, 24, 48, 49), bar=18, scale=2),
+                     boxes=[((1, 25, 48, 48), "!!!")]),                                   # 非常: DDG64 9
+    "OBJz_m0": dict(style=dict(NOTCH, cap=14), rebuild=dict(sib="OBJz_m1", box=(8, 11, 40, 36), bar=62,
+                                                         digit=("OBJbmt00", 48, 14)),
+                    boxes=[((9, 12, 38, 35), "Off")]),                                    # 切: DDG64 24
+    # --- fifth round (2026-10-01) ---
+    "OBJmes10": dict(style=ACC_T, boxes=[((0, 0, 192, 62), "ACCIDENT"),                  # 事故 / 速度の出し過ぎ 128
+                                         ((0, 62, 192, 92), "EXCESSIVE SPEED", ACC_B)]),
+    "OBJz_keitekic": dict(style=BUBBLE, boxes=[((12, 6, 51, 58), "Press"), ((88, 6, 214, 58), "to sound\nthe train's horn.", dict(BUBBLE, clear=None, align="left"))],
+                          move=[((80, 14, 112, 50), (-28, 0), 7)]),                       # 617: the button icon moved in
+    "OBJkei06": dict(style=COMPLETE, boxes=[((0, 6, 272, 58), "Complete")]),             # 全区間走破 operator; ALL ROUND CLEAR stays
+    "OBJhyou12": dict(style=SUBT, boxes=[((56, 48, 158, 64), "bonus")]),                 # ボーナス 135: the art stays
+    "OBJmes22": dict(style=SUBT, boxes=[((60, 45, 158, 61), "on time")]),               # 定通 133: the art stays
+    "OBJgreena10": dict(style=CABTOP, checker=[((64, 4, 67, 17), 1, 10), ((124, 4, 127, 17), 1, 10),   # the strip's shadow, and the round
+                                 ((67, 14, 100, 15), 10, 10), ((107, 14, 124, 15), 10, 10)],   # letters' overshoot (all but g)
+                        boxes=[((64, 4, 127, 18), "", dict(CABTOP, text={1})), ((68, 4, 123, 18), "Cab Signal"),   # 車内信号 345
+                                             ((140, 28, 220, 52), "Cab Signal Light", CABARR)]),   # 知らせ灯: DDG64 968
+    # web jump and controller notices (operator, 2026-10-01)
+    "OBJz_a2": dict(style=WEBN, boxes=[((0, 0, 320, 32), "You will be redirected to the Taito website.")]),
+    "OBJz_a3": dict(style=WEBN, boxes=[((0, 0, 416, 32), "You can return to the game using the L-button menu.")]),
+    "OBJz_tyuui": dict(style=TYUUI, boxes=[((10, 6, 422, 74), "Please plug the controller\ninto Control Port A.")]),
+    "OBJz_keitekib": dict(style=BUBBLE, boxes=[((12, 6, 51, 58), "Use the"),           # 警笛は Ⓑ ボタンです。 operator
+                                               ((88, 6, 214, 58), "button\nfor the horn.", dict(BUBBLE, clear=None, align="left"))],
+                          move=[((80, 14, 112, 50), (-28, 0), 7)]),
+    "OBJpret02": dict(style=PLATE, boxes=[((17, 6, 222, 58), "Controls")]),              # 操作説明 operator
+    "OBJpret03": dict(style=PLATE, boxes=[((17, 6, 222, 58), "Driving Instructions")]),  # 運転説明 operator
+    # memory card and Dream Passport (operator, 2026-10-01); the stopwatch icon's bubbles stop short of it
+    **{"OBJz_mes01" + k: _bubble(B3, ["Loading file...", "Do not remove the memory card.", PORT[k]], 360) for k in "ab"},
+    **{"OBJz_mes02" + k: _bubble(B2, ["Load failed.", PORT[k]]) for k in "ab"},
+    **{"OBJz_mes03" + k: _bubble(B2, ["Load complete.", PORT[k]]) for k in "ab"},
+    "OBJz_mes21": _bubble([(49, 70), (73, 94)], ["Saving requires a memory card", "with 14 blocks of free space."]),
+    "OBJz_mes22": _bubble([(52, 82)], ["File not found."]),
+    "OBJz_mes23": _bubble([(50, 70), (74, 94)], ["Loading file...", "Do not remove the memory card."], 360),
+    "OBJz_mes24": _bubble([(55, 81)], ["Load failed."]),
+    "OBJz_mes25": _bubble([(55, 81)], ["Load complete."]),
+    "OBJz_mes32": _bubble([(57, 83), (111, 130), (135, 155)],
+                          ["Insufficient free space.", "Saving requires a memory card", "with 14 blocks of free space."]),
+    "OBJz_mes33": _bubble([(47, 68), (71, 92), (120, 140), (144, 164)],
+                          ["File exists.", "Overwrite it?", "Yes", "No"]),          # はい / いいえ: DDG64 884
+    "OBJz_mes34": _bubble([(40, 67), (82, 102)], ["Saving...", "Do not turn off the power."], 360),
+    "OBJz_mes35": _bubble([(54, 81)], ["Save failed."]),
+    "OBJz_mes36": _bubble([(54, 81)], ["Save complete."]),
+    "OBJz_mes37": _bubble([(56, 86)], ["Memory card not found."]),
+    "OBJz_mes97": _bubble([(44, 61), (66, 83), (88, 106)],
+                          ["System error.", "Please perform a soft reset", "or re-insert the disc."],
+                          patch=[("OBJz_mes98", (372, 86, 440, 108))]),   # 98: the same face, no line over its chin
+    "OBJz_mes98": _bubble([(65, 83)], ["Cannot read disc."]),
+    "OBJz_mes99": _bubble([(48, 69), (73, 93)], ["Controller disconnected", "or memory card is being detected."]),
+    "OBJz_1ds": _bubble([(35, 61), (62, 82), (84, 104), (105, 124), (133, 150), (151, 169)],
+                        ["Notice!", "Launching Dream Passport will", "reset game settings to default values.",
+                         "[Please save your progress beforehand if necessary.]", "Return to Main Menu",
+                         "Launch Dream Passport"], [372, 372, 372, 444, 372, 372]),   # the bracket line runs past the face
+    "OBJz_2ds": _bubble([(37, 62), (66, 86), (88, 108)],
+                        ["Notice!", "Please use the standard controller", "to launch Dream Passport."]),
+    "OBJoginoya": dict(style=dict(SUPPORT, align="left"), boxes=[((2, 1, 64, 19), "Support"),   # 協力 1183
+                       ((228, 1, 334, 19), "(Oginoya Co.)", SUPPORT)]),                    # the DDG64 note by the logo
 }
 
 
@@ -750,7 +952,7 @@ def boxtext(a, box, text, st):
     if st.get("keep"):
         textmask = ~np.isin(orig, list(st["keep"]))
     else:
-        textmask = np.isin(orig, list(st["text"])) if st.get("text") else (orig != bg)
+        textmask = np.isin(orig, list(st["text"])) if st.get("text") is not None else (orig != bg)
     edge = st.get("outline")
     rings = st.get("rings") or ([(edge, 1)] if edge is not None else [])   # inner -> outer: (index, width)
     ringset = {i for i, _ in rings}
@@ -788,11 +990,36 @@ def boxtext(a, box, text, st):
                     rowbg[y, (np.arange(W) + y) % 2 == par] = pick
         if st.get("dither"):
             textmask |= orig != rowbg              # the glyphs' solid outline breaks the dither: text too
+        if st.get("diag") is not None:             # diagonal stripes from row st["diag"] down (the route list): a
+            top = st["diag"]                       # cleared pixel takes the nearest untouched pixel along its stripe
+            for y, x in zip(*np.nonzero(textmask)):    # (one pixel left every two rows down); above them, clear
+                v = 0
+                for k in range(1, 64) if y >= top else ():
+                    hit = [(yy, xx) for yy, xx in ((y - 2 * k, x + k), (y + 2 * k, x - k))
+                           if top <= yy < H and 0 <= xx < W and not textmask[yy, xx]]
+                    if hit:
+                        v = int(orig[hit[0]]); break
+                rowbg[y, x] = v
         sub[textmask] = rowbg[textmask]
         free = np.ones(sub.shape, bool)
     else:
         sub[textmask] = bg
         free = None
+        if st.get("inpaint"):                      # glyphs drawn over art (the assistant's hat): a cleared pixel whose
+            hole = textmask.copy()                 # neighbours are mostly art takes their most common colour, until
+            for _ in range(12):                    # nothing changes; the English is then drawn over art and all
+                changed = False
+                for y, x in zip(*np.nonzero(hole)):
+                    art = [int(sub[yy, xx]) for yy in (y - 1, y, y + 1) for xx in (x - 1, x, x + 1)
+                           if 0 <= yy < sub.shape[0] and 0 <= xx < sub.shape[1] and not hole[yy, xx]
+                           and sub[yy, xx] != bg]
+                    if len(art) >= 5:
+                        sub[y, x] = max(set(art), key=art.count); hole[y, x] = False; changed = True
+                if not changed:
+                    break
+            free = np.ones(sub.shape, bool)
+        if st.get("over"):                         # nothing cleared (a rebuilt icon): the English goes over the art
+            free = np.ones(sub.shape, bool)
     if text == "":                                 # clear only: the English keeps just the Latin line already there
         return
     pad = sum(w for _, w in rings)
@@ -815,6 +1042,28 @@ def boxtext(a, box, text, st):
         sub[g & ~m] = idx
         if free is not None:
             free &= ~(g & ~m)
+    if st.get("drop"):                             # drop shadow (index, dx, dy) under the glyphs
+        idx, dx, dy = st["drop"]
+        sh = np.zeros_like(m)
+        sh[dy:, dx:] = m[:m.shape[0] - dy, :m.shape[1] - dx]
+        sub[sh & ~m] = idx
+        if free is not None:
+            free &= ~(sh & ~m)
+    if st.get("vgrad"):                            # a top-to-bottom chrome ramp over each line of glyphs: an
+        on = np.nonzero(m.any(1))[0]               # index, or an (even, odd) pair for a checker step
+        bands, start = [], None
+        for y in range(m.shape[0] + 1):
+            if y < m.shape[0] and m[y].any():
+                start = y if start is None else start
+            elif start is not None:
+                bands.append((start, y)); start = None
+        g = st["vgrad"]
+        for b0, b1 in bands:
+            for y in range(b0, b1):
+                v = g[min(len(g) - 1, (y - b0) * len(g) // (b1 - b0))]
+                for x in np.nonzero(m[y])[0]:
+                    sub[y, x] = v[(x + y) % 2] if isinstance(v, tuple) else v
+        return
     if st.get("fill") == "template":
         rows = sorted({y for y, _ in tpl}) or [0]
         for y, x in zip(*np.nonzero(m)):
@@ -848,9 +1097,42 @@ def boxtext(a, box, text, st):
                 sub[(full >= lo) & free] = idx; free &= ~(full >= lo)
 
 
+SP = None      # the Sprites being repainted (main() sets it; previews set their own): sibling icons for rebuild()
+DIGIT = {28, 29, 30}                               # the green seven-segment digits' indices
+
+
+def rebuild(a, rb):
+    """A notch icon with a kanji over its bars (解除, 非常, 切): the kanji's box is rebuilt from a sibling icon that
+    has the same bars without it (the 1 or 8 icon): the scale columns as they are, every other lit pixel in this
+    icon's own bar colour, the sibling's digit left out. `digit` (record, dy, dx) puts back the part of this icon's
+    digit that the kanji hid, from the same digit on another icon. Nothing is drawn: every pixel is the game's."""
+    a = a.copy()
+    sib = SP.indices(rb["sib"])
+    x0, y0, x1, y1 = rb["box"]
+    for y in range(y0, y1):
+        for x in range(x0, x1):
+            v = int(sib[y, x])
+            if x < rb.get("scale", 0):
+                a[y, x] = v
+            elif v == 1 or v in DIGIT:
+                a[y, x] = 1
+            else:
+                a[y, x] = rb["bar"]
+    if rb.get("digit"):
+        src_name, dy, dx = rb["digit"]
+        src = SP.indices(src_name)
+        for y in range(y0, y1):
+            for x in range(x0, x1):
+                if 0 <= y + dy < src.shape[0] and 0 <= x + dx < src.shape[1] and src[y + dy, x + dx] in DIGIT:
+                    a[y, x] = src[y + dy, x + dx]
+    return a
+
+
 def paint(a, cfg):
     if "board" in cfg:
         return board(a, cfg)
+    if "rebuild" in cfg:
+        a = rebuild(a, cfg["rebuild"])
     a = a.copy()
     if "boxes" in cfg:
         orig = a.copy()
@@ -866,6 +1148,15 @@ def paint(a, cfg):
                 a[y0:y1, x0:x1][keep] = orig[y0:y1, x0:x1][keep]
             else:
                 a[y0:y1, x0:x1] = orig[y0:y1, x0:x1]
+        for sib, (x0, y0, x1, y1) in cfg.get("patch", ()):   # frame the glyphs overlapped: from a clean sibling
+            a[y0:y1, x0:x1] = SP.indices(sib)[y0:y1, x0:x1]
+        for (x0, y0, x1, y1), on, off in cfg.get("checker", ()):   # a dithered edge, the same on both sides
+            for y in range(y0, y1):
+                for x in range(x0, x1):
+                    a[y, x] = on if (x + y) % 2 == 0 else off
+        for (x0, y0, x1, y1), (dx, dy), bgv in cfg.get("move", ()):   # an icon moved into the English sentence
+            src = orig[y0:y1, x0:x1]
+            a[y0 + dy:y1 + dy, x0 + dx:x1 + dx][src != bgv] = src[src != bgv]
         return a
     st = cfg["style"]
     shadow = st["shadow"]
@@ -879,6 +1170,7 @@ def paint(a, cfg):
         if not len(on):
             raise SystemExit("empty label box at %s" % ((row, col),))
         bx0, bx1 = on.min(), on.max() + 1            # the Japanese label's own extent: English stays inside
+        bx0 = cfg.get("left", bx0)                    # one left edge for a stacked legend
         if st.get("kind") == "gradient":
             gradient(box, text, bx0, bx1, st)
             continue
@@ -895,7 +1187,7 @@ def paint(a, cfg):
 
 
 def board(a, cfg):
-    """Route board (OBJsou?b??, 352x144): each vertical station column becomes Zoinkity's name for that station
+    """Route board (OBJsou?b??, 352x144): each vertical station column becomes the DDG64 name for that station
     (EKI), turned 90 degrees to read top to bottom, in the column's own ink and antialiasing shades (bold black for
     the ends, grey for the stops between). The line, dots, frame and the blue ATC / BONUS ROUND stay."""
     a = a.copy()
@@ -1083,6 +1375,8 @@ def main(lst_p, tbl_p, cg2_p, pal_p, out_tbl, out_cg2, preview=None):
     cg2 = open(cg2_p, "rb").read()
     tiles = A.cg2_tiles(cg2)
     sp = A.Sprites(lst_p, tbl_p, None, cg2_p, pal_p)
+    global SP
+    SP = sp
 
     users = {}
     for n in names:

@@ -1,6 +1,6 @@
 # Densha de Go! 2 Kousoku-hen 3000 (電車でGO!2 高速編 3000番台) — Dreamcast (1999)
 
-Translation target: **Japanese → English**, carrying over Zoinkity's English from Densha de Go! 64 (N64) where
+Translation target: **Japanese → English**, carrying over the English of Densha de Go! 64 (N64; Zoinkity and mikeryan) where
 the screens match. Status: menus first, so you can navigate the game and find the next target.
 
 Disc: `T-1102M`, `V1.001`, `19991212`. Console guide: `../../extract.md`. Texture method: `../../textures.md`.
@@ -80,7 +80,7 @@ ddg_assets.py render SPRITE.LST TBL.ROM CG1.ROM OBJz_mainmenu mainmenu.png
 `OBJz_mainmenu`: 32x30 tiles (512x480), five 96-pixel buttons, each with Taito's own small English under the
 Japanese:
 
-| # | Japanese | Taito's English | DDG64 (Zoinkity) |
+| # | Japanese | Taito's English | DDG64 |
 |---|---|---|---|
 | 1 | アーケードモード | Arcade Mode | Arcade Mode (`1019`) |
 | 2 | ゲーム設定 | Game Setting | Options (`1021`) |
@@ -95,7 +95,7 @@ the three plain ARGB1555 twiddled textures (not VQ), so they encode exactly. No 
 Free slots in 86-88: 19 (all in 88). A repaint re-tiles the new 512x480 picture, deduplicates, writes the
 tiles into the menu's own slots, and rewrites `OBJz_mainmenu`'s ids in place (same size).
 
-Done 2026-09-29 by `repaint_mainmenu.py`: buttons 1-3 in Zoinkity's English (1019, 1021, 1022), buttons 4-5
+Done 2026-09-29 by `repaint_mainmenu.py`: buttons 1-3 in the DDG64 English (1019, 1021, 1022), buttons 4-5
 left as the original art (no DDG64 match); Arial Narrow Bold, grey 189 on 8. 509 unique tiles, 321 kept as they
 were, 188 rewritten, 78 slots spare. Only `OBJz_mainmenu` and `CG1.ROM` 86-88 change; every
 other record renders byte-identical. The patched `CG1.ROM` / `TBL.ROM` sit in the workbench `textures/` and go
@@ -113,9 +113,10 @@ Lessons from the main menu. Read this before starting a screen.
 2. **Triage before painting.** For the record's tiles, find: which textures (plain ARGB1555 twiddled in `CG1.ROM`
    86-88 encodes exactly; VQ does not, it needs a new codebook), whether any other record shares them, and how
    many free slots those textures have. Main menu: plain, unshared, 19 free = the easy case.
-3. **Wording is Zoinkity's only (a port, cpc `CLAUDE.md` section 11).** A label gets English only when DDG64 has
+3. **Wording is DDG64's only (a port, cpc `CLAUDE.md` section 11).** A label gets English only when DDG64 has
    the same Japanese (match by texture number); otherwise it stays the original art and goes on the gap list in
-   the workbench `FLAGS.md`. Never Taito's small English, never our own.
+   the workbench `TRANSLATION.md` (its working notes). Never Taito's small English; a gap stays Japanese unless cpc
+   words it (listed in the same file).
 4. **Erasing by colour needs a flat background.** Replacing grey pixels with the black worked on the menu's flat
    black. Text with a drop shadow over the patterned "3000" background (Game Setting, Load/Save) needs the
    background rebuilt from a clean copy, not a colour fill.
@@ -131,9 +132,9 @@ Lessons from the main menu. Read this before starting a screen.
 
 ## Screens and their DDG64 counterparts
 
-This is a port (cpc `CLAUDE.md` section 11): English only where Zoinkity's DDG64 has the same Japanese, matched by
+This is a port (cpc `CLAUDE.md` section 11): English only where DDG64 has the same Japanese, matched by
 texture number (`mld82r/Images/<n>.bin.png` Japanese vs `007gg4/<n>.bin.png` English). The authoritative table
-(every ported string with its texture number) and the gap list are the workbench `FLAGS.md`; the scripts carry
+(every ported string with its texture number) and the gap list are in the workbench `TRANSLATION.md` (its working notes); the scripts carry
 the same numbers next to each string.
 
 Find a match by rendering both sets side by side by number, never from contact sheets with labels under the
