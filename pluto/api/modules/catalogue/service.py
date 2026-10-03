@@ -475,7 +475,8 @@ def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=B
     lab_roms = this machine's ROMS_PATH (None = no lab source).
     ftp_nodes = {node: {"host": "192.168.68.69", "dirs": [(remote dir, kind), ...]}} for a
     drive reachable only over FTP (the PS3), read with ftp_client -- see _scan_ftp.
-    sd_nodes = {node: {"labels": [...], "roms_dir": "SAROO/ISO", "hub": "pi", "strip": regex}}
+    sd_nodes = {node: {"labels": [...], "roms_dir": "SAROO/ISO", "hub": "pi", "strip": regex,
+                       "skip_dirs": ["01"]}}
     for consoles whose games live on SD cards read through the Pi hub (node .env SD_LABEL /
     SD_ROMS_DIR / SD_NAME_STRIP -- the last one for a card that numbers its game files).
     admin_nodes = {node: command} for drives only root can read (the PS2 HDD): sync prints the
@@ -508,8 +509,10 @@ def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=B
             if systems_of and (system == "*" or system in systems_of):
                 route = sd_routes(consoles_config, systems_of)
                 fmt = {ext: formats.get(s) for ext, s in route.items()} if len(systems_of) > 1 else formats.get(systems_of[0])
-                jobs[node] = (lambda sd=sd, route=route, fmt=fmt:
-                              {"__sd__": route, "cards": _scan_sd(run_ssh, sd.get("hub", "pi"), sd["labels"], sd["roms_dir"], fmt, skip)})
+                # a card's own dirs to walk past (a GDEMU card's 01 is the menu, not a game)
+                node_skip = dict(skip, dirs=sorted(set(skip.get("dirs") or []) | set(sd.get("skip_dirs") or [])))
+                jobs[node] = (lambda sd=sd, route=route, fmt=fmt, node_skip=node_skip:
+                              {"__sd__": route, "cards": _scan_sd(run_ssh, sd.get("hub", "pi"), sd["labels"], sd["roms_dir"], fmt, node_skip)})
     # Nodes whose games sit on a drive Pluto can only reach over FTP (the PS3 through
     # webMAN: no shell there, so this is a read, not a remote scan program).
     ftp_nodes = ftp_nodes or {}

@@ -4552,7 +4552,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         games sit on the card, e.g. SAROO/ISO). A node without SD_ROMS_DIR only backs up saves.
         SD_NAME_STRIP is an optional regex cut off a file NAME before its title is read, for a
         card that numbers its games ("157 Golden Axe Warrior (USA, Europe).sms"); the file
-        itself is left alone."""
+        itself is left alone. SD_SCAN_SKIP lists card dirs that hold no games (a GDEMU card's
+        01 is its menu)."""
         out = {}
         for node, cfg in (self.__class__.node_roster or {}).items():
             labels = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()]
@@ -4560,6 +4561,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if labels and roms_dir:
                 out[node] = {"labels": labels, "roms_dir": roms_dir, "hub": "pi",
                              "strip": (cfg.get("SD_NAME_STRIP") or "").strip() or None,
+                             # SD_SCAN_SKIP: the card's own dirs that hold no games (GDEMU: 01)
+                             "skip_dirs": [d.strip() for d in (cfg.get("SD_SCAN_SKIP") or "").split(",") if d.strip()],
                              # sub-folders of roms_dir whose files are a kind of their own
                              "kind_dirs": self._sd_scan_kind_dirs(cfg, roms_dir)}
         return out
