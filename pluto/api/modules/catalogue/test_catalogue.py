@@ -573,6 +573,37 @@ def test_send_writes_a_tool_into_the_kind_folder_and_games_where_they_were():
     assert put == ["Sonic The Hedgehog (USA, Europe).md", "MD Test Cart.bin"]
 
 
+def test_send_skips_an_unreachable_source_and_still_copies_the_rest():
+    """Batocera off: its games are skipped with the reason (one SSH timeout, not one each), and
+    the lab copies still land. One failed source read used to abort the whole send."""
+    put, reads = [], []
+    def put_fn(src, name):
+        reads.append(src)
+        if src.startswith("batocera:"):
+            raise send.SourceUnavailable("could not read %s from batocera: ssh: connect to host "
+                                         "192.168.68.57 port 22: Operation timed out" % name)
+        put.append(name)
+    card = {"mount": lambda: None, "exists": lambda n: False, "put": put_fn, "finish": lambda: []}
+    plan = {"copies": [
+        {"game": "ninjas", "name": "3 Ninjas Kick Back (USA)", "kind": "game",
+         "source": {"node": "batocera", "path": "3 Ninjas.md"}},
+        {"game": "aladdin", "name": "Aladdin (USA)", "kind": "game",
+         "source": {"node": "batocera", "path": "Aladdin.md"}},
+        {"game": "justifier", "name": "Justifier Test", "kind": "tool",
+         "source": {"node": "lab", "path": "Justifier Test.bin"}},
+    ], "skipped": []}
+    ctx = {"target": "megadrive", "system": "megadrive",
+           "locate": lambda src: ("batocera:/userdata/" if src["node"] == "batocera" else "/lab/") + src["path"],
+           "emit": None, "rom_ext": lambda src: "." + src["path"].rsplit(".", 1)[-1], "unpack": False,
+           "card": card, "members": None, "kind_dirs": {"tool": "Tools"}}
+    r = send._files(plan, ctx)
+    assert put == ["Tools/Justifier Test.bin"] and r["count"] == 1
+    assert len([s for s in reads if s.startswith("batocera:")]) == 1     # the second never waits
+    assert [s["game"] for s in plan["skipped"]] == ["3 Ninjas Kick Back (USA)", "Aladdin (USA)"]
+    assert "Operation timed out" in plan["skipped"][0]["why"]
+    assert plan["skipped"][1]["why"] == "batocera is off or unreachable"
+
+
 def test_a_file_in_a_cards_tools_folder_is_filed_as_a_tool_unless_you_said_otherwise():
     root = tempfile.mkdtemp()
     doc = store.empty("megadrive")
@@ -1240,7 +1271,19 @@ def test_delete_on_a_node_without_cards_leaves_the_path_alone():
     """Batocera has no label in front: the path is already relative to its ROM folder."""
     peers = [{"path": "Sonic the Hedgehog (Europe).md", "card": ""}]
     assert send.card_target(peers[0]["path"], "", peers) == "Sonic the Hedgehog (Europe).md"
-    assert send.card_target("psx/Tomb Raider (Europe)/disc.cue", "", peers) == "psx"
+    # a disc takes its OWN folder, never the system folder around it
+    assert send.card_target("psx/Tomb Raider (Europe)/disc.cue", "", peers) == "psx/Tomb Raider (Europe)"
+
+
+def test_delete_of_a_rom_in_a_kind_folder_takes_only_the_file():
+    """Deleting the one tool in Mega Drive/Tools removed Tools/ itself: a single-file ROM is
+    never a folder, even when it is the only copy in there."""
+    peers = [{"path": "EDMD/Tools/Justifier Test (Japan, USA, Europe).bin", "card": "EDMD"},
+             {"path": "EDMD/0-D/Columns (World).md", "card": "EDMD"}]
+    assert send.card_target(peers[0]["path"], "EDMD", peers) == "Tools/Justifier Test (Japan, USA, Europe).bin"
+    # a disc deep in a range folder: its own folder only, not the range
+    peers = [{"path": "SAROO/A-C/Bug! (USA)/Bug! (USA).cue", "card": "SAROO"}]
+    assert send.card_target(peers[0]["path"], "SAROO", peers) == "A-C/Bug! (USA)"
 
 
 
@@ -1356,6 +1399,27 @@ def test_send_writes_a_mod_into_its_game_folder_under_its_own_name():
                     "kind_dirs": {"mod": "Mods", "game": "<range>"}})
     assert put == ["Mods/Sonic The Hedgehog [Infinite Jump by CPC v1.0].bin", "0-D/Aladdin (Europe).md"], put
 
+
+
+def test_a_default_header_serial_identifies_nothing():
+    """SGDK leaves "SAMPLE PROGRAM" / "GM 00000000-00" in a header nobody filled in, so every
+    build that keeps the default claims the same ID. Four homebrew games here carry it, and our
+    own Justifier Test tool was filed as a variant of the first of them."""
+    doc = store.empty("megadrive")
+    store.merge(doc, "lab", [
+        {"path": "Cosmic Spacehead (Europe).md", "header": {"id": "GM 00000000-00", "title": "SAMPLE PROGRAM", "regions": []}},
+        {"path": "Justifier Test.bin", "header": {"id": "GM 00000000-00", "title": "SAMPLE PROGRAM", "regions": []}},
+        {"path": "Tanzer (World).md", "header": {"id": "GM 00000000-00", "title": "SAMPLE PROGRAM", "regions": []}},
+    ], NOW)
+    assert sorted(doc["games"]) == ["cosmic-spacehead", "justifier-test", "tanzer"], sorted(doc["games"])
+    assert not [i for g in doc["games"].values() for f in g["files"] for i in (f["id"] or "")]
+    # a real serial still groups a hack with its base game
+    doc = store.empty("megadrive")
+    store.merge(doc, "lab", [
+        {"path": "Sonic The Hedgehog (USA, Europe).md", "header": {"id": "GM 00001009-00", "title": "SONIC", "regions": []}},
+        {"path": "Crazy Sonic.zip", "header": {"id": "GM 00001009-00", "title": "SONIC", "regions": []}},
+    ], NOW)
+    assert sorted(doc["games"]) == ["sonic-the-hedgehog"], sorted(doc["games"])
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

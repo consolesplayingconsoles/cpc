@@ -42,6 +42,17 @@ class NotAvailable(Exception):
     """This target (or source) can't take part in a send yet: the API's 400 message."""
 
 
+class SourceUnavailable(NotAvailable):
+    """One copy could not be read from its source node (the node is off, the file is gone).
+    Non-blocking: _files skips that game with this reason and carries on with the rest."""
+
+
+# A source read failing like this means the whole node is off, not just that one file:
+# the rest of its copies are skipped at once instead of each waiting out the SSH timeout.
+UNREACHABLE = ("ssh: connect to host", "Could not resolve hostname", "Connection refused",
+               "Connection timed out", "Operation timed out", "No route to host")
+
+
 ARCADE = {"mame", "fbneo", "neogeo", "naomi", "naomi2", "atomiswave", "cps1", "cps2", "cps3", "hikaru", "model2", "model3"}
 
 
@@ -180,8 +191,11 @@ def card_target(path, card, peers):
     path the target did not exist, and `rm -rf` on a missing path exits 0: the delete
     looked like it worked while the file stayed put and the next scan brought it back.
 
-    A disc is a folder of tracks, so when no OTHER copy on the same card lives under that
-    folder, the folder itself is the target: deleting only the .cue would leave the bins.
+    A disc is a folder of tracks, so when no OTHER copy on the same card lives in the disc's
+    own folder, that folder is the target: deleting only the .cue would leave the bins. Only
+    a disc descriptor takes its folder, and only its OWN folder (the one it sits in): a ROM in
+    a kind folder (Tools/, Mods/) is just the file -- taking the top folder deleted every
+    other tool with it.
 
     path/card come from the copy; peers are the node's other copies (each {path, card}).
     -> the path to remove, relative to the node's ROM base.
@@ -193,11 +207,11 @@ def card_target(path, card, peers):
                  if (f.get("card") or "").strip() == card and f["path"].startswith(card + "/")]
     else:
         peers = [f for f in peers if (f.get("card") or "").strip() == card]
-    if "/" not in path:
+    if "/" not in path or not path.lower().endswith(MULTI_FILE):
         return path
-    top = path.split("/")[0]
-    others = [f for f in peers if f["path"] != path and f["path"].split("/")[0] == top]
-    return path if others else top
+    folder = path.rsplit("/", 1)[0]
+    others = [f for f in peers if f["path"] != path and f["path"].startswith(folder + "/")]
+    return path if others else folder
 
 
 def plan(root, system, target, sources, files=None, all_missing=False):
@@ -327,36 +341,51 @@ def _files(p, ctx):
     if not todo:
         return _nothing(ctx)
     card["mount"]()
+    down = {}                                   # source node -> why it can't be reached
     try:
         for c, src, ext in todo:
-            if ext.lower() in DISC_FOLDER:
-                # a disc: its own folder, descriptor renamed to the game, tracks keep their names
-                name = c["name"]
-                if card["exists"](name) and not c.get("replace"):
-                    p["skipped"].append({"game": c["name"], "why": "already there as " + name + "/"})
-                    continue
-                members = ctx["members"](src, ext)
-                verb = "replacing" if c.get("replace") else "copying"
-                (ctx.get("emit") or lines.append)("%s %s/ (%d files)" % (verb, name, len(members)))
-                for member, filename, is_descriptor in members:
-                    card["put"](member, name + "/" + (name + ext if is_descriptor else filename))
-                lines.append("%s %s/" % ("replaced" if c.get("replace") else "copied", name))
-                copied += 1
+            node = c["source"]["node"]
+            if node in down:
+                p["skipped"].append({"game": c["name"], "why": down[node]})
                 continue
-            name = c["name"] + ext
-            if card["exists"](name) and not c.get("replace"):
-                p["skipped"].append({"game": c["name"], "why": "already there as " + name})
-                continue
-            verb = "replacing" if c.get("replace") else "copying"
-            (ctx.get("emit") or lines.append)("%s %s" % (verb, name))
-            card["put"](src, name)
-            lines.append("%s %s" % ("replaced" if c.get("replace") else "copied", name))
-            copied += 1
+            try:
+                copied += _copy_one(c, src, ext, card, ctx, p, lines)
+            except SourceUnavailable as e:
+                p["skipped"].append({"game": c["name"], "why": str(e)})
+                if any(u in str(e) for u in UNREACHABLE):
+                    down[node] = "%s is off or unreachable" % node
+                    (ctx.get("emit") or lines.append)("%s is unreachable: skipping its games" % node)
     finally:
         for line in card["finish"]():
             (ctx.get("emit") or lines.append)(line)
     (ctx.get("emit") or lines.append)("copied %d game%s" % (copied, "" if copied == 1 else "s"))
     return {"status": "done", "count": copied, "lines": lines}
+
+
+def _copy_one(c, src, ext, card, ctx, p, lines):
+    """Write one planned copy to the target -> 1 if written, 0 if it was already there."""
+    verb = "replacing" if c.get("replace") else "copying"
+    done = "replaced" if c.get("replace") else "copied"
+    if ext.lower() in DISC_FOLDER:
+        # a disc: its own folder, descriptor renamed to the game, tracks keep their names
+        name = c["name"]
+        if card["exists"](name) and not c.get("replace"):
+            p["skipped"].append({"game": c["name"], "why": "already there as " + name + "/"})
+            return 0
+        members = ctx["members"](src, ext)
+        (ctx.get("emit") or lines.append)("%s %s/ (%d files)" % (verb, name, len(members)))
+        for member, filename, is_descriptor in members:
+            card["put"](member, name + "/" + (name + ext if is_descriptor else filename))
+        lines.append("%s %s/" % (done, name))
+        return 1
+    name = c["name"] + ext
+    if card["exists"](name) and not c.get("replace"):
+        p["skipped"].append({"game": c["name"], "why": "already there as " + name})
+        return 0
+    (ctx.get("emit") or lines.append)("%s %s" % (verb, name))
+    card["put"](src, name)
+    lines.append("%s %s" % (done, name))
+    return 1
 
 
 def _not_built(kind):
