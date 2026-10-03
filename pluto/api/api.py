@@ -4835,7 +4835,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ctx = {"target": target, "system": system, "locate": locate, "emit": emit,
                "command": lambda args: self._admin_command(target, args),
                "rom_ext": lambda src: self._send_rom_ext(system, src), "unpack": kind == "sd",
-               "card": self._send_dest(kind, target, target_cfg, system, ctx_emit=emit) if kind in ("local", "batocera", "sd", "ftp") else None,
+               "card": self._send_dest(kind, target, target_cfg, system, ctx_emit=emit) if kind in ("local", "batocera", "sd", "ftp", "gdemu") else None,
+               # gdemu reads a disc's IP.BIN at the source for openMenu's list
+               "read_src": self._send_read_src, "find_ipbin": self._send_find_ipbin,
                "members": lambda src, ext: self._send_members(src, ext, workdir),
                # a kind with its own folder on the target (a card's Tools/): its copies go there
                "ranges": self._sd_ranges(target_cfg) if kind == "sd" else [],
@@ -5006,7 +5008,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 base, sudo = mnt + "/" + self._sd_send_dir(cfg, system), "sudo"
 
             def mount():
-                if kind == "sd":
+                if kind in ("sd", "gdemu"):
                     # These mountpoints are autofs, so touch the path FIRST: `mountpoint -q` is
                     # true for the autofs layer before the card is mounted, so a remount lands
                     # on autofs and the card then comes up read-only from fstab (the safe
@@ -5030,7 +5032,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     raise catalogue_send.NotAvailable((out.strip().splitlines() or ["could not reach " + node])[-1])
                 lines = out.splitlines()
                 # a card also answers with its free space, on the line after the mount state
-                if kind == "sd" and len(lines) > 1 and lines[1].isdigit():
+                if kind in ("sd", "gdemu") and len(lines) > 1 and lines[1].isdigit():
                     state["free"] = int(lines[1]) * 1024
                     lines = [lines[0]] + lines[2:]
                 state["have"] = set(lines[1:])
@@ -5052,6 +5054,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     with open(local, "rb") as stream:
                         rc, out = ssh_sh(host, REMOTE_PUT % (sudo, sudo, sudo, sudo), base + "/" + name,
                                          str(size), stdin=stream)
+                    if rc == 0 and kind == "gdemu":
+                        check(local, name)
                 if rc != 0:
                     raise catalogue_send.NotAvailable("copy failed for %s: %s" % (name, out.strip()[-200:]))
                 if state.get("free") is not None:
@@ -5081,6 +5085,52 @@ class Handler(http.server.BaseHTTPRequestHandler):
                          % out.strip()[-200:]]
                 return lines + rescan(node, sd_nodes=self._catalogue_sd_nodes())
 
+            def check(local, name):
+                """A GDEMU write must read back exactly: the hub's card reader has written junk
+                before (its own USB command packets) while reporting success."""
+                import hashlib
+                h = hashlib.md5()
+                with open(local, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        h.update(chunk)
+                rc, out = ssh_sh(host, 'sync; echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null; sudo md5sum "$1"',
+                                 base + "/" + name)
+                if rc != 0 or not out.strip().startswith(h.hexdigest()):
+                    raise catalogue_send.NotAvailable("%s did not read back as written: the card or its reader "
+                                                      "may be failing, nothing more was copied" % name)
+
+            def put_bytes(data, name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    local = os.path.join(tmp, "data")
+                    with open(local, "wb") as f:
+                        f.write(data)
+                    put(local, name)
+
+            def read(name, offset, length):
+                """length bytes at offset of a file on the card (base64 over SSH)."""
+                import base64
+                rc, out = ssh_sh(host, 'sudo dd if="$1" bs=2048 iflag=skip_bytes,count_bytes skip="$2" count="$3" '
+                                       'status=none | base64 -w0', base + "/" + name, str(offset), str(length))
+                if rc != 0:
+                    raise catalogue_send.NotAvailable("could not read %s on the card: %s" % (name, out.strip()[-200:]))
+                return base64.b64decode(out.strip())
+
+            def patch(name, offset, data):
+                """Overwrite bytes in place in a file on the card (never extends it), then read them
+                back from the card itself."""
+                with tempfile.TemporaryFile() as tf:
+                    tf.write(data)
+                    tf.seek(0)
+                    rc, out = ssh_sh(host, '[ -f "$1" ] || { echo "no $1 on the card"; exit 4; }; '
+                                           'sudo dd of="$1" bs=2048 oflag=seek_bytes seek="$2" conv=notrunc status=none && sync',
+                                     base + "/" + name, str(offset), stdin=tf)
+                if rc != 0:
+                    raise catalogue_send.NotAvailable("could not write %s on the card: %s" % (name, out.strip()[-200:]))
+                ssh_sh(host, 'echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null')
+                if read(name, offset, len(data)) != data:
+                    raise catalogue_send.NotAvailable("%s did not read back as written: the card or its reader "
+                                                      "may be failing" % name)
+
             def remove(rel):
                 """rm -rf one file or disc folder under the node's ROM root (no Trash there).
                 A path that is not there is an ERROR: `rm -rf` would exit 0 and the delete would
@@ -5093,6 +5143,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         card = {"mount": mount, "exists": lambda name: name in state["have"], "put": put, "finish": finish}
         if kind != "local":
             card["remove"] = remove
+        if kind == "gdemu":
+            card.update(files=lambda: sorted(state["have"]), read=read, patch=patch, put_bytes=put_bytes)
+
+            def refuse(rel):
+                # deleting a slot would leave a gap and a stale openMenu list: not built
+                raise catalogue_send.NotAvailable("deleting from a GDEMU card is not built yet: use GDMENUCardManager")
+            card["remove"] = refuse
         return card
 
     # Archive readers a send can use: .zip from the stdlib, .7z through the 7z command when
@@ -5195,6 +5252,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raise catalogue_send.NotAvailable("%s lists no track files" % os.path.basename(src))
         folder = src.rsplit("/", 1)[0]
         return [(src, src.rsplit("/", 1)[1], True)] + [(folder + "/" + t, t, False) for t in tracks]
+
+    @staticmethod
+    def _send_read_src(src, offset, length):
+        """length bytes at offset of a send source: a local path or node:/path (over SSH)."""
+        import shlex
+        m = re.match(r"^([A-Za-z0-9_.-]+):(/.*)$", src)
+        if not m:
+            with open(src, "rb") as f:
+                f.seek(offset)
+                return f.read(length)
+        r = subprocess.run(["ssh", "-o", "ConnectTimeout=6", m.group(1),
+                            "dd if=%s bs=65536 iflag=skip_bytes,count_bytes skip=%d count=%d status=none"
+                            % (shlex.quote(m.group(2)), offset, length)],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
+        if r.returncode != 0:
+            raise catalogue_send.SourceUnavailable("could not read %s from %s" % (os.path.basename(m.group(2)), m.group(1)))
+        return r.stdout
+
+    @classmethod
+    def _send_find_ipbin(cls, src):
+        """A .cdi's IP.BIN: where it sits depends on the image's sessions, so find its signature."""
+        sig, chunk, off, tail = b"SEGA SEGAKATANA ", 4 << 20, 0, b""
+        while True:
+            data = cls._send_read_src(src, off, chunk)
+            if not data:
+                raise catalogue_send.NotAvailable("%s has no Dreamcast IP.BIN" % os.path.basename(src))
+            buf = tail + data
+            i = buf.find(sig)
+            if i >= 0:
+                start = off - len(tail) + i
+                return cls._send_read_src(src, start, 0x100)
+            tail, off = buf[-len(sig):], off + len(data)
 
     def _handle_catalogue_scan_post(self, system, node, body):
         """POST /catalogue/<system>/scan/<node> {files: [{path, size}]}: a node's complete game

@@ -1453,6 +1453,42 @@ def test_a_default_header_serial_identifies_nothing():
         {"path": "Crazy Sonic.zip", "header": {"id": "GM 00001009-00", "title": "SONIC", "regions": []}},
     ], NOW)
     assert sorted(doc["games"]) == ["sonic-the-hedgehog"], sorted(doc["games"])
+
+
+def _ipbin(serial=b"IND-470594", periph=b"E000F10", area=b"JUE     ", device=b"0000 CD-ROM1/1  "):
+    ip = bytearray(b" " * 0x100)
+    ip[0:16] = b"SEGA SEGAKATANA "
+    ip[0x20:0x30] = device
+    ip[0x30:0x38] = area
+    ip[0x38:0x38 + len(periph)] = periph
+    ip[0x40:0x40 + len(serial)] = serial
+    ip[0x4A:0x50] = b"V1.000"
+    ip[0x50:0x58] = b"20260928"
+    ip[0x80:0x80 + 9] = b"MARIO  46"
+    return bytes(ip)
+
+
+def test_gdemu_ipbin_fields_follow_card_manager():
+    """vga = 6th peripherals char, product = serial without dashes up to a space, disc 1/1."""
+    f = send.ipbin_fields(_ipbin())
+    assert (f["vga"], f["product"], f["serial"], f["disc"], f["region"]) == ("1", "IND470594", "IND-470594", "1/1", "JUE"), f
+    f = send.ipbin_fields(_ipbin(serial=b"T23001D 50", periph=b"E000F00", device=b"0000 GD-ROM2/3  "))
+    assert (f["vga"], f["product"], f["disc"]) == ("0", "T23001D", "2/3"), f
+
+
+def test_gdemu_openmenu_ini_round_trips_card_managers_layout():
+    text = ("[OPENMENU]\nnum_items=2\n\n[ITEMS]\n"
+            "01.name=openMenu\n01.disc=1/1\n01.vga=1\n01.region=JUE\n01.version=V0.1.0\n01.date=20210609\n01.product=NEODC_1\n\n"
+            "02.name=Cannon Spike\n02.disc=1/1\n02.vga=1\n02.region=U\n02.version=V1.001\n02.date=20000710\n02.product=T1215N\n\n")
+    assert send.openmenu_ini(send.parse_openmenu_ini(text)) == text
+
+
+def test_gdemu_gdi_renames_tracks_and_drops_quotes():
+    gdi = '3\r\n1 0 4 2352 "My Game (Track 1).bin" 0\r\n2 600 0 2352 "My Game (Track 2).raw" 0\r\n3 45000 4 2352 "My Game (Track 3).bin" 0\r\n'
+    text, rename = send.gdemu_gdi(gdi, send.disc_tracks(gdi, ".gdi"))
+    assert text.splitlines() == ["3", "1 0 4 2352 track01.bin 0", "2 600 0 2352 track02.raw 0", "3 45000 4 2352 track03.bin 0"], text
+    assert rename["My Game (Track 3).bin"] == "track03.bin"
+    assert send.gdi_ipbin_track(gdi) == ("My Game (Track 3).bin", 2352)
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
