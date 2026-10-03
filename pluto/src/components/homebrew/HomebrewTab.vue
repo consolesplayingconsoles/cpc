@@ -13,6 +13,7 @@ import RomCard from '../RomCard.vue'
 import UiSidePanel from '../ui/UiSidePanel.vue'
 import UiPill from '../ui/UiPill.vue'
 import UiStatusDot from '../ui/UiStatusDot.vue'
+import UiSectionHead from '../ui/UiSectionHead.vue'
 import UiSubTabs from '../ui/UiSubTabs.vue'
 import { ICONS } from '../../composables/useIcons'
 import { catalogueApi } from '../../api/catalogue'
@@ -78,6 +79,22 @@ const sections = computed(() => {
       [g, [...list].sort((a, b) => Number(isVanilla(b)) - Number(isVanilla(a)))] as [string, HomebrewItem[]]),
   }))
 })
+
+// ── folded consoles ──────────────────────────────────────────────────────────
+// A console section folds away, so a node you are not working on stops pushing the
+// others off the list. Kept per viewer (cpc.<domain>.<leaf>). Folding hides the rows and
+// nothing else: what is selected stays open on the right, and a folded console says how
+// many items it holds and whether something in it is building.
+const FOLDED_KEY = 'cpc.homebrew.folded'
+const folded = ref<string[]>([])
+try { folded.value = JSON.parse(localStorage.getItem(FOLDED_KEY) || '[]') } catch { /* ignore */ }
+function toggleFold(node: string) {
+  folded.value = folded.value.includes(node) ? folded.value.filter(n => n !== node) : [...folded.value, node]
+  try { localStorage.setItem(FOLDED_KEY, JSON.stringify(folded.value)) } catch { /* ignore */ }
+}
+const shown = (sec: { node: string }) => !folded.value.includes(sec.node)
+const countOf = (sec: { groups: [string, HomebrewItem[]][] }) =>
+  sec.groups.reduce((n, [, list]) => n + list.length, 0)
 
 // ── selection (URL, remembered across tabs) ──────────────────────────────────
 // The URL carries the pick, but leaving the tab drops it, so the last one is kept
@@ -249,11 +266,15 @@ const EMPTY: Record<HomebrewKind, string> = {
       <nav class="hb__list">
         <div v-if="error" class="hb__state hb__state--bad">{{ error }}</div>
         <div v-else-if="loaded && !items.length" class="hb__state">{{ EMPTY[kind] }}</div>
-        <section v-for="sec in sections" :key="sec.node" class="hb__node">
-          <h3 class="hb__node-head">
-            <img v-if="ICONS[sec.node]" :src="ICONS[sec.node]" class="hb__node-ic" alt="" />
-            {{ sec.name }}
-          </h3>
+        <section v-for="sec in sections" :key="sec.node" class="hb__node" :class="{ 'is-folded': !shown(sec) }">
+          <UiSectionHead
+            class="hb__node-head"
+            :title="sec.name" :icon="ICONS[sec.node]" :count="countOf(sec)"
+            :open="shown(sec)" @toggle="toggleFold(sec.node)"
+          >
+            <UiStatusDot v-if="!shown(sec) && sec.groups.some(([, l]) => l.some(i => i.id === runningId))" state="ok" title="A build is running in here" />
+          </UiSectionHead>
+          <template v-if="shown(sec)">
           <template v-for="[group, list] in sec.groups" :key="group">
             <h4 v-if="group" class="hb__group">
               <span class="hb__group-title">{{ list[0].game?.title ?? group }}</span>
@@ -266,10 +287,12 @@ const EMPTY: Record<HomebrewKind, string> = {
             >
               <span class="hb__row-title">{{ isVanilla(it) ? 'Vanilla' : it.title }}</span>
               <UiPill v-if="it.release" :tone="it.release.stable ? 'accent' : 'idle'">v{{ it.release.version }}</UiPill>
-              <UiPill v-else tone="idle">Unreleased</UiPill>
+              <!-- vanilla is the original game rebuilt, never something we release -->
+              <UiPill v-else-if="!isVanilla(it)" tone="idle">Unreleased</UiPill>
               <span class="hb__row-name">{{ it.name }}</span>
               <UiStatusDot v-if="it.id === runningId" state="ok" title="Running" />
             </button>
+          </template>
           </template>
         </section>
       </nav>
@@ -299,7 +322,7 @@ const EMPTY: Record<HomebrewKind, string> = {
                   v-if="selected.release" class="hb__release"
                   :href="selected.release.url" target="_blank" rel="noopener" :title="selected.release.name"
                 ><UiPill :tone="selected.release.stable ? 'accent' : 'idle'">{{ selected.release.stable ? 'Released' : 'Pre-release' }} v{{ selected.release.version }} ↗</UiPill></a>
-                <UiPill v-else tone="idle">Unreleased</UiPill>
+                <UiPill v-else-if="!isVanilla(selected)" tone="idle">Unreleased</UiPill>
               </div>
               <div class="hb__path-row">
                 <code class="hb__path">{{ selected.path }}</code>
@@ -363,9 +386,11 @@ const EMPTY: Record<HomebrewKind, string> = {
 .hb__stage { position: relative; flex: 1; min-height: 0; display: flex; }
 .hb__list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 96px; }   /* frame (surface, edge border) comes from UiSidePanel */
 .hb__node { padding-bottom: var(--sp-3); }
-.hb__node + .hb__node { border-top: 8px solid var(--surface-3); }   /* a console break reads stronger than anything inside a section */
-.hb__node-head { display: flex; align-items: center; gap: 10px; margin: 0; padding: var(--sp-3) var(--sp-4); font-size: 14px; font-weight: 600; white-space: nowrap; background: var(--surface-2); border-bottom: 1px solid var(--line); }
-.hb__node-ic { width: 34px; height: 34px; object-fit: contain; }
+.hb__node.is-folded { padding-bottom: 0; }   /* folded: the header IS the block, no gap under it */
+/* The header is UiSectionHead (the Media tab's folding sections); this only frames it:
+   one console per block, a line between them, the console's surface behind the title. */
+.hb__node-head { background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.hb__node + .hb__node .hb__node-head { border-top: 1px solid var(--line); }
 .hb__group { display: flex; align-items: center; gap: var(--sp-2); margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-1); font-size: 12.5px; font-weight: 600; color: var(--text); min-width: 0; }
 .hb__group-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .hb__group-dir { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; font-weight: 400; color: var(--text-faint); white-space: nowrap; }

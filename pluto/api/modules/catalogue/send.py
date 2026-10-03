@@ -25,11 +25,14 @@ beside the target as .part, size-checked, renamed; then the target is rescanned.
 keep the source file name (romsets are looked up by it).
   ftp   FTP_PATH        a PS3's webMAN FTP: ISOs into /dev_hdd0/PS3ISO, where webMAN
                           mounts them from (there is no shell on a PS3)
+  gdemu SD_LAYOUT=gdemu a GDEMU card: a game per numbered slot after openMenu's 01, and
+                          openMenu's game list (OPENMENU.INI in 01's image) rewritten in place
 The caller (the API) never branches on the kind: it hands the plan to STRATEGIES.
 
 Pure stdlib, 3.6-safe, ASCII only.
 """
 import re
+import threading
 
 try:
     from . import names, service
@@ -389,6 +392,266 @@ def _copy_one(c, src, ext, card, ctx, p, lines):
     return 1
 
 
+# ---------------------------------------------------------------------------------------------
+# GDEMU: a card of numbered slots. 01 is openMenu (its own disc image); a game is one slot,
+# NN/disc.gdi + trackNN.<ext> (or NN/disc.cdi) + name.txt + serial.txt. openMenu only lists what
+# OPENMENU.INI inside 01's image says, so a send also rewrites that list -- the same entries
+# GDMENUCardManager writes (FillListText), in place in the space the file already has.
+# ---------------------------------------------------------------------------------------------
+GDEMU_MENU = "01"
+GDEMU_MAX_SLOT = 99
+# One GDEMU send at a time: each rewrites openMenu's whole list, so two at once (a send per game)
+# each wrote the list as THEY saw the card and the last to finish dropped the other's game.
+_GDEMU_LOCK = threading.Lock()
+
+
+def ipbin_fields(ip):
+    """openMenu's per-game fields from a Dreamcast IP.BIN (the 0x100-byte meta block), read the
+    way GDMENUCardManager reads them: disc "1/1" unless the header numbers it, vga = the 6th
+    peripherals character is '1', product = the serial without dashes, up to its first space."""
+    if ip[:16] != b"SEGA SEGAKATANA ":
+        raise ValueError("not a Dreamcast IP.BIN")
+    txt = lambda a, n: ip[a:a + n].decode("ascii", "replace").strip()
+    no, total = ip[0x2B:0x2C], ip[0x2D:0x2E]
+    disc = "1/1" if b" " in (no, total) else "%s/%s" % (no.decode("ascii", "replace"), total.decode("ascii", "replace"))
+    serial = txt(0x40, 10)
+    return {"name": txt(0x80, 128), "disc": disc, "vga": "1" if ip[0x38 + 5:0x38 + 6] == b"1" else "0",
+            "region": txt(0x30, 8), "version": txt(0x4A, 6), "date": txt(0x50, 8),
+            "serial": serial, "product": serial.replace("-", "").split(" ")[0]}
+
+
+INI_KEYS = ("name", "disc", "vga", "region", "version", "date", "product")
+
+
+def parse_openmenu_ini(text):
+    """OPENMENU.INI -> {slot number: {field: value}}."""
+    items = {}
+    for line in text.splitlines():
+        m = re.match(r"^(\d+)\.(\w+)=(.*)$", line.strip())
+        if m:
+            items.setdefault(int(m.group(1)), {})[m.group(2)] = m.group(3)
+    return items
+
+
+def openmenu_ini(items):
+    """{slot: fields} -> OPENMENU.INI text, Card Manager's layout (LF, a blank line per item)."""
+    out = ["[OPENMENU]", "num_items=%d" % len(items), "", "[ITEMS]"]
+    for n in sorted(items):
+        for k in INI_KEYS:
+            out.append("%02d.%s=%s" % (n, k, items[n].get(k, "")))
+        out.append("")
+    return "\n".join(out) + "\n"
+
+
+def gdemu_gdi(text, tracks):
+    """Rewrite a .gdi for a GDEMU slot: its track files renamed trackNN.<ext> (no quotes, no
+    spaces, which GDEMU's parser does not take). tracks = disc_tracks(text) order ->
+    (new descriptor text, {old name: new name})."""
+    rename = {t: "track%02d%s" % (i + 1, ("." + t.rsplit(".", 1)[-1].lower()) if "." in t else "")
+              for i, t in enumerate(tracks)}
+    lines = text.splitlines()
+    out = [lines[0].strip()]
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        quoted = re.search(r'"([^"]+)"', line)
+        parts = line.split()
+        name = quoted.group(1) if quoted else parts[4]
+        head = line[:quoted.start()].split() if quoted else parts[:4]
+        tail = line[quoted.end():].split() if quoted else parts[5:]
+        out.append(" ".join(head + [rename[name]] + tail))
+    return "\r\n".join(out) + "\r\n", rename
+
+
+def gdi_ipbin_track(text):
+    """(track file, sector size) holding a GDI's IP.BIN: the first data track (type 4) of the
+    high-density area (LBA >= 45000)."""
+    for line in text.splitlines()[1:]:
+        quoted = re.search(r'"([^"]+)"', line)
+        parts = line.split()
+        if len(parts) >= 5 and parts[2] == "4" and int(parts[1]) >= 45000:
+            return (quoted.group(1) if quoted else parts[4]), int(parts[3])
+    raise ValueError("no high-density data track in the .gdi")
+
+
+def _iso_dir(read_lba, lba, length):
+    """ISO9660 directory records: [(name, lba, length, is_dir, dir lba, offset in that dir)]."""
+    out, data = [], b"".join(read_lba(lba + i) for i in range((length + 2047) // 2048))
+    p = 0
+    while p < len(data):
+        n = data[p]
+        if n == 0:
+            p = (p // 2048 + 1) * 2048
+            continue
+        rec = data[p:p + n]
+        name = rec[33:33 + rec[32]]
+        if name not in (b"\0", b"\1"):
+            out.append((name.decode("ascii", "replace").split(";")[0], int.from_bytes(rec[2:6], "little"),
+                        int.from_bytes(rec[10:14], "little"), bool(rec[25] & 2), lba + p // 2048, p % 2048))
+        p += n
+    return out
+
+
+def menu_ini_location(gdi_text, read_track):
+    """Where OPENMENU.INI sits in a GDEMU menu image.
+
+    gdi_text = 01's disc.gdi; read_track(file, offset, length) -> bytes from that track file.
+    -> {file, offset, length, room, record: (file, offset)} -- the INI's bytes, how many it may
+    grow to without touching the next file on the disc, and its directory record."""
+    tracks = []
+    for line in gdi_text.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 5 and parts[2] == "4":
+            tracks.append((int(parts[1]), parts[4]))
+    tracks.sort()
+
+    def where(lba):
+        start, f = max(t for t in tracks if t[0] <= lba)
+        return f, (lba - start) * 2048
+
+    def read_lba(lba):
+        f, off = where(lba)
+        return read_track(f, off, 2048)
+    hd = min(t[0] for t in tracks if t[0] >= 45000)
+    pvd = read_lba(hd + 16)
+    if pvd[1:6] != b"CD001":
+        raise ValueError("01 is not an ISO9660 menu disc")
+    root = pvd[156:190]
+    entries, todo = [], [(int.from_bytes(root[2:6], "little"), int.from_bytes(root[10:14], "little"))]
+    while todo:
+        for e in _iso_dir(read_lba, *todo.pop()):
+            entries.append(e)
+            if e[3]:
+                todo.append((e[1], e[2]))
+    ini = [e for e in entries if e[0].upper() == "OPENMENU.INI"]
+    if not ini:
+        raise ValueError("01 has no OPENMENU.INI: is it openMenu?")
+    _, lba, length, _, dlba, doff = ini[0]
+    after = [e[1] for e in entries if e[1] > lba] + [lba + (length + 2047) // 2048]
+    f, off = where(lba)
+    rf, roff = where(dlba)
+    return {"file": f, "offset": off, "length": length, "room": (min(after) - lba) * 2048,
+            "record": (rf, roff + doff)}
+
+
+def card_slot_fields(read, exists, slot):
+    """openMenu fields for a slot already on the card, from its own disc header: disc.gdi's
+    high-density data track, or the IP.BIN signature inside disc.cdi. read(name, offset, length),
+    exists(name) -- reading a file that is not on the card is an error, not an empty answer."""
+    d = "%02d/" % slot
+    name = read(d + "name.txt", 0, 512).decode("utf-8", "replace").strip() if exists(d + "name.txt") else ""
+    if exists(d + "disc.gdi"):
+        gdi = read(d + "disc.gdi", 0, 64 * 1024)
+        track, sector = gdi_ipbin_track(gdi.decode("ascii", "replace"))
+        ip = read(d + track, 16 if sector == 2352 else 0, 0x100)
+    else:
+        ip, off, sig = b"", 0, b"SEGA SEGAKATANA "
+        while not ip:
+            chunk = read(d + "disc.cdi", off, 4 << 20)
+            if not chunk:
+                raise NotAvailable("slot %02d has no disc.gdi and no Dreamcast header in disc.cdi" % slot)
+            i = chunk.find(sig)
+            ip = read(d + "disc.cdi", off + i, 0x100) if i >= 0 else b""
+            off += len(chunk) - len(sig)
+    return dict(ipbin_fields(ip), name=name or ipbin_fields(ip)["name"])
+
+
+def _gdemu(p, ctx):
+    """GDEMU card: each copy into the next slot after the highest, then openMenu's list rebuilt
+    from the slots on the card. ctx["card"] adds read / patch / put_bytes to the usual words;
+    ctx["read_src"](src, offset, length) reads a source file (its IP.BIN)."""
+    card, lines, copied = ctx["card"], [], 0
+    emit = ctx.get("emit") or lines.append
+    if not p["copies"]:
+        return _nothing(ctx)
+    if not _GDEMU_LOCK.acquire(blocking=False):
+        emit("another send to the GDEMU card is running: waiting for it to finish")
+        _GDEMU_LOCK.acquire()
+    try:
+        return _gdemu_locked(p, ctx, card, lines, emit)
+    finally:
+        _GDEMU_LOCK.release()
+
+
+def _gdemu_locked(p, ctx, card, lines, emit):
+    copied = 0
+    card["mount"]()
+    try:
+        slots = sorted({int(f.split("/")[0]) for f in card["files"]() if re.match(r"^\d\d/", f)})
+        if GDEMU_MENU not in ["%02d" % s for s in slots]:
+            raise NotAvailable("the card has no slot 01 (openMenu): set it up with GDMENUCardManager first")
+        gaps = [n for n in range(1, max(slots) + 1) if n not in slots]
+        if gaps:
+            raise NotAvailable("slot %02d is missing, and GDEMU needs them in a row: renumber the card "
+                               "with GDMENUCardManager first" % gaps[0])
+        gdi01 = card["read"](GDEMU_MENU + "/disc.gdi", 0, 64 * 1024).decode("ascii", "replace")
+        loc = menu_ini_location(gdi01, lambda f, o, n: card["read"](GDEMU_MENU + "/" + f, o, n))
+        items = parse_openmenu_ini(card["read"](GDEMU_MENU + "/" + loc["file"], loc["offset"], loc["length"])
+                                   .decode("latin-1"))
+        new = {}
+        for c in p["copies"]:
+            src = ctx["locate"](c["source"])
+            if src is None:
+                p["skipped"].append({"game": c["name"], "why": "%s's copy can't be read from here yet" % c["source"]["node"]})
+                continue
+            ext = "." + c["source"]["path"].rsplit(".", 1)[-1].lower()
+            if ext not in (".gdi", ".cdi"):
+                p["skipped"].append({"game": c["name"], "why": "GDEMU takes .gdi and .cdi, not %s" % ext})
+                continue
+            slot = max(slots) + 1
+            if slot > GDEMU_MAX_SLOT:
+                raise NotAvailable("the card is full (%d slots)" % GDEMU_MAX_SLOT)
+            d = "%02d/" % slot
+            emit("copying %s into slot %02d" % (c["name"], slot))
+            if ext == ".gdi":
+                members = ctx["members"](src, ext)
+                text = ctx["read_src"](members[0][0], 0, 64 * 1024).decode("ascii", "replace")
+                gdi, rename = gdemu_gdi(text, [m[1] for m in members[1:]])
+                ip_file, sector = gdi_ipbin_track(text)
+                ip_src = next(m[0] for m in members[1:] if m[1] == ip_file)
+                ip = ctx["read_src"](ip_src, 16 if sector == 2352 else 0, 0x100)
+                for member, filename, _ in members[1:]:
+                    card["put"](member, d + rename[filename])
+                card["put_bytes"](gdi.encode("ascii"), d + "disc.gdi")
+            else:
+                ip = ctx["find_ipbin"](src)
+                card["put"](src, d + "disc.cdi")
+            fields = ipbin_fields(ip)
+            card["put_bytes"](c["name"].encode("utf-8"), d + "name.txt")
+            card["put_bytes"](fields["serial"].encode("ascii"), d + "serial.txt")
+            new[slot] = dict(fields, name=c["name"])
+            slots.append(slot)
+            copied += 1
+            lines.append("copied %s into slot %02d" % (c["name"], slot))
+        if new:
+            # the list as the card is NOW: re-read it right before writing, keep entries for slots
+            # that still exist, add the new ones, and read the header of any slot on the card the
+            # list is missing (one written by another tool, or lost to an older send)
+            items = parse_openmenu_ini(card["read"](GDEMU_MENU + "/" + loc["file"], loc["offset"], loc["length"])
+                                       .decode("latin-1"))
+            for s in slots:
+                if s not in items and s not in new:
+                    new[s] = card_slot_fields(card["read"], card["exists"], s)
+                    emit("slot %02d was missing from openMenu's list: added from its disc header" % s)
+            ini = openmenu_ini({s: new.get(s) or items[s] for s in slots}).encode("latin-1", "replace")
+            if len(ini) > loc["room"]:
+                raise NotAvailable("openMenu's list needs %d bytes but the menu disc has room for %d: "
+                                   "rebuild the menu with GDMENUCardManager" % (len(ini), loc["room"]))
+            # the INI's bytes (zero-filled to the old length), then its directory record's size
+            card["patch"](GDEMU_MENU + "/" + loc["file"], loc["offset"], ini + bytes(max(0, loc["length"] - len(ini))))
+            rf, roff = loc["record"]
+            card["patch"](GDEMU_MENU + "/" + rf, roff + 10, len(ini).to_bytes(4, "little") + len(ini).to_bytes(4, "big"))
+            back = card["read"](GDEMU_MENU + "/" + loc["file"], loc["offset"], len(ini))
+            if back != ini:
+                raise NotAvailable("openMenu's list did not read back as written: the card may be failing")
+            emit("openMenu list rebuilt: %d items" % len(slots))
+    finally:
+        for line in card["finish"]():
+            emit(line)
+    emit("copied %d game%s" % (copied, "" if copied == 1 else "s"))
+    return {"status": "done", "count": copied, "lines": lines}
+
+
 def _not_built(kind):
     def run(p, ctx):
         raise NotAvailable("sending games to %s (%s) is not built yet" % (ctx["target"], kind))
@@ -398,4 +661,4 @@ def _not_built(kind):
 # ftp joins _files: the API's card for it speaks the same mount/exists/put/finish words
 # over FTP that the others speak over SSH, so the copy loop does not change.
 STRATEGIES = {"local": _files, "batocera": _files, "sd": _files, "hdd": _hdd, "ftp": _files,
-              "gdemu": _not_built("gdemu")}
+              "gdemu": _gdemu}
