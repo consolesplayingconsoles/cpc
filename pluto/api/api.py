@@ -4899,7 +4899,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     r = subprocess.run(["ssh", "-o", "ConnectTimeout=6", m.group(1), "cat " + shlex.quote(m.group(2))],
                                        stdout=f, stderr=subprocess.PIPE, timeout=1800)
                 if r.returncode != 0 or os.path.getsize(local) == 0:
-                    raise catalogue_send.NotAvailable("could not read %s from %s: %s" % (
+                    raise catalogue_send.SourceUnavailable("could not read %s from %s: %s" % (
                         os.path.basename(m.group(2)), m.group(1), r.stderr.decode("utf-8", "replace").strip()[-200:] or "empty file"))
             if unpack and local.lower().endswith(".zip"):
                 with zipfile.ZipFile(local) as z:
@@ -5182,7 +5182,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             r = subprocess.run(["ssh", "-o", "ConnectTimeout=6", m.group(1), "cat " + shlex.quote(m.group(2))],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
             if r.returncode != 0:
-                raise catalogue_send.NotAvailable("could not read %s from %s" % (os.path.basename(m.group(2)), m.group(1)))
+                raise catalogue_send.SourceUnavailable("could not read %s from %s" % (os.path.basename(m.group(2)), m.group(1)))
             text = r.stdout.decode("utf-8", "replace")
         else:
             with open(src, encoding="utf-8", errors="replace") as f:
@@ -5226,13 +5226,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not path:
             self._send(404, {"error": "no such file in the lab ROMs"}); return
         target = path
-        top = rel.replace("\\", "/").split("/")[0]
         if "/" in rel.replace("\\", "/"):
+            # the same rule as a card: a disc takes its own folder, any other file just itself
             doc = catalogue.store.load(self._catalogue_root(), system)
-            shared = [f for g in doc["games"].values() for f in g["files"]
-                      if f["node"] == "lab" and f["path"] != rel and f["path"].split("/")[0] == top]
-            if not shared:
-                target = self._lab_rom(system, top) or path
+            peers = [dict(f, card="") for g in doc["games"].values() for f in g["files"] if f["node"] == "lab"]
+            what = catalogue_send.card_target(rel.replace("\\", "/"), "", peers)
+            if what != rel.replace("\\", "/"):
+                target = self._lab_rom(system, what) or path
         if not self._catalogue_lock.acquire(blocking=False):
             self._send(409, {"error": "a catalogue sync is running, try again when it's done"}); return
         try:

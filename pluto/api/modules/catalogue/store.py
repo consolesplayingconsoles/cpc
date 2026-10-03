@@ -116,6 +116,10 @@ def _stripped(path, strip):
     return re.sub(strip, "", path) if strip else path
 
 
+# "GM 00000000-00", "00000000", "T-000000": a serial of nothing but zeros and punctuation
+_BLANK_ID = re.compile(r"^[A-Z]{0,3}[\s-]*[0 ]+(?:[-\s]*[0 ]*)*$", re.I)
+
+
 def _drop_shared_ids(scan, strip=None):
     """Forget a header ID that this scan hands to more than one game.
 
@@ -133,17 +137,22 @@ def _drop_shared_ids(scan, strip=None):
         gid = (item.get("header") or {}).get("id")
         if not gid:
             continue
+        if _BLANK_ID.match(gid):                  # a default header, not an identity
+            continue
         p = names.parse(_stripped(item["path"], strip))
         if p["variants"] or not names.has_region_tag(p["tags"]):
             continue                              # a hack shares its base game's ID on purpose
         titles.setdefault(gid, set()).add(names.key(p["title"]))
     shared = {gid for gid, ts in titles.items() if len(ts) > 1}
-    if not shared:
-        return scan
     out = []
     for item in scan:
         h = item.get("header") or {}
-        out.append(dict(item, header=dict(h, id=None)) if h.get("id") in shared else item)
+        gid = h.get("id")
+        # An all-zero serial is what a toolchain leaves in a header nobody filled in (SGDK
+        # ships "SAMPLE PROGRAM" / "GM 00000000-00"), so every build that keeps the default
+        # claims the same ID. Four homebrew games here carry it, and our own Justifier Test
+        # tool was filed as a variant of the first of them. It identifies nothing: forget it.
+        out.append(dict(item, header=dict(h, id=None)) if gid and (gid in shared or _BLANK_ID.match(gid)) else item)
     return out
 
 
