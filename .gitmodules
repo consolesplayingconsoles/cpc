@@ -10,3 +10,6 @@
 [submodule "nodes/local/gba/homebrew"]
 	path = nodes/local/gba/homebrew
 	url = https://github.com/consolesplayingconsoles/game-boy-advance-homebrew.git
+[submodule "nodes/local/saturn/homebrew"]
+	path = nodes/local/saturn/homebrew
+	url = https://github.com/consolesplayingconsoles/saturn-homebrew.git
