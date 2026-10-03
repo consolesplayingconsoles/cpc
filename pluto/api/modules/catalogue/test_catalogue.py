@@ -604,6 +604,39 @@ def test_send_skips_an_unreachable_source_and_still_copies_the_rest():
     assert plan["skipped"][1]["why"] == "batocera is off or unreachable"
 
 
+def test_a_gdemu_card_is_read_by_slot_from_its_text_files():
+    """GDEMU: 01 is the menu (skipped), every other slot is NN/disc.gdi or NN/disc.cdi named
+    by name.txt, with serial.txt standing in when the disc has no readable header (.cdi)."""
+    root = tempfile.mkdtemp()
+    def slot(n, files):
+        os.makedirs(os.path.join(root, n))
+        for name, data in files.items():
+            with open(os.path.join(root, n, name), "wb") as f:
+                f.write(data)
+    gdi = b"3\n1 0 4 2352 track01.bin 0\n2 756 0 2352 track02.raw 0\n3 45000 4 2048 track03.bin 0\n"
+    slot("01", {"disc.gdi": gdi, "track01.bin": b"x", "track02.raw": b"x", "track03.bin": b"x", "name.txt": b"openMenu"})
+    slot("02", {"disc.gdi": gdi, "track01.bin": b"x", "track02.raw": b"x", "track03.bin": b"x",
+                "name.txt": b"Sonic Adventure\r\n", "serial.txt": b"MK-51000"})
+    slot("03", {"disc.cdi": b"x" * 10, "name.txt": b"Ghetto Blaster", "serial.txt": b"HB_GHETTO"})
+    slot("04", {"disc.mds": b"x", "disc.mdf": b"x", "name.txt": b"Ikaruga"})
+    slot("05", {"disc.ccd": b"x", "disc.img": b"x", "disc.sub": b"x", "name.txt": b"Rez"})
+    found = scan.scan_dir(root, None, {"dirs": ["01"], "exts": [".sub"]})
+    by = {f["path"]: f for f in found}
+    # tracks and pair data files consumed, menu skipped: one game per slot
+    assert sorted(by) == ["02/disc.gdi", "03/disc.cdi", "04/disc.mds", "05/disc.ccd"], sorted(by)
+    assert by["02/disc.gdi"]["name"] == "Sonic Adventure.gdi"
+    assert by["02/disc.gdi"]["header"]["id"] == "MK-51000"
+    assert by["03/disc.cdi"]["name"] == "Ghetto Blaster.cdi"
+    assert by["03/disc.cdi"]["header"] == {"id": "HB_GHETTO", "title": "Ghetto Blaster", "regions": []}
+    doc = store.empty("dreamcast")
+    store.merge(doc, "dc", [dict(f, path="GDEMU/" + f["path"]) for f in found], NOW, scope="GDEMU/")
+    assert sorted(g["title"] for g in doc["games"].values()) == ["Ghetto Blaster", "Ikaruga", "Rez", "Sonic Adventure"]
+    # the generic card writer must never be used on it: a GDEMU card has its own strategy
+    assert send.strategy_for({"SD_LABEL": "GDEMU", "SD_ROMS_DIR": ".", "SD_LAYOUT": "gdemu"}) == "gdemu"
+    assert send.strategy_for({"SD_LABEL": "EDMD", "SD_ROMS_DIR": "Mega Drive"}) == "sd"
+    shutil.rmtree(root)
+
+
 def test_a_file_in_a_cards_tools_folder_is_filed_as_a_tool_unless_you_said_otherwise():
     root = tempfile.mkdtemp()
     doc = store.empty("megadrive")

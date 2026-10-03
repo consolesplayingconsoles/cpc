@@ -15,6 +15,11 @@ What counts as a game file:
   - .zip is opened (stdlib): its main entry's name is recorded as `inner` and the
     header is read from inside it (a zipped .gdi/.cue is followed to its track)
   - .7z/.chd are listed but carry no readable header (name match only)
+  - a GDEMU slot holds one disc: disc.gdi (+ its tracks), disc.cdi, disc.mds + disc.mdf or
+    disc.ccd + disc.img (+ .sub); the .mdf / .img is part of its pair, not a game of its own.
+    The slot's path says nothing about the game: the title comes
+    from the slot's name.txt and, when the header has none (a .cdi), the serial from
+    serial.txt -- the two files the card manager writes into every slot
 
 Output is wrapped in markers so SSH noise (banners, warnings) can't break the JSON.
 
@@ -101,6 +106,34 @@ def _zip_head(path, skip):
         return None, b""
 
 
+_GENERIC_STEMS = {"disc"}
+_PAIRS = {".mds": ".mdf", ".ccd": ".img"}       # GDEMU descriptor -> the data file it names
+
+
+def _slot_text(folder, name):
+    """First line of a GDEMU slot's name.txt / serial.txt, or "" when it isn't there."""
+    data = _read(os.path.join(folder, name), 1024).decode("utf-8", "replace")
+    return (data.splitlines() or [""])[0].strip()
+
+
+def _gdemu_slot(sysdir, item):
+    """Name a GDEMU slot's disc from its name.txt (+ serial.txt) -> item, changed in place."""
+    rel = item["path"]
+    stem, ext = os.path.splitext(os.path.basename(rel))
+    folder = os.path.join(sysdir, os.path.dirname(rel))
+    if stem.lower() not in _GENERIC_STEMS or not os.path.dirname(rel):
+        return item
+    title = _slot_text(folder, "name.txt")
+    if title:
+        item["name"] = title + ext
+        serial = _slot_text(folder, "serial.txt")
+        head = item.get("header") or {}
+        if serial and not head.get("id"):
+            item["header"] = dict(head, id=serial, title=head.get("title") or title,
+                                  regions=head.get("regions") or [])
+    return item
+
+
 def scan_dir(sysdir, fmt=None, skip=None):
     """-> [{"path", "size", "header", "inner"}] for every game file under sysdir. fmt =
     the system's header format (consoles.json systems.<x>.header); None = names only. A card
@@ -117,6 +150,10 @@ def scan_dir(sysdir, fmt=None, skip=None):
             files.append(os.path.relpath(os.path.join(dirpath, name), sysdir))
 
     consumed, header_file = set(), {}
+    for rel in files:
+        stem, ext = os.path.splitext(rel)
+        if os.path.basename(stem).lower() in _GENERIC_STEMS and ext.lower() in _PAIRS:
+            consumed.update(os.path.normpath(stem + e) for e in (_PAIRS[ext.lower()], _PAIRS[ext.lower()].upper()))
     for rel in files:
         ext = os.path.splitext(rel)[1].lower()
         base = os.path.dirname(rel)
@@ -148,8 +185,8 @@ def scan_dir(sysdir, fmt=None, skip=None):
         else:
             head = _read(os.path.join(sysdir, header_file.get(rel, rel)), headers.HEAD_BYTES)
         f = (fmt.get(os.path.splitext(inner or rel)[1].lower(), fmt.get("*"))) if isinstance(fmt, dict) else fmt
-        out.append({"path": rel, "size": os.path.getsize(full), "inner": inner,
-                    "header": headers.read(f, head) if f and head else None})
+        out.append(_gdemu_slot(sysdir, {"path": rel, "size": os.path.getsize(full), "inner": inner,
+                                        "header": headers.read(f, head) if f and head else None}))
     return out
 
 

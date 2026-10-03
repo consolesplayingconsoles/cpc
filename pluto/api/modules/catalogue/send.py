@@ -65,7 +65,8 @@ def strategy_for(cfg, node=None):
     if (cfg.get("PS2_HDD_BYTES") or "").strip():
         return "hdd"
     if (cfg.get("SD_LABEL") or "").strip() and (cfg.get("SD_ROMS_DIR") or "").strip():
-        return "sd"
+        # a GDEMU card is numbered slots (01 = the menu), not a folder of games
+        return "gdemu" if (cfg.get("SD_LAYOUT") or "").strip().lower() == "gdemu" else "sd"
     if (cfg.get("FTP_PATH") or "").strip():
         return "ftp"
     return None
@@ -396,4 +397,5 @@ def _not_built(kind):
 
 # ftp joins _files: the API's card for it speaks the same mount/exists/put/finish words
 # over FTP that the others speak over SSH, so the copy loop does not change.
-STRATEGIES = {"local": _files, "batocera": _files, "sd": _files, "hdd": _hdd, "ftp": _files}
+STRATEGIES = {"local": _files, "batocera": _files, "sd": _files, "hdd": _hdd, "ftp": _files,
+              "gdemu": _not_built("gdemu")}
