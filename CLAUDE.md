@@ -27,6 +27,8 @@ To prevent platform collisions, all assets, firmware, and executables are encaps
 * **On-Demand Initialization**: The development pipeline monitors `nodes/` for empty directories matching the designated console codenames listed in the parent README. When a matched empty directory is created, the system initializes it with the single in-repo storage convention below:
   * **`/share`**: Shared media, document templates, and static external resources that are architecture-independent (aligns with the Linux `/usr/share` convention) — a clean storage dir.
 
+* **ROM names**: every build writes its ROM under the project naming convention, the same name Pluto publishes and sends it under (`pluto/api/rom_name.py`, i.e. `homebrew.lab_filename`: `<Game> [<Mod> by CPC vX]` for a mod, the title for a standalone game or tool). Same name every build, the output is always the latest; never rename, copy or snapshot a ROM to another name.
+
   ROMs and binaries are **not** committed to the repo. Game/ROM files are referenced live over SMB and the per-console `*_GAMES_PATH` env vars, so a `/roms` dir is obsolete. Native console code (e.g. Wii homebrew) lives in the console's own `homebrew/` directory and builds to a bootable artifact, so a `/bin` dir is obsolete too.
 
 ### 5. Python Compatibility & Dependency Rules
