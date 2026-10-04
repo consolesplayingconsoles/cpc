@@ -286,8 +286,10 @@ const EMPTY: Record<HomebrewKind, string> = {
               @click="open(it)"
             >
               <span class="hb__row-title">{{ isVanilla(it) ? 'Vanilla' : it.title }}</span>
-              <UiPill v-if="it.release" :tone="it.release.stable ? 'accent' : 'idle'">v{{ it.release.version }}</UiPill>
-              <!-- vanilla is the original game rebuilt, never something we release -->
+              <UiPill v-if="it.release" :tone="it.release.stable ? 'ok' : 'idle'">v{{ it.release.version }}</UiPill>
+              <!-- never publishable (someone else's IP) reads differently from not yet released,
+                   and vanilla is the original game rebuilt: never ours to release at all -->
+              <UiPill v-else-if="it.noRelease" tone="warn" class="hb__private" :title="'Never released: ' + it.noRelease">Private: {{ it.noRelease }}</UiPill>
               <UiPill v-else-if="!isVanilla(it)" tone="idle">Unreleased</UiPill>
               <span class="hb__row-name">{{ it.name }}</span>
               <UiStatusDot v-if="it.id === runningId" state="ok" title="Running" />
@@ -321,7 +323,8 @@ const EMPTY: Record<HomebrewKind, string> = {
                 <a
                   v-if="selected.release" class="hb__release"
                   :href="selected.release.url" target="_blank" rel="noopener" :title="selected.release.name"
-                ><UiPill :tone="selected.release.stable ? 'accent' : 'idle'">{{ selected.release.stable ? 'Released' : 'Pre-release' }} v{{ selected.release.version }} ↗</UiPill></a>
+                ><UiPill :tone="selected.release.stable ? 'ok' : 'idle'">{{ selected.release.stable ? 'Released' : 'Pre-release' }} v{{ selected.release.version }} ↗</UiPill></a>
+                <UiPill v-else-if="selected.noRelease" tone="warn" :title="'Never released: ' + selected.noRelease">Private: {{ selected.noRelease }}</UiPill>
                 <UiPill v-else-if="!isVanilla(selected)" tone="idle">Unreleased</UiPill>
               </div>
               <div class="hb__path-row">
@@ -397,6 +400,8 @@ const EMPTY: Record<HomebrewKind, string> = {
 .hb__row { display: flex; align-items: baseline; gap: var(--sp-2); width: 100%; padding: 7px var(--sp-4) 7px var(--sp-5); font: inherit; text-align: left; color: var(--text); background: none; border: 0; cursor: pointer; }
 .hb__row:hover { background: var(--surface-2); }
 .hb__row.is-open { background: var(--accent-soft); }
+/* "Private: Intellectual Property" is longer than the panel: let the pill clip, not the row */
+.hb__private { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
 .hb__row-title { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .hb__row-name { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); white-space: nowrap; margin-left: auto; }
 .hb__row.is-vanilla .hb__row-title { font-style: italic; color: var(--text-muted); }

@@ -136,6 +136,19 @@ def _mod_name(folder):
     return None
 
 
+def _unreleasable(folder):
+    """Why this is never going out, from MOD_NO_RELEASE in the item's .env -- the value IS
+    the reason ("Nintendo IP", "uses art from another game"). Some mods cannot be published
+    whatever state they are in, so "Unreleased" is the wrong thing to say about them: it
+    reads as pending. Empty or missing = a normal mod.
+    """
+    for f in (".env", ".env.sample"):
+        why = _parse_env(os.path.join(folder, f)).get("MOD_NO_RELEASE")
+        if why and why.strip():
+            return _nodash(why.strip())
+    return None
+
+
 def _readme(folder):
     """The first paragraph of README.md as a description, or None. The README is docs."""
     path = os.path.join(folder, "README.md")
@@ -271,6 +284,8 @@ def _item(repo_root, node, kind, group, name, folder):
         "paramsPaths": env_paths,
         "running": is_running(item_id),
         "release": _release(folder),
+        # never publishable (IP that is not ours), with the reason: not the same as unreleased
+        "noRelease": _unreleasable(folder),
         "output": last_output(item_id),
         "system": system,
         "game": game,
