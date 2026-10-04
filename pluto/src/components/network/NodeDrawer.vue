@@ -8,6 +8,7 @@ import CopyButton from '../ui/UiCopyButton.vue'
 import UiClose from '../ui/UiClose.vue'
 import UiActionRow from '../ui/UiActionRow.vue'
 import UiIconButton from '../ui/UiIconButton.vue'
+import UiButton from '../ui/UiButton.vue'
 import chatConfig from '../../../config/chat.json'
 import consolesConfig from '../../../config/consoles.json'
 
@@ -147,6 +148,50 @@ function nativeAction(action: string) {
       emit('native-run', { action, title, lines: ['ERROR API unreachable'], ok: false, startedAt })
     })
     .finally(() => { nativeBusy.value = '' })
+}
+
+// Services a node declares for ITSELF, in its own dir (nodes/local/<id>/services.json).
+// Declared where they RUN: dreampi and openjvs are both pi services.
+// Fetched when the drawer opens and after an op, never polled —
+// a drawer that re-queries six units over SSH on a timer would be a background job
+// nobody asked for. The Refresh button is the manual re-read.
+interface Svc { id: string; unit: string; state: string }
+const services     = ref<Svc[]>([])
+const servicesBusy = ref('')
+// `reset` only on a node change, where the previous node's services must not linger.
+// A refresh keeps the list on screen and swaps it when the reply lands: emptying it
+// first unmounts the whole section, the drawer shrinks, and your scroll position
+// jumps to the top before the new list arrives.
+function loadServices(reset = false) {
+  if (reset) services.value = []
+  fetch(`${API_BASE}/services/${props.id}`)
+    .then(r => r.json())
+    .then(j => { services.value = Array.isArray(j?.services) ? j.services : [] })
+    .catch(() => { if (reset) services.value = [] })
+}
+watch(() => props.id, () => loadServices(true), { immediate: true })
+
+// Each op reports into the same floating terminal as deploys and native actions, so
+// "what did that do" has one home. The state shown comes back from the API, which
+// re-reads the unit AFTER acting — a unit can exit 0 and still fail to stay up.
+function serviceOp(svc: Svc, op: 'start' | 'stop' | 'restart') {
+  const title = `${op[0].toUpperCase()}${op.slice(1)} ${svc.id} on ${props.node.name}`
+  const startedAt = Date.now()
+  servicesBusy.value = svc.id + ':' + op
+  emit('native-run', { action: op + '-' + svc.id, title, lines: [`${op} ${svc.unit} on ${props.id}`], ok: null, startedAt })
+  fetch(`${API_BASE}/services/${props.id}/${svc.id}/${op}`, { method: 'POST' })
+    .then(r => r.json())
+    .then(j => {
+      const lines: string[] = Array.isArray(j?.lines) ? j.lines : []
+      if (j?.error) lines.push('ERROR ' + j.error)
+      if (j?.state) svc.state = j.state
+      emit('native-run', { action: op + '-' + svc.id, title, lines, ok: !!j?.ok, startedAt })
+    })
+    .catch(() => {
+      svc.state = 'unknown'
+      emit('native-run', { action: op + '-' + svc.id, title, lines: ['ERROR API unreachable'], ok: false, startedAt })
+    })
+    .finally(() => { servicesBusy.value = '' })
 }
 
 // Last-deploy line — general to any deployable node (pi, pluto, the python clients).
@@ -379,6 +424,32 @@ function postCommand(text: string) {
       </section>
 
     </template>
+
+    <!-- Services: OUTSIDE both branches, because a node declares its own list and any
+         node may have one (the Pi carries most of them today, Pluto can carry its own). -->
+    <section v-if="services.length" class="nd__sec">
+      <div class="nd__lbl-row">
+        <p class="nd__lbl">Services</p>
+        <UiIconButton variant="bordered" class="nd__cfg" title="Re-read the service states" @click="loadServices()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 11a8 8 0 1 0-.6 4"/><path d="M20 4v7h-7"/>
+          </svg>
+        </UiIconButton>
+      </div>
+      <div v-for="s in services" :key="s.id" class="nd__svc">
+        <div class="nd__svc-head">
+          <span class="nd__svc-name">{{ s.id }}</span>
+          <!-- The word IS the state. The class only tints it, so the row still reads
+               correctly with no colour at all. -->
+          <span class="nd__svc-state" :class="'is-' + s.state">{{ s.state }}</span>
+        </div>
+        <div class="nd__svc-ops">
+          <UiButton :disabled="servicesBusy === s.id + ':start'" @click="serviceOp(s, 'start')">Start</UiButton>
+          <UiButton :disabled="servicesBusy === s.id + ':stop'" @click="serviceOp(s, 'stop')">Stop</UiButton>
+          <UiButton :disabled="servicesBusy === s.id + ':restart'" @click="serviceOp(s, 'restart')">Restart</UiButton>
+        </div>
+      </div>
+    </section>
   </aside>
 </template>
 
@@ -437,6 +508,14 @@ function postCommand(text: string) {
 /* HID mode (generic/ps3/switch): the profile the board presents to the console. */
 .nd__pico-badge.is-iface { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
 .nd__pico-uart { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+/* Services: same card as a Pico row, so the drawer reads as one list of declared things. */
+.nd__svc { padding: 8px 10px; margin-bottom: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.nd__svc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.nd__svc-name { font-size: 13.5px; font-weight: 600; color: var(--text); }
+/* The state word carries the meaning; the tint is a hint on top of it, never instead. */
+.nd__svc-state { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.nd__svc-state.is-active { color: var(--accent); }
+.nd__svc-ops { display: flex; gap: 6px; margin-top: 8px; }
 /* phone: the drawer IS the screen (fixed over the app chrome), its own close stays on top */
 @media (max-width: 640px) {
   .nd { position: fixed; inset: 0; width: 100%; z-index: 50; border-left: 0; box-shadow: none; }

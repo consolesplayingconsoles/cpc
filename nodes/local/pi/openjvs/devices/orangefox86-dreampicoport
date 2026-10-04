@@ -1,0 +1,22 @@
+# DreamPicoPort (OrangeFox86) -- a Dreamcast controller over USB.
+# Codes confirmed by capture on 2026-10-04, not guessed.
+#
+# All four adapter ports share this one name, so this file applies to every port.
+# Without it OpenJVS falls back to generic-joystick, which sends BTN_EAST to
+# CONTROLLER_BUTTON_D -- putting Dreamcast B on BUTTON_4 instead of BUTTON_2, so
+# Virtua Tennis lob would not work.
+
+BTN_SOUTH CONTROLLER_BUTTON_A
+BTN_EAST  CONTROLLER_BUTTON_B
+BTN_NORTH CONTROLLER_BUTTON_C
+BTN_WEST  CONTROLLER_BUTTON_D
+BTN_START CONTROLLER_BUTTON_START
+
+# D-pad. Reports -1/0/1, which is what the axis-to-two-buttons path expects.
+ABS_HAT0X CONTROLLER_BUTTON_LEFT CONTROLLER_BUTTON_RIGHT
+ABS_HAT0Y CONTROLLER_BUTTON_UP CONTROLLER_BUTTON_DOWN
+
+# The analogue stick (ABS_X / ABS_Y, -127..127, flat 15) is deliberately NOT mapped.
+# The conversion compares for EQUALITY with the declared min/max, so a direction would
+# only register at exact full deflection and release at 126. Map it once that path
+# takes a threshold.

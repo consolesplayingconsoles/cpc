@@ -267,14 +267,14 @@ const displayNodes = computed(() => {
         >Media</button>
         <button
           class="tab"
-          :class="{ 'tab--active': activeTab === 'translation' }"
-          @click="goToTab('translation')"
-        >Translation</button>
-        <button
-          class="tab"
           :class="{ 'tab--active': activeTab === 'homebrew' }"
           @click="goToTab('homebrew')"
         >Homebrew</button>
+        <button
+            class="tab"
+            :class="{ 'tab--active': activeTab === 'translation' }"
+            @click="goToTab('translation')"
+        >Translation</button>
       </div>
 
       <div class="panels">

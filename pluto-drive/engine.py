@@ -134,6 +134,15 @@ class DriveEngine:
             except Exception as exc:
                 raise ValueError("can't reach the genesis datalink at %s:%s (%s) -- is the "
                                  "hub up (cpc-hub.service)?" % (host, port, exc))
+        if target == "naomi":
+            # No host: OpenJVS reads local input devices, so this sink IS a local device.
+            # It therefore only works where OpenJVS runs (the pi), which is also where this
+            # service runs -- on the Mac lab there is no uinput and it says so.
+            try:
+                return self._c.NaomiSink()
+            except Exception as exc:
+                raise ValueError("can't create the naomi input pad (%s) -- the drive service "
+                                 "must be running on the pi, beside OpenJVS" % exc)
         raise ValueError("unknown target: %s" % target)
 
     def _live_ensure(self, target, mapping, dev=None):

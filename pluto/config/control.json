@@ -10,7 +10,7 @@
       "id": "pi",
       "label": "Raspberry Pi",
       "sources": ["gamepad", "kinect", "nokia", "keyboard"],
-      "targets": ["hid", "megadrive"]
+      "targets": ["hid", "megadrive", "naomi"]
     }
   ]
 }

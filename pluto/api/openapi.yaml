@@ -91,6 +91,25 @@ paths:
         - { name: source, in: path, required: true, schema: { type: string } }
         - { name: target, in: path, required: true, schema: { type: string } }
       responses: { '200': { description: Mapping }, '404': { description: no mapping } }
+  /services/{node}:
+    get:
+      tags: [services]
+      summary: Services a node declares, with live state
+      parameters:
+        - { name: node, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: Declared services and their state } }
+  /services/{node}/{service}/{op}:
+    post:
+      tags: [services]
+      summary: Start / stop / restart one declared service
+      parameters:
+        - { name: node, in: path, required: true, schema: { type: string } }
+        - { name: service, in: path, required: true, schema: { type: string } }
+        - { name: op, in: path, required: true, schema: { type: string, enum: [start, stop, restart] } }
+      responses:
+        '200': { description: Result and the state the unit ended in }
+        '400': { description: unknown op }
+        '404': { description: node declares no such service }
   /control/config:
     get: { tags: [control], summary: Control hosts and their configured sources / targets, responses: { '200': { description: Config } } }
   /control/signal:

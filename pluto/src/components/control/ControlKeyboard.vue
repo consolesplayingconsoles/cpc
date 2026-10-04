@@ -13,7 +13,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Joystick from 'vue-joystick-component'
 import UiToggle from '../ui/UiToggle.vue'
 import { joystickToAxis, keysToAxis, isDirButton, AXIS_CENTER } from '../../lib/analog'
-import { DRIVE_API } from '../../lib/drive'
+import { driveBase } from '../../lib/drive'
 import { resolveDriveVerb } from '../../lib/driveVerb'
 
 interface LayoutKey { key: string; btn: string; label: string; col: number; row: number }
@@ -174,7 +174,7 @@ const keyMap = computed(() => {
 async function holdPost(btn: string, down: boolean) {
   if (!canDrive.value) return
   try {
-    const r = await fetch(`${DRIVE_API}/control/drive`, {
+    const r = await fetch(`${driveBase()}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'hold', down, btn, target: props.target, source: props.mapSource, mapping: props.mapping, ...(props.targetDev ? { dev: props.targetDev } : {}) }),
     })
@@ -244,7 +244,7 @@ watch(analogKeys, (on) => {
 async function axisPost(name: string, x: number, y: number) {
   if (!canDrive.value) return
   try {
-    const r = await fetch(`${DRIVE_API}/control/drive`, {
+    const r = await fetch(`${driveBase()}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'axis', name, x, y, target: props.target, source: props.mapSource, mapping: props.mapping, ...(props.targetDev ? { dev: props.targetDev } : {}) }),
     })
@@ -289,7 +289,7 @@ function startKeepalive() {
   if (ka || !canDrive.value) return
   ka = window.setInterval(() => {
     if (!canDrive.value) return
-    fetch(`${DRIVE_API}/control/drive`, {
+    fetch(`${driveBase()}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'keepalive' }),
     }).catch(() => {})
@@ -301,7 +301,7 @@ function teardown() {
   releaseAll()
   stopKeepalive()
   if (canDrive.value) {
-    fetch(`${DRIVE_API}/control/drive`, {
+    fetch(`${driveBase()}/control/drive`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'pause' }),
     }).catch(() => {})

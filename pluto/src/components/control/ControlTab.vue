@@ -5,6 +5,7 @@
 // (ClaudeControl). The on-screen keyboard is the one unified controller across all three.
 import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { driveHost } from '../../lib/drive'
 import type { NodeMap } from '../../composables/useNodes'
 import ControlBody from './ControlBody.vue'
 
@@ -28,6 +29,14 @@ onMounted(async () => {
 // target lists stay consistent. Default: lab on the dev build, pi elsewhere.
 const host = computed(() => (route.params.host as string) || (isLab ? 'lab' : 'pi'))
 const curHost = computed(() => hosts.value.find(h => h.id === host.value) || hosts.value[0])
+// A sink only exists on the box that owns its hardware, so the selected host also picks
+// which drive service serves /control/drive. 'lab' is the local one (same origin as
+// Pluto); any other host is reached at its node IP. Without this, a pi-only target such
+// as naomi posts to the Lab, which has no uinput and says so.
+watch([host, () => props.nodes], () => {
+  const id = host.value
+  driveHost.value = (id && id !== 'lab') ? ((props.nodes?.[id]?.ip || '').trim()) : ''
+}, { immediate: true })
 // Picking a host jumps straight to that host's first source (never the empty-source
 // state) so the canon fills target/mapping for the new host.
 function pickHost(h: string) {
@@ -55,7 +64,7 @@ const source = computed(() => (route.params.source as string) || '')
 interface FlatTarget {
   id: string
   label: string
-  drive: 'none' | 'keyboard' | 'pi' | 'roomba' | 'megadrive'   // the sink the drive service opens
+  drive: 'none' | 'keyboard' | 'pi' | 'roomba' | 'megadrive' | 'naomi'   // the sink the drive service opens
   dev: string                                     // pico dev (pi) | roomba node id (roomba)
   kind: 'none' | 'emulator' | 'console' | 'roomba' | 'display'
   ip?: string                                     // roomba: host:port, for the telemetry panel
@@ -98,6 +107,14 @@ const targetOptions = computed<FlatTarget[]>(() => {
       // it 404s like any unimplemented sink (show everything, let the API fail). Text is NOT
       // here -- that's the chat verb '@megadrive text'.
       out.push({ id: 'megadrive', label: 'Mega Drive', drive: 'megadrive', dev: '', kind: 'console' })
+    } else if (cat === 'naomi') {
+      // NAOMI as a CONTROLLER target. Unlike the others, Pluto is NOT in the normal input
+      // path: a pad plugs into the Pi and OpenJVS reads it straight off evdev, so the board
+      // is already playable with Pluto closed. This target is for what a pad CANNOT reach --
+      // coin, test and service -- which Pluto injects into a virtual pad OpenJVS picks up.
+      // That producer is pending, so like 'megadrive' the target ships anyway and the API
+      // answers for itself rather than the UI hiding a thing that exists.
+      out.push({ id: 'naomi', label: 'Naomi', drive: 'naomi', dev: '', kind: 'console' })
     }
   }
   return out

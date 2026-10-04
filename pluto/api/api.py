@@ -46,6 +46,7 @@ from modules.catalogue import send as catalogue_send
 from modules.catalogue import names as catalogue_names
 from modules.homebrew import service as homebrew
 from modules.fxos import listen as fxos_listen
+from modules.services import service as node_services
 
 
 def open_path(path):
@@ -2405,6 +2406,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/connections"), ("GET", "/whoami"), ("GET", "/messages"),
         ("GET", "/deploy/{node}/stream"),
         ("GET", "/mappings"), ("GET", "/mappings/{source}"), ("GET", "/mappings/{source}/{target}"),
+        ("GET", "/services/{node}"), ("POST", "/services/{node}/{service}/{op}"),
         ("GET", "/control/config"),
         ("GET", "/control/signal"), ("GET", "/control/capture"), ("GET", "/control/log"),
         ("GET", "/control/frame"), ("GET", "/control/frame/processed"),
@@ -2545,6 +2547,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parts and parts[0] == "mappings":
             self._handle_mappings(parts)
 
+        elif len(parts) == 2 and parts[0] == "services":
+            self._handle_services(parts[1])
+
         elif parsed.path == "/control/signal":
             self._handle_control_signal_get()
 
@@ -2608,6 +2613,52 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else:
             self._send(404, {"error": "not found"})
 
+    def _handle_services(self, node_id):
+        """GET /services/<node> -> the node's declared services, with live state.
+
+        The list is declared by the NODE (nodes/local/<node>/services.json), so this
+        never knows what any node runs. Nothing is gated on reachability: a node that
+        is off still lists everything it has, all 'unknown', so the drawer shows what
+        a node CARRIES even when it cannot be asked -- the same rule the rest of the
+        drawer follows."""
+        services = node_services.load(self.__class__.base_dir, node_id)
+        if not services:
+            self._send(200, {"node": node_id, "services": []})
+            return
+        _, out = self._node_ssh(node_id, node_services.status_argv(services),
+                                timeout=20, connect_timeout=6)
+        self._send(200, {"node": node_id,
+                         "services": node_services.parse_status(services, out)})
+
+    def _handle_service_op(self, node_id, service_id, op):
+        """POST /services/<node>/<service>/<op> -- op is start, stop or restart.
+
+        Both the op and the unit are resolved against the node's own declaration, so
+        a request can only ever act on a service that node published: the unit name
+        on the systemctl line comes from the file, never from the URL. Replies in the
+        drawer's usual shape ({ok, lines}) and reports the state it ended in, which is
+        the honest answer to "did that work" -- a unit can exit 0 and still die."""
+        if op not in node_services.OPS:
+            self._send(400, {"ok": False, "error": "unknown op '%s'" % op,
+                             "lines": ["ERROR op must be one of: " + ", ".join(node_services.OPS)]})
+            return
+        services = node_services.load(self.__class__.base_dir, node_id)
+        service = node_services.find(services, service_id)
+        if not service:
+            self._send(404, {"ok": False, "error": "node '%s' declares no service '%s'" % (node_id, service_id),
+                             "lines": ["ERROR no such service on this node"]})
+            return
+        rc, out = self._node_ssh(node_id, node_services.op_argv(service, op),
+                                 timeout=60, connect_timeout=6)
+        _, after = self._node_ssh(node_id, node_services.status_argv([service]),
+                                  timeout=20, connect_timeout=6)
+        state = node_services.parse_status([service], after)[0]["state"]
+        lines = [l for l in (out or "").splitlines() if l.strip()]
+        lines.append("%s %s -> %s" % (op, service["unit"], state))
+        ok = (rc == 0) and (state == "inactive" if op == "stop" else state == "active")
+        self._send(200, {"ok": ok, "node": node_id, "service": service_id,
+                         "op": op, "state": state, "lines": lines})
+
     def _handle_mappings(self, parts):
         """RESTful mapping store, organised by event-source dir -- the dir IS the
         filter (no query params, no DB). Mappings are reusable engine config:
@@ -2647,6 +2698,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if parsed.path == "/messages":
             self._handle_post_message()
+        elif len(parts) == 4 and parts[0] == "services":
+            self._handle_service_op(parts[1], parts[2], parts[3])
         elif parsed.path == "/control/listen":
             self._handle_control_listen()
         elif parsed.path == "/roomba-ai/audio":

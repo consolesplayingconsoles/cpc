@@ -540,6 +540,127 @@ class MegadriveSink(Sink):
         self._push()                         # byte 0x00 = all released
 
 
+class NaomiSink(Sink):
+    """Drive the NAOMI by being a controller, not by talking to the board.
+
+    OpenJVS reads ordinary Linux input devices and speaks JVS to the NAOMI, so the
+    shortest route in is to BE one of those devices: this sink creates a uinput pad
+    and presses its keys. OpenJVS re-enumerates in its main loop, so the pad is picked
+    up whenever it appears and nothing cares about start order. The NAOMI itself is
+    never contacted from here -- our contract ends at OpenJVS.
+
+    This exists for what a player's pad cannot send. A Dreamcast controller on the
+    DreamPicoPort reports no SELECT, MODE or stick clicks, so coin, test and service
+    have no route in; they are cabinet events, not panel buttons. The play buttons are
+    published too, so the on-screen pad drives the game as well.
+
+    uinput is written with struct + ioctl rather than a bindings package: the house rule
+    is raw device access over a C-extension dependency, and this stays pure stdlib.
+
+    Pair it with /etc/openjvs/devices/pluto-naomi, which must declare PLAYER 1 -- without
+    it OpenJVS hands this pad the next free player number and coins land on the wrong slot.
+    """
+
+    # Codes this pad publishes. Chosen, not inherited: we ship the matching OpenJVS
+    # mapping file, so these only have to be distinct and stable.
+    _CODES = {
+        "COIN": 0x13e,      # BTN_THUMBR
+        "TEST": 0x13c,      # BTN_MODE
+        "SERVICE": 0x13a,   # BTN_SELECT
+        "START": 0x13b,     # BTN_START
+        "BUTTON_1": 0x120, "BUTTON_2": 0x121, "BUTTON_3": 0x122,   # BTN_TRIGGER, THUMB, THUMB2
+        "BUTTON_4": 0x123, "BUTTON_5": 0x124, "BUTTON_6": 0x125,   # BTN_TOP, TOP2, PINKIE
+        "D_UP": 0x220, "D_DOWN": 0x221, "D_LEFT": 0x222, "D_RIGHT": 0x223,  # BTN_DPAD_*
+    }
+
+    _UI_SET_EVBIT = 0x40045564      # _IOW('U', 100, int)
+    _UI_SET_KEYBIT = 0x40045565     # _IOW('U', 101, int)
+    _UI_DEV_CREATE = 0x5501         # _IO('U', 1)
+    _UI_DEV_DESTROY = 0x5502        # _IO('U', 2)
+    _EV_SYN, _EV_KEY, _SYN_REPORT = 0x00, 0x01, 0x00
+
+    def __init__(self, name="pluto-naomi", path="/dev/uinput"):
+        super(NaomiSink, self).__init__()
+        self._name = name
+        self._path = path
+        self._fd = None
+        self._open()
+
+    def _open(self):
+        import fcntl
+        import struct
+        try:
+            self._fd = os.open(self._path, os.O_WRONLY | os.O_NONBLOCK)
+        except Exception as exc:
+            raise ValueError("can't open %s (%s) -- uinput is root-only, and the drive "
+                             "service must run on the same box as OpenJVS" % (self._path, exc))
+        try:
+            fcntl.ioctl(self._fd, self._UI_SET_EVBIT, self._EV_KEY)
+            for code in self._CODES.values():
+                fcntl.ioctl(self._fd, self._UI_SET_KEYBIT, code)
+            # struct uinput_user_dev: name[80], input_id{bustype,vendor,product,version},
+            # ff_effects_max, then absmax/absmin/absfuzz/absflat, 64 ints each.
+            dev = struct.pack("80s4HI256i", self._name.encode("ascii")[:79],
+                              0x03, 0x1209, 0x7a01, 1, 0, *([0] * 256))
+            os.write(self._fd, dev)
+            fcntl.ioctl(self._fd, self._UI_DEV_CREATE)
+        except Exception as exc:
+            self.close()
+            raise ValueError("can't create the uinput pad (%s)" % exc)
+        print("  [naomi] uinput pad '%s' created with %d keys" % (self._name, len(self._CODES)))
+
+    def _emit(self, code, value):
+        import struct
+        if self._fd is None:
+            return
+        # struct input_event: timeval (two longs), type, code, value. The kernel fills
+        # the timestamp when it is left at zero.
+        for typ, cod, val in ((self._EV_KEY, code, value), (self._EV_SYN, self._SYN_REPORT, 0)):
+            os.write(self._fd, struct.pack("llHHi", 0, 0, typ, cod, val))
+
+    def _code(self, btn):
+        return self._CODES.get(str(btn).upper())
+
+    def press(self, btn):
+        code = self._code(btn)
+        if code is None:
+            return                            # a button this console has no switch for
+        super(NaomiSink, self).press(btn)
+        self._emit(code, 1)
+
+    def release(self, btn):
+        code = self._code(btn)
+        if code is None:
+            return
+        super(NaomiSink, self).release(btn)
+        self._emit(code, 0)
+
+    def pulse(self, btn, ms=90):
+        """A momentary closure, which is what a coin mech and the filter board's PSW1/PSW2
+        actually are. Long enough that the board's per-frame poll cannot miss it."""
+        import time
+        self.press(btn)
+        time.sleep(max(ms, 1) / 1000.0)
+        self.release(btn)
+
+    def keepalive(self):
+        pass                                  # the kernel holds the key state
+
+    def close(self):
+        import fcntl
+        if self._fd is None:
+            return
+        try:
+            fcntl.ioctl(self._fd, self._UI_DEV_DESTROY)
+        except Exception:
+            pass
+        try:
+            os.close(self._fd)
+        except Exception:
+            pass
+        self._fd = None
+
+
 def mappings_dir(base=None):
     """The mapping store. Mappings are CONFIG/DATA, not engine code, so they live
     with Pluto (pluto/config/mappings), NOT inside this package. Pluto sets the
