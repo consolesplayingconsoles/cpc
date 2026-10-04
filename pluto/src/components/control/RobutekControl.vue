@@ -714,8 +714,8 @@ async function signIn() {
   background: var(--surface-3); color: var(--text-muted);
 }
 .rb-pill.is-clean  { background: var(--accent-soft); color: var(--accent-hover); }
-.rb-pill.is-return { background: #fef3c7; color: #92580a; }
-.rb-pill.is-error  { background: #fee2e2; color: #b91c1c; }
+.rb-pill.is-return { background: var(--warn-soft); color: var(--warn-ink); }
+.rb-pill.is-error  { background: var(--bad-soft); color: var(--bad-ink); }
 .rb-offline {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px; font-weight: 500; color: var(--text-muted);
@@ -779,7 +779,7 @@ async function signIn() {
 .rb-row-meta { font-size: 11px; color: var(--text-muted); }
 .rb-row-tags { display: flex; align-items: center; gap: 5px; }
 .rb-tag { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: var(--surface-3); color: var(--text-muted); }
-.rb-tag.sweep { background: #fef3c7; color: #92580a; }
+.rb-tag.sweep { background: var(--warn-soft); color: var(--warn-ink); }
 .rb-pet { font-size: 14px; color: var(--accent); flex-shrink: 0; }
 .rb-map-paw { fill: var(--accent); pointer-events: none; animation: rb-paw-in 0.25s ease-out; }
 .rb-paw-bg { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }

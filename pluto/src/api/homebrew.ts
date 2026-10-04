@@ -56,6 +56,7 @@ export interface HomebrewItem {
   paramsPaths: string[]   // the .env files the params are saved to (game's, then its own)
   running: boolean
   release: HomebrewRelease | null   // from a RELEASE file: newest stable GitHub release
+  noRelease: string | null          // MOD_NO_RELEASE: why this one can never be published
   game: HomebrewGame | null         // from the game's CATALOGUE file
   output: HomebrewOutput | null     // last build output, if the file still exists
   sendTargets: HomebrewTarget[]     // nodes Send can take it to (catalogue send, or its deploy.sh)

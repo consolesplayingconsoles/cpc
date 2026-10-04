@@ -134,9 +134,9 @@ const metrics = computed(() => {
 
 /* pills follow the app's soft-badge convention (like RobutekControl's rb-pill) */
 .tel__pill { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 999px; background: var(--surface-3); color: var(--text-muted); }
-.tel__pill.is-ok { background: var(--ok-soft, var(--surface-3)); color: var(--ok); }
-.tel__pill.is-warn { background: var(--warn-soft, var(--surface-3)); color: var(--warn); }
-.tel__pill.is-bad { background: var(--bad-soft, var(--surface-3)); color: var(--bad); }
+.tel__pill.is-ok { background: var(--ok-soft); color: var(--ok-ink); }
+.tel__pill.is-warn { background: var(--warn-soft); color: var(--warn-ink); }
+.tel__pill.is-bad { background: var(--bad-soft); color: var(--bad-ink); }
 .tel__pill.is-accent { background: var(--accent-soft); color: var(--accent-hover); }
 .tel__pill.is-idle { background: var(--surface-3); color: var(--text-muted); }
 

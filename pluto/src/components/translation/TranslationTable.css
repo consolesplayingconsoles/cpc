@@ -58,9 +58,9 @@
 
 .stat { padding: 2px 6px; border-radius: var(--r-sm); font-weight: 500; }
 .stat.pending { background: #dbeafe; color: #2563eb; }
-.stat.ok   { background: #dcfce7; color: var(--ok); }
-.stat.warn { background: #fef3c7; color: var(--warn); }
-.stat.over { background: #fee2e2; color: var(--bad); }
+.stat.ok   { background: var(--ok-soft); color: var(--ok-ink); }
+.stat.warn { background: var(--warn-soft); color: var(--warn-ink); }
+.stat.over { background: var(--bad-soft); color: var(--bad-ink); }
 .stat.muted { color: var(--text-faint); padding: 0; }
 .stat-sep { color: var(--line-strong); }
 
@@ -316,7 +316,7 @@
   transition: opacity 0.1s;
 }
 .speaker-badge.inferred {
-  background: #fef3c7;
+  background: var(--warn-soft);
   color: #92400e;
 }
 .speaker-badge.unconfirmed {
@@ -324,12 +324,12 @@
   color: var(--text-faint);
 }
 .speaker-badge.confirmed {
-  background: #dcfce7;
+  background: var(--ok-soft);
   color: #166534;
   cursor: default;
 }
 .speaker-badge.rejected {
-  background: #fee2e2;
+  background: var(--bad-soft);
   color: var(--bad);
   cursor: default;
 }
@@ -413,9 +413,9 @@
 }
 /* (the coloured variants below are for the SCENE-HEAD budget cell, which carries the box verdict) */
 .bytes-cell.pending { background: #eff6ff; color: #2563eb; }
-.bytes-cell.ok   { background: #dcfce7; color: var(--ok); }
-.bytes-cell.warn { background: #fef3c7; color: var(--warn); }
-.bytes-cell.over { background: #fee2e2; color: var(--bad); }
+.bytes-cell.ok   { background: var(--ok-soft); color: var(--ok-ink); }
+.bytes-cell.warn { background: var(--warn-soft); color: var(--warn-ink); }
+.bytes-cell.over { background: var(--bad-soft); color: var(--bad-ink); }
 
 /* Cumulative box fill under each line: how full the scene's slack is up to (and incl.) this line,
    as a bar + a running aggregate number. Grows as you go down; turns red on the line where the scene
