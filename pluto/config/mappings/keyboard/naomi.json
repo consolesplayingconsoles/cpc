@@ -1,0 +1,114 @@
+{
+  "_comment": "Keyboard source -> NAOMI, through OpenJVS on the Pi. Button names are JVS's own, as OpenJVS's 'generic' game map uses them: an 8-way lever, BUTTON_1..6 and START. They are deliberately unlabelled beyond their numbers, because what BUTTON_1 does is per game, not per console. COIN, TEST and SERVICE are NOT here and are not buttons: a coin goes in a slot and test/service live inside the coin door, so they are cabinet events, not player controls. They belong to the target, not to whatever source is driving the game.",
+  "controller": "Naomi",
+  "controls": {
+    "Enter": "START",
+    "action": "BUTTON_1",
+    "cancel": "BUTTON_2"
+  },
+  "keys": {
+    "D_UP": "w",
+    "D_DOWN": "s",
+    "D_LEFT": "a",
+    "D_RIGHT": "d",
+    "BUTTON_1": "j",
+    "BUTTON_2": "k",
+    "BUTTON_3": "l",
+    "BUTTON_4": "u",
+    "BUTTON_5": "i",
+    "BUTTON_6": "o",
+    "START": "enter"
+  },
+  "layout": [
+    {
+      "key": "w",
+      "btn": "D_UP",
+      "label": "Up",
+      "col": 2,
+      "row": 2
+    },
+    {
+      "key": "a",
+      "btn": "D_LEFT",
+      "label": "Left",
+      "col": 1,
+      "row": 3
+    },
+    {
+      "key": "d",
+      "btn": "D_RIGHT",
+      "label": "Right",
+      "col": 3,
+      "row": 3
+    },
+    {
+      "key": "s",
+      "btn": "D_DOWN",
+      "label": "Down",
+      "col": 2,
+      "row": 4
+    },
+    {
+      "key": "Enter",
+      "btn": "START",
+      "label": "Start",
+      "col": 5,
+      "row": 2
+    },
+    {
+      "key": "u",
+      "btn": "BUTTON_4",
+      "label": "4",
+      "col": 7,
+      "row": 2
+    },
+    {
+      "key": "i",
+      "btn": "BUTTON_5",
+      "label": "5",
+      "col": 8,
+      "row": 2
+    },
+    {
+      "key": "o",
+      "btn": "BUTTON_6",
+      "label": "6",
+      "col": 9,
+      "row": 2
+    },
+    {
+      "key": "j",
+      "btn": "BUTTON_1",
+      "label": "1",
+      "col": 7,
+      "row": 3
+    },
+    {
+      "key": "k",
+      "btn": "BUTTON_2",
+      "label": "2",
+      "col": 8,
+      "row": 3
+    },
+    {
+      "key": "l",
+      "btn": "BUTTON_3",
+      "label": "3",
+      "col": 9,
+      "row": 3
+    }
+  ],
+  "colors": {
+    "D_UP": "#4b5058",
+    "D_DOWN": "#4b5058",
+    "D_LEFT": "#4b5058",
+    "D_RIGHT": "#4b5058",
+    "BUTTON_1": "#2d8ec9",
+    "BUTTON_2": "#2d8ec9",
+    "BUTTON_3": "#2d8ec9",
+    "BUTTON_4": "#36a657",
+    "BUTTON_5": "#36a657",
+    "BUTTON_6": "#36a657",
+    "START": "#c0392b"
+  }
+}

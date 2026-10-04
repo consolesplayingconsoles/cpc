@@ -1,0 +1,10 @@
+{
+  "services": [
+    { "id": "cpc-hub",   "unit": "cpc-hub.service" },
+    { "id": "cpc-drive", "unit": "cpc-drive.service" },
+    { "id": "openjvs",   "unit": "openjvs.service" },
+    { "id": "dreampi",   "unit": "dreampi.service" },
+    { "id": "dnsmasq",   "unit": "dnsmasq.service" },
+    { "id": "samba",     "unit": "smbd.service" }
+  ]
+}

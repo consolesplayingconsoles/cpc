@@ -269,7 +269,6 @@ async function startMic(): Promise<void> {
     void refreshInputs()      // labels are populated now that permission exists
   } catch {
     error.value = 'Microphone unavailable'
-    micOn.value = false
     return
   }
   const Ctor = window.AudioContext

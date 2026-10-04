@@ -34,7 +34,7 @@
     "to": "vmu",
     "label": "Maple"
   },
-    {
+  {
     "from": "dc",
     "to": "pi",
     "label": "GP2040-CE / DreamPi"
@@ -48,11 +48,6 @@
     "from": "gba",
     "to": "wii",
     "label": "GBA Link"
-  },
-  {
-    "from": "ws",
-    "to": "pi",
-    "label": "USB"
   },
   {
     "from": "dreame",
@@ -82,7 +77,7 @@
   {
     "from": "sms",
     "to": "pi",
-    "label": "Pending link"
+    "label": "Serial / Pico"
   },
   {
     "from": "megadrive",
@@ -128,5 +123,19 @@
     "from": "crazy-roomba",
     "to": "gateway",
     "label": "WiFi"
+  },
+  {
+    "from": "naomi",
+    "to": "pi",
+    "label": "JVS / OpenJVS"
+  },
+  {
+    "from": "naomi",
+    "to": "gateway",
+    "label": "NetDIMM"
+  },
+  {
+    "from": "psx",
+    "label": "Pending link"
   }
 ]
