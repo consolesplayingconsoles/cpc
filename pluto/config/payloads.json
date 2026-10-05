@@ -1,7 +1,7 @@
 {
   "default": ["client"],
   "pluto": ["drive", "server", "hub"],
-  "pi": ["client", "hub", "drive"],
+  "pi": ["client", "hub", "drive", "ps2"],
   "batocera": ["translate"],
   "roomba-rally": ["pico"],
   "crazy-roomba": ["pico"]

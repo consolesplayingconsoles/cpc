@@ -3063,7 +3063,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         running emulator) and restart-es (restart EmulationStation, which also drops any
         launches ES queued while a game ran). Any node with an SD card (SD_LABEL): unmount-sd,
         so the card can be pulled -- the Pi hub mounts a card on insert and keeps it mounted,
-        which is what makes it browsable. Anything else isn't built yet -- we surface the
+        which is what makes it browsable. A PS2 drive on the hub (PS2_HDD_HOST): eject-hdd. Anything else isn't built yet -- we surface the
         capability in the drawer and let the API say so honestly, rather than hide it."""
         if action == "unmount-sd":
             cfg = (self.__class__.node_roster or {}).get(node_id) or {}
@@ -3078,6 +3078,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             print("  [NATIVE:%s] unmount-sd: %s" % (node_id, " | ".join(lines)))
             self._send(200, {"ok": not any(l.startswith("WARN") for l in lines), "lines": lines,
                              "error": next((l for l in lines if l.startswith("WARN")), "")}); return
+        if action == "eject-hdd":
+            # the PS2 drive on the hub: ps2hdd.py eject (refuses while a send is writing)
+            host = self._ps2_hub(node_id)
+            if not host:
+                self._send(400, {"ok": False, "error": "%s has no drive on the hub (PS2_HDD_HOST)" % node_id}); return
+            r = subprocess.run(["ssh", "-o", "ConnectTimeout=5", host, "sudo -n python3 %s eject" % self.PS2_HUB_SCRIPT],
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=120)
+            lines = [l for l in r.stdout.splitlines() if l.strip()]
+            print("  [NATIVE:%s] eject-hdd: %s" % (node_id, " | ".join(lines)))
+            self._send(200, {"ok": r.returncode == 0, "lines": lines,
+                             "error": "" if r.returncode == 0 else (lines[-1] if lines else "rc %d" % r.returncode)}); return
         if node_id == "batocera" and action in ("quit-game", "restart-es"):
             script = (self._BATOCERA_QUIT + 'echo quit') if action == "quit-game" else \
                      'curl -s -m 10 http://127.0.0.1:1234/restart >/dev/null; echo restarting'
@@ -4796,14 +4807,52 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """Nodes whose games live on a drive only root can read (PS2_HDD_BYTES: the PS2's
         APA HDD on this Mac). Pluto never reads it: it hands out a Terminal command
         (nodes/local/<node>/scripts/ps2hdd.py) that reads/writes the drive and POSTs the
-        drive's game list back to /catalogue/<system>/scan/<node>."""
+        drive's game list back to /catalogue/<system>/scan/<node>. A drive on PS2_HDD_HOST
+        (the Pi hub, passwordless sudo) is not one of these: Pluto drives it (_ps2_hub_*)."""
         return sorted(n for n, cfg in (self.__class__.node_roster or {}).items()
-                      if (cfg.get("PS2_HDD_BYTES") or "").strip())
+                      if (cfg.get("PS2_HDD_BYTES") or "").strip() and not self._ps2_hub(n))
 
     def _admin_command(self, node, args):
         import shlex
         script = os.path.normpath(os.path.join(self.__class__.base_dir, "..", "nodes", "local", node, "scripts", "ps2hdd.py"))
         return "sudo python3 " + " ".join(shlex.quote(a) for a in [script] + args)
+
+    PS2_HUB_SCRIPT = "/opt/cpc/ps2/scripts/ps2hdd.py"     # the Pi's ps2 deploy payload
+
+    def _ps2_hub(self, node):
+        """The SSH alias of the machine a node's PS2 drive is plugged into (PS2_HDD_HOST), or ''."""
+        return (((self.__class__.node_roster or {}).get(node) or {}).get("PS2_HDD_HOST") or "").strip()
+
+    def _catalogue_hdd_nodes(self):
+        """{node: list_files} for PS2 drives on the hub: sync reads the drive's game list there
+        (ps2hdd.py list, under sudo) and merges it like any scan."""
+        out = {}
+        for n, cfg in (self.__class__.node_roster or {}).items():
+            host = self._ps2_hub(n)
+            if host and (cfg.get("PS2_HDD_BYTES") or "").strip():
+                def list_files(host=host):
+                    r = subprocess.run(["ssh", "-o", "ConnectTimeout=10", host,
+                                        "sudo -n python3 %s list" % self.PS2_HUB_SCRIPT],
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
+                    if r.returncode != 0:
+                        raise RuntimeError((r.stdout.strip() or r.stderr.strip() or "ps2hdd.py list failed").splitlines()[-1])
+                    return json.loads(r.stdout.strip().splitlines()[-1])["files"]
+                out[n] = list_files
+        return out
+
+    def _ps2_hub_run(self, node, args, emit):
+        """Run nodes/local/<node>/scripts/ps2hdd-hub.py here (it sends each game to the hub and
+        installs it there under sudo; the drive's list comes back through the scan POST).
+        Every output line goes to emit. -> (returncode, lines)."""
+        script = os.path.normpath(os.path.join(self.__class__.base_dir, "..", "nodes", "local", node, "scripts", "ps2hdd-hub.py"))
+        p = subprocess.Popen([sys.executable, "-u", script] + list(args), stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, errors="replace")
+        lines = []
+        for line in p.stdout:
+            line = line.rstrip("\n")
+            lines.append(line)
+            emit(line)
+        return p.wait(), lines
 
     def _handle_catalogue_send(self, system, body):
         """POST form of the send (see _catalogue_send_run): one JSON answer at the end."""
@@ -4887,6 +4936,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         workdir = tempfile.mkdtemp(prefix="cpc-send-")
         ctx = {"target": target, "system": system, "locate": locate, "emit": emit,
                "command": lambda args: self._admin_command(target, args),
+               "run": (lambda args: self._ps2_hub_run(target, args, emit)) if kind == "hdd" and self._ps2_hub(target) else None,
                "rom_ext": lambda src: self._send_rom_ext(system, src), "unpack": kind == "sd",
                "card": self._send_dest(kind, target, target_cfg, system, ctx_emit=emit) if kind in ("local", "batocera", "sd", "ftp", "gdemu") else None,
                # gdemu reads a disc's IP.BIN at the source for openMenu's list
@@ -5493,7 +5543,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 lab_roms=(self.__class__.config.get("ROMS_PATH") or "").strip() or None,
                 sd_nodes=self._catalogue_sd_nodes(), ftp_nodes=self._catalogue_ftp_nodes(),
                 ftp_client=self._ftp_client(),
-                admin_nodes={n: self._admin_command(n, ["sync"]) for n in self._catalogue_admin_nodes()})
+                admin_nodes={n: self._admin_command(n, ["sync"]) for n in self._catalogue_admin_nodes()},
+                hdd_nodes=self._catalogue_hdd_nodes())
             emit("done", "ok")          # per-node / per-system failures are WARN lines above
         except Exception as exc:
             emit("line", "sync crashed: %s" % exc)
@@ -6111,6 +6162,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "folder": bool(smb),
                 # Set = this console's saves live on a card read via the Pi hub.
                 "sd":     (console_cfg.get("SD_LABEL") or "").strip() or None,
+                # Set = this console's drive (the PS2 HDD) is plugged into the Pi hub.
+                "hdd":    bool((console_cfg.get("PS2_HDD_HOST") or "").strip() and (console_cfg.get("PS2_HDD_BYTES") or "").strip()),
                 # Set = the Media tab can send games to this node (catalogue send strategy:
                 # PS2 drive, or an SD card with SD_ROMS_DIR). sendSystems narrows which of
                 # the node's systems (SD_SEND_SYSTEMS), None = all it hosts.

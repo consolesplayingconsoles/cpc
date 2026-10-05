@@ -18,6 +18,7 @@
 #    client    -- the python TUI client (pluto-python-tui + vendored deps).
 #    hub       -- the Pi's bridge backend; its always-up op receiver runs under systemd.
 #    translate -- the Dreamcast translation API on Batocera, under batocera-services.
+#    ps2       -- the PS2 HDD script, for a drive plugged into this node (ps2 PS2_HDD_HOST).
 #
 #  Usage: ./deploy.sh <path-to-env-file>
 #    ./deploy.sh pluto/.env            # the Pluto host  -> server payload
@@ -316,6 +317,20 @@ payload_translate() {
     $SSH "F=\$(fuser 7711/tcp 2>/dev/null); [ -n \"\$F\" ] && kill \$F 2>/dev/null; sleep 1; setsid sh ${TR_DIR}/run.sh serve > ${TR_DIR}/service.log 2>&1 < /dev/null &"
     echo "started via run.sh (no batocera-services)"
   fi
+}
+
+# ps2 -- the PS2 HDD script (nodes/local/ps2/scripts) + the ps2 node .env, for the PS2 drive
+# plugged into this node. Lands at ${REMOTE_ROOT}/ps2; Pluto's commands run it over SSH
+# (ps2hdd-hub.py on the Mac). Nothing runs at deploy: hdl_dump is built once on the node
+# with scripts/build-hdl-dump.sh.
+payload_ps2() {
+  echo "##STEP:sync"
+  [[ -f nodes/local/ps2/.env ]] || { echo "[ERROR] nodes/local/ps2/.env not found"; exit 1; }
+  $SSH "mkdir -p ${REMOTE_ROOT}/ps2/scripts"
+  tar --no-xattrs --no-fflags --no-mac-metadata -C nodes/local/ps2/scripts \
+      -cf - ps2hdd.py build-hdl-dump.sh | $SSH "tar -xf - -C ${REMOTE_ROOT}/ps2/scripts"
+  $SSH "cat > ${REMOTE_ROOT}/ps2/.env" < nodes/local/ps2/.env
+  echo "sync ok"
 }
 
 payload_pico() {

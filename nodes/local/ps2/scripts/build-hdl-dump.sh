@@ -1,6 +1,7 @@
 #!/bin/bash
-# Build hdl_dump (ps2homebrew/hdl-dump, pinned) for this Mac and install it at HDL_DUMP
-# from nodes/local/ps2/.env. Needs git + Xcode command line tools. No sudo.
+# Build hdl_dump (ps2homebrew/hdl-dump, pinned) for this machine (macOS or Linux, e.g. the Pi
+# hub) and install it at HDL_DUMP from the ps2 node .env. Needs git + a C compiler (Xcode
+# command line tools / gcc + make). No sudo.
 set -e
 
 COMMIT=32c296c
