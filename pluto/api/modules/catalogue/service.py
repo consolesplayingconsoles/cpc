@@ -242,6 +242,19 @@ def physical_only(root):
     return {"games": out}
 
 
+def deleted_games(root):
+    """Games whose every copy is gone from its node (files known, none present), across all
+    systems: the cleanup list. info = the nodes they were on."""
+    out = []
+    for s in systems(root):
+        system = s["system"]
+        for g in system_view(root, system)["games"]:
+            if g["files"] and not g["nodes"]:
+                was = sorted(set(f.get("node") for f in g["files"] if f.get("node")))
+                out.append({"system": system, "key": g["key"], "title": g["title"], "info": ", ".join(was)})
+    return {"games": out}
+
+
 def favourite_games(root):
     """Every game starred on any system, as one list: favourites are how you say "these
     are the ones I play", so they deserve a view that does not care which console. Only

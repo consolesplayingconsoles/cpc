@@ -80,8 +80,9 @@ watch(() => props.active, (a) => { if (a) load() }, { immediate: true })
 // ── Cross-system game lists, grouped by system; click one -> its drawer.
 //   missing:  games with no image linked in the catalogue (local only)
 //   physical: games you own on a shelf with no digital copy on any node
+//   deleted:  games whose every copy is gone from its node (to clean up)
 //   hardware: your consoles and peripherals (rows open the system's page)
-type ListMode = 'missing' | 'physical' | 'hardware'
+type ListMode = 'missing' | 'physical' | 'deleted' | 'hardware'
 // 'hardware' is a VIEW of its own; the game lists are three FILTERS that stack (AND): each
 // one keeps only the games in its list, so Physical only + Missing covers = shelf games
 // with no digital copy AND no art, and Favourites narrows either.
@@ -89,18 +90,20 @@ const listMode = ref<'hardware' | ''>('')
 const physOnly = ref(false)
 const missingOnly = ref(false)
 const favGames = ref(false)
-const gameListOpen = computed(() => physOnly.value || missingOnly.value || favGames.value)
+const deletedGames = ref(false)
+const gameListOpen = computed(() => physOnly.value || missingOnly.value || favGames.value || deletedGames.value)
 // A search wins over the list views (Favourites, Physical only, Missing covers) the same way
 // it already ignores the grid filters: typing shows every match, clearing it brings the list
 // you were in straight back.
 const missingOpen = computed(() => (listMode.value === 'hardware' || gameListOpen.value) && !systemFilter.value.trim())
-const lists = ref<Record<ListMode | 'favourites', MissingCover[] | null>>({ missing: null, physical: null, hardware: null, favourites: null })
+const lists = ref<Record<ListMode | 'favourites', MissingCover[] | null>>({ missing: null, physical: null, deleted: null, hardware: null, favourites: null })
 const missing = computed<MissingCover[] | null>(() => {
   if (listMode.value === 'hardware') return lists.value.hardware
   const parts: (MissingCover[] | null)[] = []
   if (physOnly.value) parts.push(lists.value.physical)
   if (missingOnly.value) parts.push(lists.value.missing)
   if (favGames.value) parts.push(lists.value.favourites)
+  if (deletedGames.value) parts.push(lists.value.deleted)
   if (!parts.length || parts.some(p => !p)) return null          // off, or still loading
   const [first, ...rest] = parts as MissingCover[][]
   const keep = rest.map(l => new Set(l.map(m => m.system + '/' + m.key)))
@@ -114,6 +117,7 @@ async function loadList(mode: ListMode | 'favourites') {
     const r = mode === 'missing' ? await catalogueApi.missingCovers()
       : mode === 'physical' ? await catalogueApi.physicalOnly()
       : mode === 'favourites' ? await catalogueApi.favourites()
+      : mode === 'deleted' ? await catalogueApi.deleted()
       : await catalogueApi.hardware()
     lists.value[mode] = r.games
   } catch {
@@ -123,8 +127,8 @@ async function loadList(mode: ListMode | 'favourites') {
   }
 }
 // One toggle for each game filter; switching one on leaves the Hardware view.
-async function toggleGameFilter(which: 'physical' | 'missing' | 'favourites') {
-  const flag = which === 'physical' ? physOnly : which === 'missing' ? missingOnly : favGames
+async function toggleGameFilter(which: 'physical' | 'missing' | 'favourites' | 'deleted') {
+  const flag = which === 'physical' ? physOnly : which === 'missing' ? missingOnly : which === 'deleted' ? deletedGames : favGames
   flag.value = !flag.value
   if (flag.value) {
     listMode.value = ''
@@ -133,7 +137,7 @@ async function toggleGameFilter(which: 'physical' | 'missing' | 'favourites') {
   }
 }
 const toggleFavGames = () => toggleGameFilter('favourites')
-function clearGameFilters() { physOnly.value = missingOnly.value = favGames.value = false }
+function clearGameFilters() { physOnly.value = missingOnly.value = favGames.value = deletedGames.value = false }
 async function toggleList(mode: 'hardware') {
   listMode.value = listMode.value === mode ? '' : mode
   if (listMode.value) { clearGameFilters(); await loadList(mode) }
@@ -211,7 +215,7 @@ const hitsBySystem = computed(() => {
 const favSystemsOnly = ref(false)
 const ownedOnly = ref(true)                   // on by default: your own consoles first
 const gridFilters = computed(() => [favSystemsOnly.value, ownedOnly.value,
-  physOnly.value, missingOnly.value, favGames.value].filter(Boolean).length)
+  physOnly.value, missingOnly.value, favGames.value, deletedGames.value].filter(Boolean).length)
 const gridFilterOpen = ref(false)
 // ...and a console filter switched on clears the game lists, back to the grid.
 watch([favSystemsOnly, ownedOnly], ([f, o], [pf, po]) => { if ((f && !pf) || (o && !po)) clearGameFilters() })
@@ -385,6 +389,8 @@ async function openPeek(sys: string, key: string) {
 async function reloadPeek() {
   if (!peek.value) return
   try { peekViews.value[peek.value.system] = await catalogueApi.system(peek.value.system) } catch { /* keep the old copy */ }
+  // a copy forgotten from the drawer leaves the Deleted list
+  if (deletedGames.value) try { lists.value.deleted = (await catalogueApi.deleted()).games } catch { /* keep the old list */ }
 }
 async function togglePeekFavourite(g: Game, on: boolean) {
   g.favourite = on
@@ -531,7 +537,8 @@ function sendAll(node: string, name: string, path?: string, from?: string, game?
             <span class="md__menu-sep">Games</span>
             <label><input :checked="favGames" type="checkbox" @change="toggleFavGames()" /> Favourites</label>
             <label><input :checked="physOnly" type="checkbox" @change="toggleGameFilter('physical')" /> Physical only</label>
-            <label><input :checked="missingOnly" type="checkbox" @change="toggleGameFilter('missing')" /> Missing covers<template v-if="lists.missing"> ({{ lists.missing.length }})</template></label>
+            <label><input :checked="missingOnly" type="checkbox" @change="toggleGameFilter('missing')" /> Missing covers</label>
+            <label><input :checked="deletedGames" type="checkbox" @change="toggleGameFilter('deleted')" /> Deleted</label>
           </div>
         </span>
         <!-- what the grid shows: consoles or your hardware, a select like a system page's Cards/List -->
@@ -561,11 +568,12 @@ function sendAll(node: string, name: string, path?: string, from?: string, game?
           <button v-if="favGames" class="md__pill" @click="toggleFavGames()">Favourite games ✕</button>
           <button v-if="physOnly" class="md__pill" @click="toggleGameFilter('physical')">Physical only ✕</button>
           <button v-if="missingOnly" class="md__pill" @click="toggleGameFilter('missing')">Missing covers ✕</button>
+          <button v-if="deletedGames" class="md__pill" @click="toggleGameFilter('deleted')">Deleted ✕</button>
           <button class="md__pill-clear" @click="favSystemsOnly = ownedOnly = false; clearGameFilters()">Clear all</button>
         </span>
         <template v-if="missingOpen">
           <UiState v-if="missingLoading" loading>Loading…</UiState>
-          <UiState v-else-if="missing && !missing.length">{{ listMode === 'hardware' ? 'No hardware recorded.' : [physOnly, missingOnly, favGames].filter(Boolean).length > 1 ? 'No results for these filters.' : favGames ? 'No favourite games yet.' : missingOnly ? 'Every game has a cover.' : 'Every physical game has a digital copy.' }}</UiState>
+          <UiState v-else-if="missing && !missing.length">{{ listMode === 'hardware' ? 'No hardware recorded.' : [physOnly, missingOnly, favGames, deletedGames].filter(Boolean).length > 1 ? 'No results for these filters.' : favGames ? 'No favourite games yet.' : deletedGames ? 'No deleted games.' : missingOnly ? 'Every game has a cover.' : 'Every physical game has a digital copy.' }}</UiState>
           <section v-for="[sys, list] in missingBySystem" :key="sys" class="md__missing">
             <button class="md__section md__fold" :aria-expanded="!isFolded(sys, list.length)" @click="toggleFold(sys, list.length)">
               <svg class="md__fold-chev" :class="{ 'is-open': !isFolded(sys, list.length) }" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
