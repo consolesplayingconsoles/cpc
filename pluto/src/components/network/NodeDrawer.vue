@@ -120,6 +120,7 @@ watch(() => props.id, () => { nativeNote.value = '' })
 function nativeTitle(action: string): string {
   const on = ' on ' + props.node.name
   if (action === 'unmount-sd') return `Unmount ${props.node.sd ?? props.node.name} SD`
+  if (action === 'eject-hdd')  return `Eject ${props.node.name} drive`
   if (action === 'quit-game')  return 'Quit game' + on
   if (action === 'restart-es') return 'Restart EmulationStation' + on
   if (action === 'flash')      return 'Flash Homebrew' + on
@@ -348,6 +349,17 @@ function postCommand(text: string) {
             <span>Game Library</span>
           </UiActionRow>
         </template>
+        <p v-if="nativeNote" class="nd__hint is-bad">{{ nativeNote }}</p>
+      </section>
+
+      <!-- same for a console's drive on the hub (the PS2 HDD): eject before pulling it -->
+      <section v-if="node.hdd" class="nd__sec">
+        <p class="nd__lbl">Drive</p>
+        <UiActionRow :disabled="!!nativeBusy" @click="nativeAction('eject-hdd')">
+          <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 15h14l-7-9z"/><path d="M5 19h14"/></svg>
+          <span>Eject drive</span>
+          <span v-if="nativeBusy === 'eject-hdd'" class="nd__act-note">Ejecting…</span>
+        </UiActionRow>
         <p v-if="nativeNote" class="nd__hint is-bad">{{ nativeNote }}</p>
       </section>
 

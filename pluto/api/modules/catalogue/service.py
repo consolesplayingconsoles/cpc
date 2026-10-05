@@ -467,7 +467,7 @@ def _scan_ftp(client, host, dirs):
 
 
 def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=BATOCERA_ROMS, lab_roms=None, sd_nodes=None,
-         admin_nodes=None, only=None, ftp_nodes=None, ftp_client=None):
+         admin_nodes=None, only=None, ftp_nodes=None, ftp_client=None, hdd_nodes=None):
     """Sync one system ('*' = everything). emit(line) streams progress.
     consoles_config = config/consoles.json (nodeConsoles for hosts, systems for headers).
 
@@ -481,6 +481,8 @@ def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=B
     SD_ROMS_DIR / SD_NAME_STRIP -- the last one for a card that numbers its game files).
     admin_nodes = {node: command} for drives only root can read (the PS2 HDD): sync prints the
     command to run in Terminal, which reads the drive and POSTs it back (merge_posted).
+    hdd_nodes = {node: list_files} for such a drive on a machine Pluto reaches with sudo (the
+    PS2 HDD on the Pi hub): list_files() -> [{"path", "size"}], scanned like any node.
 
     Two phases. SCANS run in parallel, one thread per node: they only read. MERGES then
     run one at a time on this thread, because two nodes can write the same system's
@@ -524,6 +526,16 @@ def sync(root, system, consoles_config, run_ssh, saves_lookup, emit, now, roms=B
             if target and (system == "*" or system == target):
                 jobs[node] = (lambda f=f, target=target:
                               {target: {"files": _scan_ftp(ftp_client, f["host"], f["dirs"]), "gamelist": ""}})
+    hdd_nodes = hdd_nodes or {}
+    for node in hosts:
+        if node in hdd_nodes:
+            systems_of = [c for c in (node_consoles.get(node) or []) if c != "*"]
+            target = systems_of[0] if systems_of else None
+            if target and (system == "*" or system == target):
+                jobs[node] = (lambda fn=hdd_nodes[node], target=target:
+                              {target: {"files": [{"path": str(f["path"]), "size": int(f.get("size") or 0),
+                                                   "inner": None, "header": None} for f in fn()],
+                                        "gamelist": ""}})
     admin_nodes = admin_nodes or {}
     for node in hosts:
         if node in admin_nodes:

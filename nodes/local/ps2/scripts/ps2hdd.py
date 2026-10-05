@@ -4,6 +4,8 @@ ps2hdd.py -- install PS2 games from this Mac onto the PS2's internal HDD (APA fo
 
     sudo python3 ps2hdd.py status
     sudo python3 ps2hdd.py sync
+    sudo python3 ps2hdd.py list
+    sudo python3 ps2hdd.py eject
     sudo python3 ps2hdd.py install [--dry-run] [--allow-same-id] [FILE ...] [--game NAME SOURCE ...]
     sudo python3 ps2hdd.py rename "OLD NAME" "NEW NAME"
 
@@ -19,7 +21,7 @@ user who ran sudo (their ~/.ssh config) into PS2_HDD_WORK_PATH first. sudo is ne
 read/write the raw disk.
 
 Every run checks the drive first and stops with an error when any check fails:
-  - an external USB disk of exactly PS2_HDD_BYTES (pick with --disk diskN if several)
+  - an external USB disk of exactly PS2_HDD_BYTES (pick with --disk diskN / sdX if several)
   - a PS2 APA header (APA + __mbr) in sector 0
 
 install, per game:
@@ -119,36 +121,56 @@ def _plist(args):
     return plistlib.loads(subprocess.check_output(["diskutil", args[0], "-plist"] + args[1:]))
 
 
+def _disks():
+    """-> [(name, {"size", "usb", "whole", "internal"})] for the candidate disks, per OS:
+    macOS = diskutil's external physical disks, Linux = lsblk's whole disks."""
+    if sys.platform == "darwin":
+        out = []
+        for n in _plist(["list", "external", "physical"]).get("WholeDisks") or []:
+            i = _plist(["info", n])
+            out.append((n, {"size": i.get("TotalSize", i.get("Size")), "usb": i.get("BusProtocol") == "USB",
+                            "bus": i.get("BusProtocol"), "whole": bool(i.get("WholeDisk")),
+                            "internal": i.get("Internal", True)}))
+        return out
+    rows = json.loads(subprocess.check_output(["lsblk", "-J", "-b", "-d", "-o", "NAME,SIZE,TRAN,TYPE"]).decode("utf-8"))
+    return [(r["name"], {"size": int(r["size"] or 0), "usb": r.get("tran") == "usb", "bus": r.get("tran"),
+                         "whole": r.get("type") == "disk", "internal": r.get("tran") != "usb"})
+            for r in rows.get("blockdevices") or [] if r.get("type") == "disk"]
+
+
 def find_drive(expected, disk=None):
-    """-> {"disk": "disk6", "raw": "/dev/rdisk6", "dev": "/dev/disk6"} after every safety check.
-    hdl_dump gets the buffered BLOCK device (dev): its game writes fail midway on macOS's raw
-    character device, leaving a half-made partition. Header reads here use raw."""
+    """-> {"disk": "disk6", "raw": "/dev/rdisk6", "dev": "/dev/disk6"} after every safety check
+    (Linux: "sda", raw and dev both /dev/sda). hdl_dump gets the buffered BLOCK device (dev):
+    its game writes fail midway on macOS's raw character device, leaving a half-made
+    partition. Header reads here use raw."""
+    found = _disks()
     if disk:
-        names = [disk.replace("/dev/", "").replace("rdisk", "disk")]
+        name = disk.replace("/dev/", "").replace("rdisk", "disk")
+        infos = [(n, i) for n, i in found if n == name]
+        if not infos:
+            raise Fail("No disk %s plugged in" % name)
     else:
-        names = _plist(["list", "external", "physical"]).get("WholeDisks") or []
-        if not names:
+        infos = [(n, i) for n, i in found if not i["internal"]]
+        if not infos:
             raise Fail("No PS2 drive plugged in (no external disk found)")
-    infos = [(n, _plist(["info", n])) for n in names]
-    if not disk:
-        sized = [(n, i) for n, i in infos if i.get("TotalSize", i.get("Size")) == expected]
+        sized = [(n, i) for n, i in infos if i["size"] == expected]
         if not sized:
             raise Fail("No PS2 drive plugged in: external disk(s) %s, none is %s (PS2_HDD_BYTES)" % (
-                ", ".join("%s %s" % (n, gb(i.get("TotalSize", i.get("Size", 0)))) for n, i in infos), gb(expected)))
+                ", ".join("%s %s" % (n, gb(i["size"] or 0)) for n, i in infos), gb(expected)))
         if len(sized) > 1:
             raise Fail("Several external disks of %s (%s): pick one with --disk" % (gb(expected), ", ".join(n for n, _ in sized)))
         infos = sized
     name, info = infos[0]
-    size = info.get("TotalSize", info.get("Size"))
-    if info.get("Internal", True):
+    if info["internal"]:
         raise Fail("%s is an internal disk, refusing" % name)
-    if info.get("BusProtocol") != "USB":
-        raise Fail("%s is not a USB disk (%s), refusing" % (name, info.get("BusProtocol")))
-    if not info.get("WholeDisk"):
+    if not info["usb"]:
+        raise Fail("%s is not a USB disk (%s), refusing" % (name, info["bus"]))
+    if not info["whole"]:
         raise Fail("%s is a partition, not a whole disk, refusing" % name)
-    if size != expected:
-        raise Fail("%s is %s, expected %s (PS2_HDD_BYTES), refusing" % (name, gb(size), gb(expected)))
-    raw = "/dev/r" + name
+    if info["size"] != expected:
+        raise Fail("%s is %s, expected %s (PS2_HDD_BYTES), refusing" % (name, gb(info["size"] or 0), gb(expected)))
+    dev = "/dev/" + name
+    raw = "/dev/r" + name if sys.platform == "darwin" else dev
     try:
         with open(raw, "rb") as f:
             head = f.read(4096)
@@ -156,7 +178,7 @@ def find_drive(expected, disk=None):
         raise Fail("Can't read %s: run with sudo" % raw)
     if head[4:8] != b"APA\0" or head[0x10:0x15] != b"__mbr":
         raise Fail("%s is not a PS2 drive (no APA header), refusing" % name)
-    return {"disk": name, "raw": raw, "dev": "/dev/" + name}
+    return {"disk": name, "raw": raw, "dev": dev}
 
 
 def hdl(env, args, check=True):
@@ -219,28 +241,44 @@ def backup_headers(env, drive):
 
 def flush(drive):
     """Push everything written so far onto the disk and make the drive empty its own write
-    cache (F_FULLFSYNC): after this, pulling the plug loses nothing already installed. Run
-    after every game, so a batch is as safe as ejecting between games."""
+    cache (macOS F_FULLFSYNC, Linux fsync on the block device): after this, pulling the plug
+    loses nothing already installed. Run after every game, so a batch is as safe as ejecting
+    between games."""
     import fcntl
     subprocess.call(["sync"])
     fd = os.open(drive["dev"], os.O_RDONLY)
     try:
-        fcntl.fcntl(fd, getattr(fcntl, "F_FULLFSYNC", 51))
+        if sys.platform == "darwin":
+            fcntl.fcntl(fd, getattr(fcntl, "F_FULLFSYNC", 51))
+        else:
+            os.fsync(fd)
     finally:
         os.close(fd)
 
 
 def eject(drive):
+    """macOS: eject, the drive is plugged in for the run. Linux (the Pi hub): the drive lives
+    there, so it is only flushed and stays attached for the next run."""
+    if sys.platform != "darwin":
+        flush(drive)
+        print("Drive %s flushed: stays attached" % drive["disk"])
+        return
     subprocess.call(["sync"])
     if subprocess.call(["diskutil", "eject", drive["disk"]], stdout=subprocess.DEVNULL) != 0:
         raise Fail("Could not eject %s: do NOT unplug, run `diskutil eject %s`" % (drive["disk"], drive["disk"]))
+    print("Drive %s ejected: safe to unplug" % drive["disk"])
 
 
 # --- Pluto ----------------------------------------------------------------------------
 
+def catalogue_files(games):
+    """The drive's games as the catalogue's file list: [{"path", "size"}]."""
+    return [{"path": g["name"] + ".iso", "size": g["kb"] * 1024} for g in games]
+
+
 def post_to_pluto(env, games):
     """The drive's complete game list -> the catalogue (system ps2, node ps2)."""
-    files = [{"path": g["name"] + ".iso", "size": g["kb"] * 1024} for g in games]
+    files = catalogue_files(games)
     url = env["PLUTO_API"].rstrip("/") + "/catalogue/ps2/scan/ps2"
     req = urllib.request.Request(url, data=json.dumps({"files": files}).encode("utf-8"),
                                  headers={"Content-Type": "application/json"}, method="POST")
@@ -384,7 +422,7 @@ def drive_name(filename):
 
 def chd_kind(path):
     if not shutil.which("chdman"):
-        raise Fail("%s needs chdman (brew install rom-tools)" % os.path.basename(path))
+        raise Fail("%s needs chdman (macOS: brew install rom-tools, Linux: apt install mame-tools)" % os.path.basename(path))
     info = subprocess.check_output(["chdman", "info", "-i", path]).decode("ascii", "replace")
     return "cd" if "CHT2" in info or "CHTR" in info else "dvd"
 
@@ -549,6 +587,33 @@ def cmd_sync(env, args):
     post_to_pluto(env, games)
 
 
+def cmd_list(env, args):
+    """The drive's game list as JSON on stdout, for Pluto to merge itself (it runs this over
+    SSH when the drive is on the Pi hub)."""
+    drive = find_drive(env["PS2_HDD_BYTES"], args.disk)
+    print(json.dumps({"files": catalogue_files(drive_games(env, drive)[0])}))
+
+
+def cmd_eject(env, args):
+    """Detach the drive so it can be unplugged. Refused while a write is running (an install,
+    or hdl_dump from anywhere). Linux: flush, then delete the SCSI device and check it went;
+    macOS: diskutil eject."""
+    busy = subprocess.run(["pgrep", "-f", "hdl_dump|ps2hdd.py install"], stdout=subprocess.PIPE)
+    if busy.returncode == 0:
+        raise Fail("The drive is busy (a send or install is running): not ejecting")
+    drive = find_drive(env["PS2_HDD_BYTES"], args.disk)
+    if sys.platform == "darwin":
+        eject(drive)
+        return
+    flush(drive)
+    with open("/sys/block/%s/device/delete" % drive["disk"], "w") as f:
+        f.write("1")
+    subprocess.call(["udevadm", "settle", "--timeout=10"])
+    if os.path.exists("/sys/block/" + drive["disk"]):
+        raise Fail("%s is still attached: do NOT unplug" % drive["disk"])
+    print("Drive %s ejected: safe to unplug (replug it to use it again)" % drive["disk"])
+
+
 def cmd_rename(env, args):
     new = re.sub(r"\s+", " ", args.new).strip()
     if not new or len(new) > NAME_MAX or new[0] in "+-*" or new.startswith("0x"):
@@ -569,7 +634,6 @@ def cmd_rename(env, args):
         post_to_pluto(env, games)
     finally:
         eject(drive)
-        print("Drive %s ejected: safe to unplug" % drive["disk"])
 
 
 def plan(env, args, drive):
@@ -669,16 +733,17 @@ def cmd_install(env, args):
         except Fail as e:
             print("Could not list the drive for Pluto (%s): run sync" % e)
         eject(drive)
-        print("Drive %s ejected: safe to unplug" % drive["disk"])
     return 1 if failed else 0
 
 
 def main():
     ap = argparse.ArgumentParser(description="Install PS2 games onto the PS2 HDD (APA).")
-    ap.add_argument("--disk", help="the drive's diskN, when auto-detection finds several")
+    ap.add_argument("--disk", help="the drive's diskN (macOS) or sdX (Linux), when auto-detection finds several")
     sub = ap.add_subparsers(dest="cmd")
     sub.add_parser("status", help="check the drive and list its games")
     sub.add_parser("sync", help="send the drive's game list to Pluto's catalogue")
+    sub.add_parser("list", help="print the drive's game list as JSON (what sync sends)")
+    sub.add_parser("eject", help="detach the drive so it can be unplugged")
     r = sub.add_parser("rename", help="rename a game on the drive")
     r.add_argument("old")
     r.add_argument("new")
@@ -694,7 +759,7 @@ def main():
         return 1
     try:
         env = load_env()
-        return {"status": cmd_status, "sync": cmd_sync, "install": cmd_install, "rename": cmd_rename}[args.cmd](env, args) or 0
+        return {"status": cmd_status, "sync": cmd_sync, "list": cmd_list, "eject": cmd_eject, "install": cmd_install, "rename": cmd_rename}[args.cmd](env, args) or 0
     except Fail as e:
         print("ps2hdd: %s" % e)
         return 1

@@ -17,8 +17,9 @@ Strategies, chosen from the target node (strategy_for):
   sd       SD_LABEL +     a card in the Pi hub, under SD_ROMS_DIR; ROMs unpacked from .zip
                           (an archive we cannot open, .7z and friends, is skipped, not copied)
            SD_ROMS_DIR
-  hdd      PS2_HDD_BYTES  the PS2's APA drive on this Mac: root only, so the answer is the
-                          Terminal command (nodes/local/<node>/scripts/ps2hdd.py install)
+  hdd      PS2_HDD_BYTES  the PS2's APA drive. On this Mac it is root only, so the answer is
+                          the Terminal command (nodes/local/<node>/scripts/ps2hdd.py install);
+                          on PS2_HDD_HOST (the Pi hub) Pluto runs ps2hdd-hub.py install itself
 local, batocera and sd share _files: one file per game, or a disc folder for .gdi/.cue (the
 descriptor as <name>.gdi plus the track files it lists, in <name>/), written
 beside the target as .part, size-checked, renamed; then the target is rescanned. Arcade systems
@@ -259,8 +260,9 @@ def plan(root, system, target, sources, files=None, all_missing=False):
 
 
 def _hdd(p, ctx):
-    """The PS2 drive: one Terminal command. Each copy is `--game NAME SOURCE`; a source is a
-    local path, or node:/path for the script to pull over SSH (as the invoking user) first.
+    """The PS2 drive: one Terminal command, or, with ctx["run"] (the drive on the Pi hub, where
+    Pluto has sudo), that same command run here with its output streamed. Each copy is
+    `--game NAME SOURCE`; a source is a local path, or node:/path read over SSH.
     A copy whose source can't be reached from here (an SD card) is skipped, not fatal."""
     args, count = ["install"], 0
     for c in p["copies"]:
@@ -272,6 +274,12 @@ def _hdd(p, ctx):
         count += 1
     if not count:
         return _nothing(ctx)
+    if ctx.get("run"):
+        rc, lines = ctx["run"](args)
+        if rc != 0:
+            why = [l.strip() for l in lines if l.strip().startswith(("FAILED", "ps2hdd"))] or lines[-1:]
+            raise NotAvailable("the PS2 drive install failed: %s" % (why[-1] if why else "no output"))
+        return {"status": "done", "count": count, "lines": lines}
     return {"status": "command", "command": ctx["command"](args), "count": count}
 
 
