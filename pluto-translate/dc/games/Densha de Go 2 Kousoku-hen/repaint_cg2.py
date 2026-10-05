@@ -660,7 +660,7 @@ RECORDS = {
     'OBJrenk07': dict(style=GRAD2, boxes=[((0, 0, 999, 48), 'Ready')]),   # 829
     'OBJrenk08': dict(style=GRAD2, boxes=[((0, 0, 999, 48), 'Start')]),   # 830
     # difficulty (DDG64 525-529)
-    "OBJselect08": dict(style=dict(cap=9, bg=0, fill=15, outline=17, pal=1, margin=(0, 0), ink_gap=4),     # 難易度 525: kept clear of
+    "OBJselect08": dict(style=dict(cap=9, bg=0, fill=15, outline=17, pal=1, margin=(0, 0), ink_gap=3, pixel=True),     # 難易度 525: kept clear of
                         boxes=[((0, 0, 64, 16), ""), ((0, 2, 64, 16), "DIFFICULTY")]),        # the rating balls above
     'OBJselect13': dict(style=LVL, boxes=[((0, 0, 64, 32), 'Lvl.1')]),   # 526
     'OBJselect14': dict(style=LVL, boxes=[((0, 0, 64, 32), 'Lvl.2')]),   # 527
@@ -885,6 +885,37 @@ def coverage(text, cap, w, h):
     return out
 
 
+def pixel_fit(text, cap, w, h, ink_gap, face=None):
+    """One line drawn pixel-exact (no smoothing, no resampling) at the largest size up to `cap` that fits, each
+    letter placed by its ink with `ink_gap` px between: for words too small for antialiasing (8 px caps)."""
+    for size in range(int(round(cap / CAP)), 6, -1):
+        font = ImageFont.truetype(face or FONT, size)
+        glyphs = []
+        for ch in text:
+            g = Image.new("1", (size * 2, size * 2))
+            d = ImageDraw.Draw(g)
+            d.fontmode = "1"
+            d.text((size // 2, 0), ch, 1, font=font)
+            bb = g.getbbox()
+            glyphs.append((g, bb) if bb else (None, size // 3))
+        top = min(bb[1] for g, bb in glyphs if g)
+        bot = max(bb[3] for g, bb in glyphs if g)
+        width = sum((bb[2] - bb[0]) if g else bb for g, bb in glyphs) + ink_gap * (len(text) - 1)
+        if width <= w and bot - top <= h:
+            break
+    out = np.zeros((h, w))
+    x = (w - width) // 2
+    y = (h - (bot - top)) // 2
+    for g, bb in glyphs:
+        if g is None:
+            x += bb + ink_gap
+            continue
+        a = np.asarray(g.crop((bb[0], top, bb[2], bot)), dtype=float)
+        out[y:y + a.shape[0], x:x + a.shape[1]] = np.maximum(out[y:y + a.shape[0], x:x + a.shape[1]], a)
+        x += a.shape[1] + ink_gap
+    return out
+
+
 def fit(text, cap, w, h, align="center", lead=None, baseline=False, face=None, track=0, ink_gap=None):
     """(h, w) coverage of `text` (lines split on \\n), at cap height `cap` or smaller: shrunk evenly to fit the
     height, squeezed to 80% width, then shrunk evenly again. Lines are aligned left or centred. `lead`: line
@@ -1045,7 +1076,8 @@ def boxtext(a, box, text, st):
         return
     pad = sum(w for _, w in rings)
     mx, my = st.get("margin", (0, 0))              # cleared across the whole box, drawn inside the margin
-    cov = fit(text, st["cap"], sub.shape[1] - 2 * (pad + mx), sub.shape[0] - 2 * (pad + my),
+    fitter = (lambda t, c, ww, hh, *a: pixel_fit(t, c, ww, hh, st["ink_gap"], st.get("face"))) if st.get("pixel") else fit
+    cov = fitter(text, st["cap"], sub.shape[1] - 2 * (pad + mx), sub.shape[0] - 2 * (pad + my),
               st.get("align", "center"), st.get("lead"), st.get("baseline", False), st.get("face"),
               st.get("track", 0), st.get("ink_gap"))
     cov = np.pad(cov, ((my, my), (mx, mx)))
