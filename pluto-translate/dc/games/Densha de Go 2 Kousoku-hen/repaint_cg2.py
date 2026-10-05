@@ -660,8 +660,8 @@ RECORDS = {
     'OBJrenk07': dict(style=GRAD2, boxes=[((0, 0, 999, 48), 'Ready')]),   # 829
     'OBJrenk08': dict(style=GRAD2, boxes=[((0, 0, 999, 48), 'Start')]),   # 830
     # difficulty (DDG64 525-529)
-    "OBJselect08": dict(style=dict(cap=9, bg=0, fill=15, outline=17, pal=1, margin=(0, 1)),     # 難易度 525: kept clear of
-                        boxes=[((0, 0, 64, 16), ""), ((0, 2, 64, 16), "Difficulty")]),        # the rating balls above
+    "OBJselect08": dict(style=dict(cap=9, bg=0, fill=15, outline=17, pal=1, margin=(0, 0), ink_gap=4),     # 難易度 525: kept clear of
+                        boxes=[((0, 0, 64, 16), ""), ((0, 2, 64, 16), "DIFFICULTY")]),        # the rating balls above
     'OBJselect13': dict(style=LVL, boxes=[((0, 0, 64, 32), 'Lvl.1')]),   # 526
     'OBJselect14': dict(style=LVL, boxes=[((0, 0, 64, 32), 'Lvl.2')]),   # 527
     'OBJselect15': dict(style=LVL, boxes=[((0, 0, 64, 32), 'Lvl.3')]),   # 528
@@ -798,8 +798,8 @@ RECORDS = {
     "OBJex002": dict(style=TAG3000, boxes=[((0, 0, 192, 48), "3000 series")]),           # 3000番台
     "OBJtunac01": dict(style=BIG3000, boxes=[((0, 0, 480, 160), "3000 series")]),        # 3000番台
     # notch icons: the kanji's box rebuilt from the 1 / 8 icon (the same bars) and the 0 digit from 解除's own
-    "OBJbmt00": dict(style=NOTCH, rebuild=dict(sib="OBJbmt01", box=(0, 24, 48, 49), bar=62, scale=2),
-                     boxes=[((1, 25, 48, 48), "Brake\nReady")]),                         # 解除: DDG64 0
+    "OBJbmt00": dict(style=dict(NOTCH, cap=12, lead=1.25, ink_gap=4), rebuild=dict(sib="OBJbmt01", box=(0, 24, 48, 49), bar=62, scale=2),
+                     boxes=[((0, 20, 48, 50), "BRAKE\nREADY")]),   # 解除: DDG64 0; over the bars above too, bigger on a CRT
     "OBJbmt09": dict(style=dict(NOTCH, cap=18), rebuild=dict(sib="OBJbmt08", box=(0, 24, 48, 49), bar=18, scale=2),
                      boxes=[((1, 25, 48, 48), "!!!")]),                                   # 非常: DDG64 9
     "OBJz_m0": dict(style=dict(NOTCH, cap=14), rebuild=dict(sib="OBJz_m1", box=(8, 11, 40, 36), bar=62,
@@ -885,7 +885,7 @@ def coverage(text, cap, w, h):
     return out
 
 
-def fit(text, cap, w, h, align="center", lead=None, baseline=False, face=None):
+def fit(text, cap, w, h, align="center", lead=None, baseline=False, face=None, track=0, ink_gap=None):
     """(h, w) coverage of `text` (lines split on \\n), at cap height `cap` or smaller: shrunk evenly to fit the
     height, squeezed to 80% width, then shrunk evenly again. Lines are aligned left or centred. `lead`: line
     pitch in cap heights (tight, for multi-line boxes); without it each line gets the font's full height + a gap."""
@@ -895,8 +895,29 @@ def fit(text, cap, w, h, align="center", lead=None, baseline=False, face=None):
     imgs = []
     for ln in lines:
         l, t, r, b = font.getbbox(ln)
-        im = Image.new("L", (r - l + 8, int(cap * SS / CAP * 1.25) + 8))
-        ImageDraw.Draw(im).text((4 - l, 4), ln, 255, font=font)
+        im = Image.new("L", (r - l + 8 + int(track * SS) * len(ln), int(cap * SS / CAP * 1.25) + 8))
+        if ink_gap is not None:                    # ink spacing: `ink_gap` px between letters' ink, whatever
+            x = 4                                  # the font's own spacing (f-f, c-u overlap otherwise)
+            for ch in ln:
+                if ch == " ":
+                    x += font.getlength(ch); continue
+                g = Image.new("L", im.size)
+                ImageDraw.Draw(g).text((0, 4), ch, 255, font=font)
+                bb = g.getbbox()
+                if bb is None:
+                    continue
+                g = g.crop((bb[0], 0, bb[2], g.height))
+                if x + g.width > im.width:
+                    im = im.crop((0, 0, x + g.width + 8, im.height))
+                im.paste(g, (x, 0), g)
+                x += g.width + int(ink_gap * SS)
+        elif track:                                # letter spacing (px): each letter drawn on its own
+            x = 4 - l
+            for ch in ln:
+                ImageDraw.Draw(im).text((x, 4), ch, 255, font=font)
+                x += font.getlength(ch) + track * SS
+        else:
+            ImageDraw.Draw(im).text((4 - l, 4), ln, 255, font=font)
         bb = im.getbbox() or (0, 0, 1, 1)
         imgs.append(im.crop((bb[0], 0, bb[2], im.height)))
     tw = max(i.width for i in imgs)
@@ -1025,7 +1046,8 @@ def boxtext(a, box, text, st):
     pad = sum(w for _, w in rings)
     mx, my = st.get("margin", (0, 0))              # cleared across the whole box, drawn inside the margin
     cov = fit(text, st["cap"], sub.shape[1] - 2 * (pad + mx), sub.shape[0] - 2 * (pad + my),
-              st.get("align", "center"), st.get("lead"), st.get("baseline", False), st.get("face"))
+              st.get("align", "center"), st.get("lead"), st.get("baseline", False), st.get("face"),
+              st.get("track", 0), st.get("ink_gap"))
     cov = np.pad(cov, ((my, my), (mx, mx)))
     m = np.zeros(sub.shape, bool)
     m[pad:pad + cov.shape[0], pad:pad + cov.shape[1]] = cov >= 0.5

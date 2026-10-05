@@ -353,8 +353,8 @@ def paint(name, rgba):
     elif name == "OBJtuuti01":                # the report card, black on white; the rules stay
         white = (255, 255, 255, 255)
         solid(a, (100, 4, 380, 46), "Evaluation", 26, white, (0, 0, 0))            # 運転評価 DDG64 141
-        for box, t in CARD:
-            solid(a, box, t, 16, white, (0, 0, 0))
+        for box, t in CARD:                   # left-aligned, one size for all five (the longest fits unsqueezed)
+            solid(a, box, t, 15, white, (0, 0, 0), align="left", pad=(6, 0))
         solid(a, (150, 214, 300, 254), "Overall evaluation", 18, white, (0, 0, 0))   # 総合評価 operator
         solid(a, (400, 214, 476, 254), "points", 18, white, (0, 0, 0))              # 点 operator
     elif name == "OBJstart16":                # the departure board header: 発車案内 -> Departure Guide (468)
