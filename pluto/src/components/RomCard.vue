@@ -6,12 +6,15 @@
 // Build, Stop and Delete are hidden unless asked for (Media never builds; Homebrew never deletes).
 //   <RomCard play open :send-targets="t" @play="…" @open="…" @send="id => …">…body…</RomCard>
 import SendButtons from './SendButtons.vue'
+import UiButtonGroup from './ui/UiButtonGroup.vue'
 import UiButton from './ui/UiButton.vue'
 import UiSpinner from './ui/UiSpinner.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 
 withDefaults(defineProps<{
   deleted?: boolean        // a copy gone from its node: the only action left is forget
+  flat?: boolean           // no frame: the parent already is one (the Homebrew header)
+  group?: string           // label the card's own buttons as one box, as Send to is
   build?: boolean
   play?: boolean
   quit?: boolean
@@ -36,10 +39,11 @@ defineEmits<{ build: []; play: []; quit: []; open: []; send: [node: string]; rem
 </script>
 
 <template>
-  <div class="rom-card" :class="{ 'is-deleted': deleted }">
+  <div class="rom-card" :class="{ 'is-deleted': deleted, 'is-flat': flat }">
     <div class="rom-card__body"><slot /></div>
     <div class="rom-card__actions">
       <template v-if="!deleted">
+        <UiButtonGroup :label="group" :bare="!group" :disabled="busy">
         <UiIconButton v-if="build" variant="ghost" :disabled="busy" :title="building ? 'Building…' : buildTitle" @click="$emit('build')">
           <UiSpinner v-if="building" :size="14" />
           <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 3.5l6 6-2.5 2.5-6-6z"/><path d="M13.2 7.8L4 17a1.9 1.9 0 0 0 2.7 2.7l9.2-9.2"/></svg>
@@ -53,6 +57,7 @@ defineEmits<{ build: []; play: []; quit: []; open: []; send: [node: string]; rem
         <UiIconButton v-if="open" variant="ghost" :title="openTitle" @click="$emit('open')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
         </UiIconButton>
+        </UiButtonGroup>
         <SendButtons :targets="sendTargets" :disabled="busy" :busy="sendBusy" @send="id => $emit('send', id)" />
         <UiButton v-if="stop" variant="secondary" @click="$emit('stop')">Stop</UiButton>
         <UiIconButton v-if="remove" variant="ghost" class="rom-card__right" :title="removeTitle" @click="$emit('remove')">
@@ -70,6 +75,12 @@ defineEmits<{ build: []; play: []; quit: []; open: []; send: [node: string]; rem
 <style scoped>
 .rom-card { margin-bottom: 8px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; }
 .rom-card.is-deleted { border-style: dashed; }
+/* flat: the frame, the fill and the action bar's rule all come off, so the card can sit
+   inside a header that already draws them. The buttons and spacing stay as they are. */
+.rom-card.is-flat { margin: 0; border: 0; border-radius: 0; background: none; overflow: visible; }
+.rom-card.is-flat .rom-card__body { padding: 0 0 var(--sp-2); }
+.rom-card.is-flat .rom-card__actions { padding: 0; background: none; border-top: 0; }
+.rom-card.is-flat .rom-card__err { padding: 6px 0 0; background: none; border-top: 0; }
 .rom-card__body { padding: 10px 12px 8px; }
 .rom-card__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 4px 6px; border-top: 1px solid var(--line); background: var(--surface-2); }
 .rom-card__right { margin-left: auto; }
