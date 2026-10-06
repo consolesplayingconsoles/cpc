@@ -80,7 +80,7 @@ watch(() => props.active, (a) => { if (a) load() }, { immediate: true })
 // ── Cross-system game lists, grouped by system; click one -> its drawer.
 //   missing:  games with no image linked in the catalogue (local only)
 //   physical: games you own on a shelf with no digital copy on any node
-//   deleted:  games whose every copy is gone from its node (to clean up)
+//   deleted:  games with at least one copy gone from its node (to clean up)
 //   hardware: your consoles and peripherals (rows open the system's page)
 type ListMode = 'missing' | 'physical' | 'deleted' | 'hardware'
 // 'hardware' is a VIEW of its own; the game lists are three FILTERS that stack (AND): each
@@ -261,7 +261,7 @@ const favOnly = ref(false)
 const onlyDigital = ref(false)
 const onlyPhysical = ref(false)
 const onlySaved = ref(false)
-const deletedOnly = ref(false)                  // games whose every file is gone from its node
+const deletedOnly = ref(false)                  // games with at least one file gone from its node
 const noCoverOnly = ref(false)
 // Nodes: none checked = every node; several = a game on ANY of them.
 const nodeFilter = ref<string[]>([])
@@ -368,7 +368,9 @@ function variantSummary(g: Game): string {
     .filter(Boolean).join(' · ')
   return parts && original ? `Original + ${parts}` : parts
 }
-const onlyDeleted = (g: Game) => g.files.length > 0 && g.nodes.length === 0
+// one copy gone is enough: a card copy that vanished is worth seeing even while the Lab
+// still holds the game (the usual case after a card is reorganised)
+const onlyDeleted = (g: Game) => g.files.some(f => f.status === 'deleted')
 function nodeName(id: string) { return props.nodes[id]?.name ?? id }
 
 // ── Peek: the game drawer on the CONSOLES page ──
