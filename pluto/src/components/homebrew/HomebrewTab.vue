@@ -18,7 +18,7 @@ import UiSubTabs from '../ui/UiSubTabs.vue'
 import { ICONS } from '../../composables/useIcons'
 import { catalogueApi } from '../../api/catalogue'
 import {
-  listItems, saveParams, stopItem, openFolder, startItem, streamUrl, setFavourite,
+  listItems, saveParams, stopItem, openFolder, startItem, streamUrl, setFavourite, forgetRun,
   type HomebrewItem, type HomebrewKind,
 } from '../../api/homebrew'
 
@@ -50,6 +50,10 @@ async function load() {
   try {
     all.value = await listItems()
     loaded.value = true
+    // A build still running (started before a reload, or in another tab): pick its console back up
+    for (const it of all.value) {
+      if (it.running && !runs.value[it.node]) follow(it, it.runningSend ?? undefined, true)
+    }
   } catch (e) {
     error.value = `API unreachable: ${(e as Error).message}`
   } finally {
@@ -184,10 +188,20 @@ async function build(node?: string) {
   const it = selected.value
   if (!it || runs.value[it.node]) return
   if (!(await save())) return
+  follow(it, node, false)
+}
+
+// Open a terminal on the item's run. attach: follow a run that is already going (the API
+// replays its console from the start); otherwise this starts it.
+function follow(it: HomebrewItem, node: string | undefined, attach: boolean) {
   const target = node ? it.sendTargets.find(t => t.id === node) : null
   const output = openRun(target ? `Send ${it.name} to ${target.name}` : `Build ${it.name}`,
     { raw: '', ok: null, step: 'build', startedAt: Date.now() },
-    { lastMs: lastRuns.value[runKey(it.id, node)] ?? null })
+    { lastMs: lastRuns.value[runKey(it.id, node)] ?? null,
+      // once it ends ok: Play what it just built, the same as the item's Start button
+      after: { label: 'Play', run: () => startItem(it.id) },
+      // closing the tab (or Clear done) drops the finished job in the API too
+      onClose: () => { forgetRun(it.id).catch(() => { /* the API may be down: nothing to drop */ }) } })
   const consoleId = it.node
   runs.value = { ...runs.value, [consoleId]: { id: it.id, sendTo: node ?? null } }
   const finish = () => {
@@ -198,7 +212,7 @@ async function build(node?: string) {
     runs.value = rest
   }
   let mediaPath: string | null = null
-  const es = new EventSource(streamUrl(it.id, node))
+  const es = new EventSource(streamUrl(it.id, node, attach))
   streams[consoleId] = es
   es.addEventListener('media', (e: MessageEvent) => { mediaPath = e.data })
   es.addEventListener('line', (e: MessageEvent) => {
@@ -209,6 +223,10 @@ async function build(node?: string) {
   })
   es.addEventListener('done', (e: MessageEvent) => {
     finish()
+    if (e.data === 'none') {                         // it ended before we got there
+      output.value = { ...output.value, ok: null, step: 'done', raw: output.value.raw + '[finished before this page attached]' }
+      load(); return
+    }
     const ok = e.data === 'ok'
     const stopped = e.data === 'failed:-15'          // SIGTERM from Stop
     output.value = {

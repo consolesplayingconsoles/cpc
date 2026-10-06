@@ -2424,7 +2424,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/catalogue/{system}"),
         ("GET", "/catalogue/{system}/cover/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
-        ("GET", "/homebrew"), ("GET", "/homebrew/stream"), ("PUT", "/homebrew/params"), ("POST", "/homebrew/stop"), ("POST", "/homebrew/open"), ("POST", "/homebrew/start"), ("POST", "/homebrew/favourite"),
+        ("GET", "/homebrew"), ("GET", "/homebrew/stream"), ("PUT", "/homebrew/params"), ("POST", "/homebrew/stop"), ("POST", "/homebrew/forget"), ("POST", "/homebrew/open"), ("POST", "/homebrew/start"), ("POST", "/homebrew/favourite"),
         ("POST", "/messages"), ("POST", "/dreame/login"), ("POST", "/dreame/logout"),
         ("POST", "/control/signal"), ("POST", "/control/capture"),
         ("POST", "/control/listen"), ("POST", "/roomba-ai/audio"),
@@ -2719,6 +2719,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/homebrew/stop":
             item_id = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
             self._send(200, {"stopped": homebrew.stop(item_id)})
+        elif parsed.path == "/homebrew/forget":
+            # the terminal tab was closed: drop the finished job's kept console (a running one stays)
+            item_id = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
+            self._send(200, {"forgotten": homebrew.forget_job(item_id)})
         elif parsed.path == "/homebrew/favourite":
             item_id = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
             body = self._read_json_body()
@@ -4265,7 +4269,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         system = item.get("system")
         if not system:
             self._send(400, {"error": "no system for this item, so its emulator is unknown"}); return
-        self._send(*self._launch_desktop(system, out["path"]))
+        self._send(*self._launch_desktop(system, out["path"], (item.get("game") or {}).get("key") or ""))
 
     def _homebrew_script(self, item, action, emit):
         """Run build.sh / deploy.sh, streaming output. ##STEP: -> step, ##OUTPUT: -> recorded.
@@ -4349,10 +4353,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return rel
 
     def _handle_homebrew_stream(self, qs):
-        """GET /homebrew/stream?id=<item>[&node=<node>] -> SSE. Build, then (for a game in the
-        catalogue) publish to Lab and sync; with node, send it there too. A send skips the
+        """GET /homebrew/stream?id=<item>[&node=<node>][&attach=1] -> SSE. Build, then (for a game
+        in the catalogue) publish to Lab and sync; with node, send it there too. A send skips the
         build when the item's last output is still on disk. Events: 'line', 'step', 'media'
-        (the game's Media path, after a send), 'done' ok | failed."""
+        (the game's Media path, after a send), 'done' ok | failed.
+
+        The work runs as a job of its own (homebrew.Job), not inside this request: a reload or a
+        second tab re-attaches and replays the console from the start, and asking again while it
+        runs follows the running one instead of starting another. attach=1 only ever follows:
+        with nothing running it answers 'done' 'none'."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -4360,26 +4369,52 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._cors_headers()
         self.end_headers()
 
-        def emit(event, data):
+        def send(event, data):
             try:
                 for chunk in str(data).splitlines() or [""]:
                     self.wfile.write(("event: %s\ndata: %s\n\n" % (event, chunk)).encode("utf-8"))
                 self.wfile.flush()
+                return True
             except Exception:
-                pass
+                return False
 
+        item_id = (qs.get("id") or [""])[0]
+        node = (qs.get("node") or [""])[0]
+        attach = (qs.get("attach") or [""])[0] == "1"
+        job = homebrew.job(item_id)
+        if attach and not job:
+            send("done", "none"); return
+        if not job:
+            items = {i["id"]: i for i in self._homebrew_items()}
+            item = items.get(item_id)
+            if not item:
+                send("line", "ERROR no such homebrew item"); send("done", "failed"); return
+            if node and node not in {t["id"] for t in item["sendTargets"]}:
+                send("line", "ERROR %s can't be sent to %s" % (item["id"], node)); send("done", "failed"); return
+            try:
+                job = homebrew.new_job(item_id, node)
+            except RuntimeError:
+                job = homebrew.job(item_id)              # started a moment ago by someone else: follow it
+            else:
+                print("  [HOMEBREW] %s%s" % (item["id"], " -> " + node if node else ""))
+                threading.Thread(target=self._homebrew_pipeline, args=(item, node, job.emit), daemon=True).start()
+        elif not attach:
+            send("line", "already running: showing it")
+        for ev in (job.follow() if job else []):
+            if ev is None:
+                try:
+                    self.wfile.write(b": keepalive\n\n"); self.wfile.flush()
+                except Exception:
+                    return                                  # the page went away; the job carries on
+            elif not send(*ev):
+                return
+
+    def _homebrew_pipeline(self, item, node, emit):
+        """The build/publish/sync/send behind a stream, on its own thread (see the stream handler)."""
         def fail(why):
             emit("line", "ERROR " + why)
             emit("done", "failed")
 
-        items = {i["id"]: i for i in self._homebrew_items()}
-        item = items.get((qs.get("id") or [""])[0])
-        node = (qs.get("node") or [""])[0]
-        if not item:
-            return fail("no such homebrew item")
-        if node and node not in {t["id"] for t in item["sendTargets"]}:
-            return fail("%s can't be sent to %s" % (item["id"], node))
-        print("  [HOMEBREW] %s%s" % (item["id"], " -> " + node if node else ""))
         try:
             emit("step", "build")
             # A send reuses the last build if its output is still on disk: the Build button is
@@ -4538,7 +4573,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = self._lab_rom(system, rel)
         if not path:
             self._send(400, {"error": "not a lab ROM"}); return
-        self._send(*self._launch_desktop(system, path))
+        self._send(*self._launch_desktop(system, path, self._lab_game_key(system, rel)))
+
+    def _lab_game_key(self, system, rel):
+        """The catalogue key of the game this lab file belongs to ("" when unknown)."""
+        try:
+            doc = catalogue.store.load(self._catalogue_root(), system)
+        except Exception:
+            return ""
+        for key, g in doc["games"].items():
+            if any(f["node"] == "lab" and f["path"] == rel for f in g["files"]):
+                return key
+        return ""
 
     def _play_webman(self, node, cfg, rel):
         """Boot a title on a PS3 through webMAN. -> (status, body) for _send.
@@ -4591,9 +4637,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return (f.get("category") or "").upper()
         return ""
 
-    def _launch_desktop(self, system, path):
+    def _launch_desktop(self, system, path, game_key=""):
         """Open a ROM in the system's associated desktop emulator on this Mac (config/consoles.json
-        systems.<x>.emulator, else defaultEmulator). -> (status, body) for _send."""
+        systems.<x>.emulator, else defaultEmulator). -> (status, body) for _send.
+        A homebrew game folder can ask for FLYCAST_SINGLE_THREADED=1 in its .env: Flycast then
+        runs with threaded rendering off (DDG2 flickers otherwise, flycast#1079)."""
         cfg = self.__class__.consoles_config
         key = ((cfg.get("systems") or {}).get(system) or {}).get("emulator") or cfg.get("defaultEmulator")
         emu = (cfg.get("emulators") or {}).get(key or "")
@@ -4601,12 +4649,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return 400, {"error": "no emulator associated with %s" % system}
         if platform.system() != "Darwin":
             return 501, {"error": "desktop emulator launch is macOS only"}
+        extra = []
+        if key == "flycast" and game_key:
+            flag = homebrew.game_env(self._repo_root(), system, game_key).get("FLYCAST_SINGLE_THREADED", "")
+            if flag.strip().lower() in ("1", "yes", "true"):
+                extra = ["-config", "config:rend.ThreadedRendering=no"]
         cmd = ["open", "-a", emu["app"]]
-        cmd += (["--args"] + [a.replace("{rom}", path) for a in emu["args"]]) if emu.get("args") else [path]
+        if emu.get("args"):
+            cmd += ["--args"] + extra + [a.replace("{rom}", path) for a in emu["args"]]
+        else:
+            cmd += (["--args"] + extra + [path]) if extra else [path]
         r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         if r.returncode != 0:
             return 502, {"error": (r.stdout or "open failed").strip()}
-        print("  [PLAY:%s] %s" % (key, path))
+        print("  [PLAY:%s] %s%s" % (key, path, " (single-threaded)" if extra else ""))
         return 200, {"ok": True}
 
     def _handle_catalogue_open(self, system, rel):

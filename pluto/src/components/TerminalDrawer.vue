@@ -63,6 +63,7 @@ const fill = { inset: '0', borderRadius: '0', border: '0', boxShadow: 'none' }
         :title="active.title"
         :output="active.output.value"
         :last-ms="active.lastMs"
+        :after="active.after"
         :card-style="fill"
         @close="closeRun(active.id)"
       />
