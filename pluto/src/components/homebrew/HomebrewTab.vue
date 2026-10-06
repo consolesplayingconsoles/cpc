@@ -8,8 +8,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useRuns } from '../../composables/useRuns'
 import { useRunDurations } from '../../composables/useRunDurations'
 import UiButton from '../ui/UiButton.vue'
-import UiIconButton from '../ui/UiIconButton.vue'
-import RomCard from '../RomCard.vue'
+import HomebrewHead from './HomebrewHead.vue'
 import UiSidePanel from '../ui/UiSidePanel.vue'
 import UiPill from '../ui/UiPill.vue'
 import UiStatusDot from '../ui/UiStatusDot.vue'
@@ -64,7 +63,6 @@ watch(() => props.active, (on) => { if (on && !loaded.value) load() }, { immedia
 
 const coverUrl = (it: HomebrewItem) => it.game?.listed ? catalogueApi.coverUrl(it.game.system, it.game.key) : null
 const mediaLink = (it: HomebrewItem) => it.game?.listed ? `/media/${it.game.system}/${it.game.key}` : null
-const hideImg = (e: Event) => { (e.target as HTMLElement).style.display = 'none' }
 
 // node -> group (game, mods only; '' otherwise) -> items.
 const sections = computed(() => {
@@ -136,6 +134,15 @@ watch([sections, selected, () => props.active], () => {
   const it = items.value.find(i => i.id === last) ?? sections.value[0]?.groups[0]?.[1][0]
   if (it) open(it, true)
 })
+
+// A params file sits either in the item's own folder (show just ".env") or in its game's
+// folder above it (show "<game>/.env"): the rest is the project path the header prints.
+function envLabel(pp: string) {
+  const base = selected.value?.path ?? ''
+  if (pp.startsWith(base + '/')) return pp.slice(base.length + 1)
+  const parts = pp.split('/')
+  return parts.slice(-2).join('/')
+}
 
 // ── params form ───────────────────────────────────────────────────────────────
 const draft = ref<Record<string, string>>({})
@@ -263,11 +270,6 @@ async function start() {
 }
 watch(selectedId, () => { startError.value = ''; openError.value = '' })
 const cardError = computed(() => startError.value || openError.value || null)
-async function openOutput() {
-  if (!selected.value) return
-  openError.value = ''
-  try { await openFolder(selected.value.id, true) } catch (e) { openError.value = (e as Error).message }
-}
 
 // ── open folder ───────────────────────────────────────────────────────────────
 const openError = ref('')
@@ -361,65 +363,26 @@ const EMPTY: Record<HomebrewKind, string> = {
       <main class="hb__detail">
         <div v-if="!selected" class="hb__state" />
         <template v-else>
-          <div class="hb__title-row">
-            <RouterLink v-if="mediaLink(selected)" :to="mediaLink(selected)!" class="hb__cover-link" :title="'Open ' + selected.game?.title + ' in Media'">
-              <img :src="coverUrl(selected)!" class="hb__cover" alt="" @error="hideImg" />
-            </RouterLink>
-            <img v-else-if="ICONS[selected.node]" :src="ICONS[selected.node]" class="hb__head-ic" alt="" />
-            <div class="hb__titles">
-              <h2 class="hb__title">{{ selected.title }}</h2>
-              <div class="hb__sub">
-                <img v-if="ICONS[selected.node]" :src="ICONS[selected.node]" class="hb__sub-ic" alt="" />
-                <RouterLink v-if="selected.game?.listed" :to="`/media/${selected.game.system}`" class="hb__game-link" :title="'Open ' + selected.nodeName + ' in Media'">{{ selected.nodeName }}</RouterLink>
-                <span v-else>{{ selected.nodeName }}</span>
-                <template v-if="selected.game">
-                  <span class="hb__sep">/</span>
-                  <RouterLink v-if="mediaLink(selected)" :to="mediaLink(selected)!" class="hb__game-link">{{ selected.game.title }}</RouterLink>
-                  <span v-else>{{ selected.game.title }}</span>
-                </template>
-                <template v-else-if="selected.group"><span class="hb__sep">/</span> {{ selected.group }}</template>
-                <a
-                  v-if="selected.release" class="hb__release"
-                  :href="selected.release.url" target="_blank" rel="noopener" :title="selected.release.name"
-                ><UiPill :tone="selected.release.stable ? 'ok' : 'idle'">{{ selected.release.stable ? 'Released' : 'Pre-release' }} v{{ selected.release.version }} ↗</UiPill></a>
-                <UiPill v-else-if="selected.noRelease" tone="warn" :title="'Never released: ' + selected.noRelease">Private: {{ selected.noRelease }}</UiPill>
-                <UiPill v-else tone="idle">Unreleased</UiPill>
-              </div>
-              <div class="hb__path-row">
-                <code class="hb__path">{{ selected.path }}</code>
-                <UiIconButton title="Open folder" @click="openDir">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-                </UiIconButton>
-              </div>
-            </div>
-          </div>
-          <p v-if="openError" class="hb__state--bad">{{ openError }}</p>
-          <p v-if="selected.description" class="hb__desc">{{ selected.description }}</p>
-
-          <RomCard
-            build play open :stop="isRunning(selected.id)"
+          <HomebrewHead
+            :item="selected" :icon="ICONS[selected.node]"
+            :cover-url="coverUrl(selected)" :media-link="mediaLink(selected)"
             :send-targets="selected.sendTargets" :send-busy="runOf(selected)?.sendTo ?? null"
             :busy="!!runs[selected.node]" :building="!!runOf(selected) && !runOf(selected)?.sendTo"
+            :running="isRunning(selected.id)"
             :build-title="selected.game?.listed ? 'Build, publish to Lab and sync the catalogue' : 'Build'"
-            play-title="Start the last build from its dev tree in the desktop emulator (no rebuild)"
-            open-title="Open the build folder"
             :error="cardError"
-            class="hb__dev"
-            @build="build()" @play="start" @open="openOutput" @send="id => build(id)" @stop="stop"
-          >
-            <div class="hb__dev-head">
-              <span class="hb__dev-title">{{ selected.title }}</span>
-              <span class="hb__dev-kind">dev build</span>
-              <span v-if="selected.output" class="hb__hint">{{ selected.output.at.replace('T', ' ') }}</span>
-            </div>
-            <code v-if="selected.output" class="hb__path">{{ selected.output.path }}</code>
-            <p v-else class="hb__hint">Not built yet.</p>
-          </RomCard>
+            @build="build()" @play="start" @open-output="openDir" @send="id => build(id)"
+            @stop="stop" @open-dir="openDir"
+          />
+          <p v-if="openError" class="hb__state--bad">{{ openError }}</p>
 
           <section v-if="selected.params.length" class="hb__params">
             <div class="hb__params-head">
               <h3 class="hb__section">Parameters</h3>
-              <code v-for="pp in selected.paramsPaths" :key="pp" class="hb__path">{{ pp }}</code>
+              <!-- the header already says the project folder: name only what differs,
+                   which for a mod's own .env is the file and for a game's shared one the
+                   folder it is shared from -->
+              <code v-for="pp in selected.paramsPaths" :key="pp" class="hb__path" :title="pp">{{ envLabel(pp) }}</code>
             </div>
             <label v-for="p in selected.params" :key="p.key" class="hb__param">
               <span class="hb__key">{{ p.key }}<UiPill v-if="p.scope === 'game'" tone="idle" class="hb__shared" title="Shared by every mod of this game">shared</UiPill></span>
@@ -467,26 +430,8 @@ const EMPTY: Record<HomebrewKind, string> = {
 .hb__private { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
 .hb__row-title { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .hb__row-name { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); white-space: nowrap; margin-left: auto; }
-.hb__release { text-decoration: none; }
-.hb__sub { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: 13px; color: var(--text-muted); }
 .hb__detail { flex: 1; min-width: 0; overflow-y: auto; padding: var(--sp-5) var(--sp-5) 340px; }   /* bottom: clear of the floating terminal */
-.hb__title-row { display: flex; align-items: flex-start; gap: var(--sp-4); }
-.hb__path-row { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-1); }
-.hb__head-ic { width: 72px; height: 72px; object-fit: contain; }
-.hb__cover-link { flex: none; line-height: 0; }
-.hb__cover { width: 220px; height: auto; max-height: 300px; object-fit: contain; border-radius: var(--r); box-shadow: var(--shadow); }
-.hb__sub-ic { width: 26px; height: 26px; object-fit: contain; }
-.hb__sep { color: var(--text-faint); }
-.hb__game-link { color: var(--text-muted); text-decoration: none; border-bottom: 1px dotted var(--line-strong); }
-.hb__game-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
-.hb__titles { min-width: 0; flex: 1; }
-.hb__title { margin: 0 0 var(--sp-1); font-size: 20px; font-weight: 600; }
 .hb__path { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-faint); word-break: break-all; }
-.hb__desc { margin: var(--sp-3) 0 0; font-size: 13.5px; line-height: 1.55; color: var(--text-muted); }
-.hb__dev { margin: var(--sp-4) 0 var(--sp-5); }
-.hb__dev-head { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: 2px; }
-.hb__dev-title { font-size: 13px; font-weight: 600; }
-.hb__dev-kind { font-size: 12px; color: var(--text-muted); }
 .hb__params { padding: var(--sp-4); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); }
 .hb__params-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-3); margin-bottom: var(--sp-3); }
 .hb__shared { margin-left: 6px; }
