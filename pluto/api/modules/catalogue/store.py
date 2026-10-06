@@ -9,7 +9,8 @@ Layout (catalogue/ is its own private repo, gitignored in cpc):
     catalogue/<system>/variants.json   hand-maintained credits for mods/translations:
                                        {"<game key>/<name>": {"author": "..."}}
     catalogue/favourites.json          per game: {"games": {"<system>": ["<game key>"]},
-                                       "imported": {"<node>/<system>": "<when>"}}
+                                       "imported": {"<node>/<system>": "<when>"},
+                                       "systems": [...], "homebrew": ["<Homebrew item id>"]}
 
 digital.json:
 
@@ -411,6 +412,8 @@ def save_favourites(root, favs):
         keys.sort()
     if "systems" in favs:
         favs["systems"] = sorted(set(favs["systems"]))
+    if "homebrew" in favs:
+        favs["homebrew"] = sorted(set(favs["homebrew"]))
     tmp = os.path.join(root, "favourites.json.tmp")
     with open(tmp, "w") as f:
         json.dump(favs, f, indent=2, sort_keys=True)

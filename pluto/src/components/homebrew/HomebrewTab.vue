@@ -18,7 +18,7 @@ import UiSubTabs from '../ui/UiSubTabs.vue'
 import { ICONS } from '../../composables/useIcons'
 import { catalogueApi } from '../../api/catalogue'
 import {
-  listItems, saveParams, stopItem, openFolder, startItem, streamUrl,
+  listItems, saveParams, stopItem, openFolder, startItem, streamUrl, setFavourite,
   type HomebrewItem, type HomebrewKind,
 } from '../../api/homebrew'
 
@@ -62,9 +62,7 @@ const coverUrl = (it: HomebrewItem) => it.game?.listed ? catalogueApi.coverUrl(i
 const mediaLink = (it: HomebrewItem) => it.game?.listed ? `/media/${it.game.system}/${it.game.key}` : null
 const hideImg = (e: Event) => { (e.target as HTMLElement).style.display = 'none' }
 
-// node -> group (game, mods only; '' otherwise) -> items. Within a game, vanilla (the
-// unmodified rebuild every mod is measured against) comes first.
-const isVanilla = (it: HomebrewItem) => it.kind === 'mods' && it.name === 'vanilla'
+// node -> group (game, mods only; '' otherwise) -> items.
 const sections = computed(() => {
   const byNode = new Map<string, { name: string; groups: Map<string, HomebrewItem[]> }>()
   for (const it of items.value) {
@@ -76,9 +74,19 @@ const sections = computed(() => {
   return [...byNode.entries()].map(([node, sec]) => ({
     node, name: sec.name,
     groups: [...sec.groups.entries()].map(([g, list]) =>
-      [g, [...list].sort((a, b) => Number(isVanilla(b)) - Number(isVanilla(a)))] as [string, HomebrewItem[]]),
+      [g, list] as [string, HomebrewItem[]]),
   }))
 })
+
+// ── favourites ───────────────────────────────────────────────────────────────
+// Starred items (what you are working on) are pinned on top of the list, across consoles,
+// and stay in their console below too. Stored with the game favourites, as Media does.
+const favourites = computed(() => items.value.filter(i => i.favourite)
+  .sort((a, b) => a.title.localeCompare(b.title)))
+async function toggleFavourite(it: HomebrewItem) {
+  it.favourite = !it.favourite
+  try { await setFavourite(it.id, it.favourite) } catch { it.favourite = !it.favourite }
+}
 
 // ── folded consoles ──────────────────────────────────────────────────────────
 // A console section folds away, so a node you are not working on stops pushing the
@@ -162,24 +170,36 @@ const { durations: lastRuns, remember: rememberRun } = useRunDurations('cpc.home
 const runKey = (itemId: string, node?: string | null) => itemId + ':' + (node || 'build')
 
 const { openRun } = useRuns()
-const runningId = ref<string | null>(null)
-let es: EventSource | null = null
+// One run per console at a time (builds of one console can share a toolchain and its
+// caches); different consoles build side by side, each in its own terminal tab.
+// console (item.node) -> the run: which item, and where it is sending (null = a build).
+const runs = ref<Record<string, { id: string; sendTo: string | null }>>({})
+const streams: Record<string, EventSource> = {}
+const isRunning = (id: string) => Object.values(runs.value).some(r => r.id === id)
+const runOf = (it: HomebrewItem) => (runs.value[it.node]?.id === it.id ? runs.value[it.node] : null)
 
 // Build: build, publish to Lab, sync (it shows up in Media). Send: rebuild and send it to the
 // node, then open the game in Media, as the Translation tab's build does.
-const sendingTo = ref<string | null>(null)
 async function build(node?: string) {
   const it = selected.value
-  if (!it || runningId.value) return
+  if (!it || runs.value[it.node]) return
   if (!(await save())) return
   const target = node ? it.sendTargets.find(t => t.id === node) : null
   const output = openRun(target ? `Send ${it.name} to ${target.name}` : `Build ${it.name}`,
     { raw: '', ok: null, step: 'build', startedAt: Date.now() },
     { lastMs: lastRuns.value[runKey(it.id, node)] ?? null })
-  runningId.value = it.id
-  sendingTo.value = node ?? null
+  const consoleId = it.node
+  runs.value = { ...runs.value, [consoleId]: { id: it.id, sendTo: node ?? null } }
+  const finish = () => {
+    streams[consoleId]?.close()
+    delete streams[consoleId]
+    const rest = { ...runs.value }
+    delete rest[consoleId]
+    runs.value = rest
+  }
   let mediaPath: string | null = null
-  es = new EventSource(streamUrl(it.id, node))
+  const es = new EventSource(streamUrl(it.id, node))
+  streams[consoleId] = es
   es.addEventListener('media', (e: MessageEvent) => { mediaPath = e.data })
   es.addEventListener('line', (e: MessageEvent) => {
     output.value = { ...output.value, raw: output.value.raw + e.data + '\n' }
@@ -188,7 +208,7 @@ async function build(node?: string) {
     output.value = { ...output.value, step: e.data }
   })
   es.addEventListener('done', (e: MessageEvent) => {
-    es?.close(); es = null
+    finish()
     const ok = e.data === 'ok'
     const stopped = e.data === 'failed:-15'          // SIGTERM from Stop
     output.value = {
@@ -196,24 +216,21 @@ async function build(node?: string) {
       raw: ok ? output.value.raw : output.value.raw + (stopped ? '\n[stopped]' : `\n[${e.data}]`),
     }
     if (ok) rememberRun(runKey(it.id, node), Date.now() - output.value.startedAt)
-    runningId.value = null
-    sendingTo.value = null
     load()   // the build recorded a new output
     if (ok && mediaPath) router.push(mediaPath)
   })
   es.onerror = () => {
-    es?.close(); es = null
+    finish()
     if (output.value.ok === null) {
       output.value = { ...output.value, ok: false, step: 'failed', raw: output.value.raw + '\n[connection lost]' }
     }
-    runningId.value = null
-    sendingTo.value = null
   }
 }
 
 async function stop() {
-  if (runningId.value) {
-    try { await stopItem(runningId.value) } catch { /* the stream reports the outcome */ }
+  const it = selected.value
+  if (it && isRunning(it.id)) {
+    try { await stopItem(it.id) } catch { /* the stream reports the outcome */ }
   }
 }
 
@@ -266,13 +283,31 @@ const EMPTY: Record<HomebrewKind, string> = {
       <nav class="hb__list">
         <div v-if="error" class="hb__state hb__state--bad">{{ error }}</div>
         <div v-else-if="loaded && !items.length" class="hb__state">{{ EMPTY[kind] }}</div>
+        <!-- what you are working on: starred items on top, across consoles -->
+        <section v-if="favourites.length" class="hb__node hb__favs">
+          <h4 class="hb__group"><span class="hb__group-title">Favourites</span></h4>
+          <div
+            v-for="it in favourites" :key="'fav-' + it.id" role="button" tabindex="0"
+            class="hb__row" :class="{ 'is-open': it.id === selectedId }"
+            @click="open(it)" @keydown.enter="open(it)"
+          >
+            <button class="hb__fav is-on" title="Unfavourite" @click.stop="toggleFavourite(it)">★</button>
+            <img v-if="ICONS[it.node]" :src="ICONS[it.node]" class="hb__fav-ic" :alt="it.nodeName" :title="it.nodeName" />
+            <span class="hb__row-title">{{ it.title }} ({{ it.nodeName }})</span>
+            <UiPill v-if="it.release" :tone="it.release.stable ? 'ok' : 'idle'">v{{ it.release.version }}</UiPill>
+            <UiPill v-else-if="it.noRelease" tone="warn" class="hb__private" :title="'Never released: ' + it.noRelease">Private: {{ it.noRelease }}</UiPill>
+            <UiPill v-else tone="idle">Unreleased</UiPill>
+            <span class="hb__row-name">{{ it.name }}</span>
+            <UiStatusDot v-if="isRunning(it.id)" state="ok" title="Running" />
+          </div>
+        </section>
         <section v-for="sec in sections" :key="sec.node" class="hb__node" :class="{ 'is-folded': !shown(sec) }">
           <UiSectionHead
             class="hb__node-head"
             :title="sec.name" :icon="ICONS[sec.node]" :count="countOf(sec)"
             :open="shown(sec)" @toggle="toggleFold(sec.node)"
           >
-            <UiStatusDot v-if="!shown(sec) && sec.groups.some(([, l]) => l.some(i => i.id === runningId))" state="ok" title="A build is running in here" />
+            <UiStatusDot v-if="!shown(sec) && sec.groups.some(([, l]) => l.some(i => isRunning(i.id)))" state="ok" title="A build is running in here" />
           </UiSectionHead>
           <template v-if="shown(sec)">
           <template v-for="[group, list] in sec.groups" :key="group">
@@ -280,20 +315,21 @@ const EMPTY: Record<HomebrewKind, string> = {
               <span class="hb__group-title">{{ list[0].game?.title ?? group }}</span>
               <span class="hb__group-dir">{{ group }}</span>
             </h4>
-            <button
-              v-for="it in list" :key="it.id"
-              class="hb__row" :class="{ 'is-open': it.id === selectedId, 'is-vanilla': isVanilla(it) }"
-              @click="open(it)"
+            <div
+              v-for="it in list" :key="it.id" role="button" tabindex="0"
+              class="hb__row" :class="{ 'is-open': it.id === selectedId }"
+              @click="open(it)" @keydown.enter="open(it)"
             >
-              <span class="hb__row-title">{{ isVanilla(it) ? 'Vanilla' : it.title }}</span>
+              <button class="hb__fav" :class="{ 'is-on': it.favourite }" :title="it.favourite ? 'Unfavourite' : 'Favourite'"
+                      @click.stop="toggleFavourite(it)">{{ it.favourite ? '★' : '☆' }}</button>
+              <span class="hb__row-title">{{ it.title }}</span>
               <UiPill v-if="it.release" :tone="it.release.stable ? 'ok' : 'idle'">v{{ it.release.version }}</UiPill>
-              <!-- never publishable (someone else's IP) reads differently from not yet released,
-                   and vanilla is the original game rebuilt: never ours to release at all -->
+              <!-- never publishable (someone else's IP) reads differently from not yet released -->
               <UiPill v-else-if="it.noRelease" tone="warn" class="hb__private" :title="'Never released: ' + it.noRelease">Private: {{ it.noRelease }}</UiPill>
-              <UiPill v-else-if="!isVanilla(it)" tone="idle">Unreleased</UiPill>
+              <UiPill v-else tone="idle">Unreleased</UiPill>
               <span class="hb__row-name">{{ it.name }}</span>
-              <UiStatusDot v-if="it.id === runningId" state="ok" title="Running" />
-            </button>
+              <UiStatusDot v-if="isRunning(it.id)" state="ok" title="Running" />
+            </div>
           </template>
           </template>
         </section>
@@ -325,7 +361,7 @@ const EMPTY: Record<HomebrewKind, string> = {
                   :href="selected.release.url" target="_blank" rel="noopener" :title="selected.release.name"
                 ><UiPill :tone="selected.release.stable ? 'ok' : 'idle'">{{ selected.release.stable ? 'Released' : 'Pre-release' }} v{{ selected.release.version }} ↗</UiPill></a>
                 <UiPill v-else-if="selected.noRelease" tone="warn" :title="'Never released: ' + selected.noRelease">Private: {{ selected.noRelease }}</UiPill>
-                <UiPill v-else-if="!isVanilla(selected)" tone="idle">Unreleased</UiPill>
+                <UiPill v-else tone="idle">Unreleased</UiPill>
               </div>
               <div class="hb__path-row">
                 <code class="hb__path">{{ selected.path }}</code>
@@ -339,9 +375,9 @@ const EMPTY: Record<HomebrewKind, string> = {
           <p v-if="selected.description" class="hb__desc">{{ selected.description }}</p>
 
           <RomCard
-            build play open :stop="runningId === selected.id"
-            :send-targets="selected.sendTargets" :send-busy="sendingTo"
-            :busy="!!runningId" :building="runningId === selected.id && !sendingTo"
+            build play open :stop="isRunning(selected.id)"
+            :send-targets="selected.sendTargets" :send-busy="runOf(selected)?.sendTo ?? null"
+            :busy="!!runs[selected.node]" :building="!!runOf(selected) && !runOf(selected)?.sendTo"
             :build-title="selected.game?.listed ? 'Build, publish to Lab and sync the catalogue' : 'Build'"
             play-title="Start the last build from its dev tree in the desktop emulator (no rebuild)"
             open-title="Open the build folder"
@@ -399,12 +435,16 @@ const EMPTY: Record<HomebrewKind, string> = {
 .hb__group-dir { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; font-weight: 400; color: var(--text-faint); white-space: nowrap; }
 .hb__row { display: flex; align-items: baseline; gap: var(--sp-2); width: 100%; padding: 7px var(--sp-4) 7px var(--sp-5); font: inherit; text-align: left; color: var(--text); background: none; border: 0; cursor: pointer; }
 .hb__row:hover { background: var(--surface-2); }
+/* favourite toggle, as on a Media row: always there, filled when starred */
+.hb__fav { border: 0; background: transparent; padding: 0; font: inherit; font-size: 12px; line-height: 1; cursor: pointer; color: var(--accent);
+           width: 12px; flex: 0 0 auto; align-self: center; margin-right: calc(var(--sp-3) - var(--sp-2)); }   /* as .md__star: centred, 12px, --sp-3 to the title */
+.hb__fav:not(.is-on) { color: var(--text-faint); }
+.hb__fav-ic { width: 14px; height: 14px; object-fit: contain; align-self: center; flex: none; }
 .hb__row.is-open { background: var(--accent-soft); }
 /* "Private: Intellectual Property" is longer than the panel: let the pill clip, not the row */
 .hb__private { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
 .hb__row-title { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .hb__row-name { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); white-space: nowrap; margin-left: auto; }
-.hb__row.is-vanilla .hb__row-title { font-style: italic; color: var(--text-muted); }
 .hb__release { text-decoration: none; }
 .hb__sub { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: 13px; color: var(--text-muted); }
 .hb__detail { flex: 1; min-width: 0; overflow-y: auto; padding: var(--sp-5) var(--sp-5) 340px; }   /* bottom: clear of the floating terminal */

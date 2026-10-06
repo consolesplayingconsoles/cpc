@@ -2424,7 +2424,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/catalogue/{system}"),
         ("GET", "/catalogue/{system}/cover/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
-        ("GET", "/homebrew"), ("GET", "/homebrew/stream"), ("PUT", "/homebrew/params"), ("POST", "/homebrew/stop"), ("POST", "/homebrew/open"), ("POST", "/homebrew/start"),
+        ("GET", "/homebrew"), ("GET", "/homebrew/stream"), ("PUT", "/homebrew/params"), ("POST", "/homebrew/stop"), ("POST", "/homebrew/open"), ("POST", "/homebrew/start"), ("POST", "/homebrew/favourite"),
         ("POST", "/messages"), ("POST", "/dreame/login"), ("POST", "/dreame/logout"),
         ("POST", "/control/signal"), ("POST", "/control/capture"),
         ("POST", "/control/listen"), ("POST", "/roomba-ai/audio"),
@@ -2719,6 +2719,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/homebrew/stop":
             item_id = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
             self._send(200, {"stopped": homebrew.stop(item_id)})
+        elif parsed.path == "/homebrew/favourite":
+            item_id = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
+            body = self._read_json_body()
+            if body is not None:
+                if not homebrew.find(self._repo_root(), item_id):
+                    self._send(404, {"error": "no such homebrew item"})
+                else:
+                    catalogue.set_homebrew_favourite(self._catalogue_root(), item_id, bool(body.get("on")))
+                    self._send(200, {"ok": True})
         elif parsed.path == "/homebrew/start":
             self._handle_homebrew_start((urllib.parse.parse_qs(parsed.query).get("id") or [""])[0])
         elif parsed.path == "/homebrew/open":
@@ -4194,10 +4203,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """Discovered items plus sendTargets: where Send can take each one, Lab (this Mac's ROM
         library) first."""
         items = homebrew.discover(self._repo_root())
+        favs = catalogue.homebrew_favourites(self._catalogue_root())
         by_system = {}
         for it in items:
             # Every homebrew ROM is sendable to nodes that host ITS system (a tool/game/mod
             # alike); a catalogue match is not required. A CATALOGUE only enriches Media.
+            it["favourite"] = it["id"] in favs              # starred: pinned on top of the list
             system = it.get("system")
             if system:
                 if system not in by_system:

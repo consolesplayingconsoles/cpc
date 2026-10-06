@@ -243,14 +243,19 @@ def physical_only(root):
 
 
 def deleted_games(root):
-    """Games whose every copy is gone from its node (files known, none present), across all
-    systems: the cleanup list. info = the nodes they were on."""
+    """Games with at least ONE copy gone from its node, across all systems: the cleanup list.
+
+    Not "every copy gone": a game whose card copy vanished while the Lab still holds it has
+    something to clean up just the same, and that is the common case after a card is
+    reorganised. info = the nodes the missing copies were on.
+    """
     out = []
     for s in systems(root):
         system = s["system"]
         for g in system_view(root, system)["games"]:
-            if g["files"] and not g["nodes"]:
-                was = sorted(set(f.get("node") for f in g["files"] if f.get("node")))
+            gone = [f for f in g["files"] if f.get("status") == "deleted"]
+            if gone:
+                was = sorted(set(f.get("node") for f in gone if f.get("node")))
                 out.append({"system": system, "key": g["key"], "title": g["title"], "info": ", ".join(was)})
     return {"games": out}
 
@@ -320,6 +325,19 @@ def set_favourite(root, system, game_key, on):
         keys.append(game_key)
     if not on and game_key in keys:
         keys.remove(game_key)
+    store.save_favourites(root, favs)
+
+
+def homebrew_favourites(root):
+    """Starred homebrew items (Homebrew tab ids), kept with the game favourites."""
+    return set(store.load_favourites(root).get("homebrew") or [])
+
+
+def set_homebrew_favourite(root, item_id, on):
+    favs = store.load_favourites(root)
+    keys = set(favs.get("homebrew") or [])
+    (keys.add if on else keys.discard)(item_id)
+    favs["homebrew"] = sorted(keys)
     store.save_favourites(root, favs)
 
 

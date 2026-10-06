@@ -366,7 +366,7 @@ paths:
       tags: [homebrew]
       summary: "SSE: build, publish to Lab + sync (catalogue games), and with node send it there; a send reuses the last build if its output still exists ('line', 'step', 'media', 'done')"
       parameters:
-        - { name: id, in: query, required: true, schema: { type: string }, description: 'item id, e.g. megadrive/mods/sonic1/vanilla' }
+        - { name: id, in: query, required: true, schema: { type: string }, description: 'item id, e.g. megadrive/mods/sonic1/sonic-infinite-jump' }
         - { name: node, in: query, required: false, schema: { type: string }, description: 'a sendTargets id; omit to build and sync only. With it, the build step is skipped when the last output is still on disk' }
       responses: { '200': { description: text/event-stream }, '404': { description: no such item } }
   /homebrew/params:
@@ -382,6 +382,12 @@ paths:
       summary: Stop an item's running action (kills its process group)
       parameters: [{ name: id, in: query, required: true, schema: { type: string } }]
       responses: { '200': { description: "{ stopped: bool }" } }
+  /homebrew/favourite:
+    post:
+      tags: [homebrew]
+      summary: Star or un-star an item (body {on}); starred items are pinned on top of the Homebrew list
+      parameters: [{ name: id, in: query, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK }, '404': { description: no such item } }
   /homebrew/open:
     post:
       tags: [homebrew]

@@ -60,6 +60,7 @@ export interface HomebrewItem {
   game: HomebrewGame | null         // from the game's CATALOGUE file
   output: HomebrewOutput | null     // last build output, if the file still exists
   sendTargets: HomebrewTarget[]     // nodes Send can take it to (catalogue send, or its deploy.sh)
+  favourite: boolean                // starred: pinned on top of the list (catalogue/favourites.json)
 }
 
 async function json<T>(res: Response): Promise<T> {
@@ -78,6 +79,13 @@ export async function listItems(): Promise<HomebrewItem[]> {
 export async function saveParams(id: string, values: Record<string, string>): Promise<HomebrewItem> {
   return json<HomebrewItem>(await fetch(`${BASE}/params?id=${enc(id)}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values }),
+  }))
+}
+
+// Star or un-star an item, as the Media tab stars games (same favourites.json)
+export async function setFavourite(id: string, on: boolean): Promise<void> {
+  await json<{ ok: boolean }>(await fetch(`${BASE}/favourite?id=${enc(id)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }),
   }))
 }
 
