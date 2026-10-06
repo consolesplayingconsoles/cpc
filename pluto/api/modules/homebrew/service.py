@@ -5,7 +5,9 @@ Convention (one naming, scripts are free to differ):
     nodes/local/<node>/homebrew/games/<game>/build.sh         -> kind "games"
     nodes/local/<node>/homebrew/tools/<tool>/build.sh         -> kind "tools"
 
-A folder is an item when it has build.sh. Parameters come from .env.sample files: a mod gets its game's (mods/<game>/, shared
+A folder is an item when it has build.sh, except a game's vanilla/ (the original game rebuilt) and
+its decomp (mods/<game>/<x>-decomp/): the plain game lives in the Media catalogue, so Pluto lists
+only real mods. Both still build from a terminal. Parameters come from .env.sample files: a mod gets its game's (mods/<game>/, shared
 by every mod of that game, e.g. the base ROM path) plus its own; each value is saved to the
 .env beside the sample it came from, which every repo gitignores. A mod's own key wins over
 a game key of the same name.
@@ -306,6 +308,8 @@ def discover(repo_root):
         hb = os.path.join(local, node, "homebrew")
         for game in _dirs(os.path.join(hb, "mods")):
             for mod in _dirs(os.path.join(hb, "mods", game)):
+                if mod == "vanilla" or mod.endswith("-decomp"):
+                    continue
                 folder = os.path.join(hb, "mods", game, mod)
                 if os.path.isfile(os.path.join(folder, "build.sh")):
                     items.append(_item(repo_root, node, "mods", game, mod, folder))
@@ -428,15 +432,14 @@ _UNSAFE = re.compile(r'[\\/:*?"<>|]+')
 def lab_filename(item, output_path):
     """The name a build gets in the Lab library, in the catalogue's naming (names.py):
     "<game title> [<mod> v<version>]<ext>". The bracket makes it a variant of the game, so it
-    groups with the game but never replaces the original file. Vanilla is [Vanilla Build]:
-    a rebuilt ROM, as opposed to the regular retail one. A standalone homebrew (a tool or an
+    groups with the game but never replaces the original file. A standalone homebrew (a tool or an
     original game, no CATALOGUE) has no base game to be a variant of, so it is just its title."""
     ext = os.path.splitext(output_path)[1].lower()
     game = item.get("game")
     if not game:
         return "%s%s" % (_UNSAFE.sub(" ", item["title"]).strip(), ext)
     title = _UNSAFE.sub(" ", game.get("title") or item["name"]).strip()
-    mod = "Vanilla Build" if item["name"] == "vanilla" else item["title"]
+    mod = item["title"]
     version = (item.get("release") or {}).get("version")
     # "by CPC" is what marks the file as ours, so a send replaces it on a node instead of
     # skipping it: our bytes change from build to build under the same catalogue name.
