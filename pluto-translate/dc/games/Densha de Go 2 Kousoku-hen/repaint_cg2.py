@@ -83,7 +83,8 @@ ITEMS_RIGHT = {0: "Two-Handed A",            # ツーハンドルA 1044
                11: "Port B, exp. socket 1"}  # ポートB拡張ソケット1 operator
 
 # --- HUD, pause and controls (2026-09-30). Box styles measured from the originals. ---
-BUBBLE = dict(cap=12, bg=7, keep={7, 28, 0}, clear=(0, 0, 224, 64), fill=1, ramp=[1], pal=1, lead=1.35)
+BUBBLE = dict(cap=14, bg=7, keep={7, 28, 0}, clear=(0, 0, 224, 64), fill=1, ramp=[1, 2, 4, 6], pal=1, lead=1.35,
+              upper=True)   # capitals, shaded with the bubble's own greys (black-only strokes broke up on a CRT)
 # tips: black text on white; every pixel but the white, the green border and the transparent corners is text
 CLOCK  = dict(cap=11, bg=1, fill=17, ramp=[17, 17], pal=1)   # 現在時刻, 次駅到着時刻; two colours only, so fill down to 35%: stems stay 2 px
 CLOCK2 = dict(cap=11, bg=1, fill=74, pal=1)                                          # 次駅通過時刻
@@ -288,7 +289,7 @@ def _plate(v):
 
 TIPS = {                                   # OBJgreenaNN: the DDG64 bubble and line breaks
     1: ("When the train doors\nclose, the cab signal\nlight will turn on.", 583),
-    2: ("Abide the speed limit\nuntil it is cancelled.", 584),
+    2: ("Abide by the speed limit\nuntil it is cancelled.", 584),   # DDG64 584: "Abide the" (slip, reported by ateam)
     3: ("Act promptly when\nmultiple speed limit\nsignals are given.", 585),
     4: ("Decelerate quickly\nwhen you receive\na limit signal.", 586),
     5: ("Until the next\nsignal, maintain\nthe speed limit.", 587),
@@ -296,7 +297,7 @@ TIPS = {                                   # OBJgreenaNN: the DDG64 bubble and l
     7: ("Don't continue\nto accelerate.", 589),
     8: ("Only apply the\nemergency brake\nin emergencies.", 590),
     9: ("Relay signals repeat\nsignals you can't see\nfurther down the line.", 591),
-    11: ("Don't mistakingly set\nboth the brakes and\nthe master control.", 592),
+    11: ("Don't mistakenly set\nboth the brakes and\nthe master control.", 592),   # DDG64 592: "mistakingly" (slip, reported by bingobongo)
     13: ("Decelerate as soon\nas you see a blinking\nspeed limit warning.", 594),
     14: ("The speed limit\nis in effect once\nit stops blinking.", 595),
     15: ("The speed limit has\nbeen lifted, but obey\nthe 70 km/h signal.", 596),
@@ -494,7 +495,7 @@ RECORDS = {
     **{n + v: dict(style=_sig(15), boxes=[((0, y, 96, y + 30), "Stop Signal")], protect=_plate(v))  # 停止信号 operator
        for n, y in (("OBJwin008", 103), ("OBJwin035", 110)) for v in ("", "j", "s")},     # (DDG64 190: none)
     "OBJwin044": dict(style=_sig(7), boxes=[((0, 95, 96, 120), "Express", _sig(31)), ((0, 120, 96, 144), "Relay")]),  # 191 192
-    **{"OBJwin%03d" % i: dict(style=_sig(10), boxes=[((0, 63, 96, 96), "Speed Limit")])   # 速度制限 89
+    **{"OBJwin%03d" % i: dict(style=dict(_sig(10), margin=(4, 0), pixel=True, ink_gap=3), boxes=[((0, 63, 96, 96), "SPEED\nLIMIT")])   # 速度制限 89
        for i in list(range(17, 33)) + list(range(48, 54))},
     "OBJwin033": dict(style=_sig(28), boxes=[((0, 64, 96, 96), "No Limit")]),             # 制限解除 79
     "OBJwin034": dict(style=_sig(10), boxes=[((0, 63, 96, 96), "Horn")]),                 # 警笛鳴せ 81
@@ -885,34 +886,42 @@ def coverage(text, cap, w, h):
     return out
 
 
-def pixel_fit(text, cap, w, h, ink_gap, face=None):
-    """One line drawn pixel-exact (no smoothing, no resampling) at the largest size up to `cap` that fits, each
-    letter placed by its ink with `ink_gap` px between: for words too small for antialiasing (8 px caps)."""
+def pixel_fit(text, cap, w, h, ink_gap, face=None, line_gap=3):
+    """Lines (split on \\n) drawn pixel-exact (no smoothing, no resampling) at the largest size up to `cap` that
+    fits, each letter placed by its ink with `ink_gap` px between, lines `line_gap` px apart and centred: for
+    words too small for antialiasing."""
+    lines = text.split("\n")
     for size in range(int(round(cap / CAP)), 6, -1):
         font = ImageFont.truetype(face or FONT, size)
-        glyphs = []
-        for ch in text:
-            g = Image.new("1", (size * 2, size * 2))
-            d = ImageDraw.Draw(g)
-            d.fontmode = "1"
-            d.text((size // 2, 0), ch, 1, font=font)
-            bb = g.getbbox()
-            glyphs.append((g, bb) if bb else (None, size // 3))
-        top = min(bb[1] for g, bb in glyphs if g)
-        bot = max(bb[3] for g, bb in glyphs if g)
-        width = sum((bb[2] - bb[0]) if g else bb for g, bb in glyphs) + ink_gap * (len(text) - 1)
-        if width <= w and bot - top <= h:
+        rows = []
+        for ln in lines:
+            glyphs = []
+            for ch in ln:
+                g = Image.new("1", (size * 2, size * 2))
+                d = ImageDraw.Draw(g)
+                d.fontmode = "1"
+                d.text((size // 2, 0), ch, 1, font=font)
+                bb = g.getbbox()
+                glyphs.append((g, bb) if bb else (None, size // 3))
+            rows.append(glyphs)
+        inked = [bb for glyphs in rows for g, bb in glyphs if g]
+        top, bot = min(bb[1] for bb in inked), max(bb[3] for bb in inked)
+        widths = [sum((bb[2] - bb[0]) if g else bb for g, bb in glyphs) + ink_gap * (len(glyphs) - 1) for glyphs in rows]
+        height = (bot - top) * len(rows) + line_gap * (len(rows) - 1)
+        if max(widths) <= w and height <= h:
             break
     out = np.zeros((h, w))
-    x = (w - width) // 2
-    y = (h - (bot - top)) // 2
-    for g, bb in glyphs:
-        if g is None:
-            x += bb + ink_gap
-            continue
-        a = np.asarray(g.crop((bb[0], top, bb[2], bot)), dtype=float)
-        out[y:y + a.shape[0], x:x + a.shape[1]] = np.maximum(out[y:y + a.shape[0], x:x + a.shape[1]], a)
-        x += a.shape[1] + ink_gap
+    y = (h - height) // 2
+    for glyphs, width in zip(rows, widths):
+        x = (w - width) // 2
+        for g, bb in glyphs:
+            if g is None:
+                x += bb + ink_gap
+                continue
+            a = np.asarray(g.crop((bb[0], top, bb[2], bot)), dtype=float)
+            out[y:y + a.shape[0], x:x + a.shape[1]] = np.maximum(out[y:y + a.shape[0], x:x + a.shape[1]], a)
+            x += a.shape[1] + ink_gap
+        y += (bot - top) + line_gap
     return out
 
 
@@ -1074,6 +1083,8 @@ def boxtext(a, box, text, st):
             free = np.ones(sub.shape, bool)
     if text == "":                                 # clear only: the English keeps just the Latin line already there
         return
+    if st.get("upper"):                            # shown in capitals (the wording itself is unchanged)
+        text = text.upper()
     pad = sum(w for _, w in rings)
     mx, my = st.get("margin", (0, 0))              # cleared across the whole box, drawn inside the margin
     fitter = (lambda t, c, ww, hh, *a: pixel_fit(t, c, ww, hh, st["ink_gap"], st.get("face"))) if st.get("pixel") else fit
@@ -1468,7 +1479,7 @@ def main(lst_p, tbl_p, cg2_p, pal_p, out_tbl, out_cg2, preview=None):
                 kept.add(existing[px])
     pool = [t for t in freeable if t not in kept]
     out_tiles = list(tiles)
-    placed, ids_for = {}, {}
+    placed, ids_for, todo = {}, {}, []           # todo: (slot, pixels) still to encode
     for name, a in new.items():
         w, h, _ = sp.tilemap(name)
         ids = []
@@ -1481,10 +1492,15 @@ def main(lst_p, tbl_p, cg2_p, pal_p, out_tbl, out_cg2, preview=None):
                     if not pool:
                         raise SystemExit("out of tile ids")
                     t = pool.pop(0); placed[px] = t
-                    e = A.cg2_encode(px)
-                    out_tiles[t] = (e[0], e[1:])
+                    todo.append((t, px))
             ids.append(placed[px])
         ids_for[name] = ids
+    # Encoding is ~0.35 s a tile and a full build has ~11,600 new ones: an hour on one core. Each tile
+    # is independent, so every core takes a share (reclaim() does the same).
+    from multiprocessing import Pool
+    with Pool() as workers:
+        for (t, _), e in zip(todo, workers.map(A.cg2_encode, [px for _, px in todo], chunksize=64)):
+            out_tiles[t] = (e[0], e[1:])
     for t in pool:                                 # freed and unused: smallest valid tile
         out_tiles[t] = (1, bytes([0x7F, 0, 0x7F, 0]))
 
