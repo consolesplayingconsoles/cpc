@@ -293,7 +293,11 @@ const EMPTY: Record<HomebrewKind, string> = {
           >
             <button class="hb__fav is-on" title="Unfavourite" @click.stop="toggleFavourite(it)">★</button>
             <img v-if="ICONS[it.node]" :src="ICONS[it.node]" class="hb__fav-ic" :alt="it.nodeName" :title="it.nodeName" />
-            <span class="hb__row-title">{{ it.title }} ({{ it.nodeName }})</span>
+            <!-- no group heading up here, so the row says what the mod patches itself. The
+                 console is the icon (named in its title), spelled out only without one. -->
+            <span class="hb__row-title">
+              {{ it.game?.title ? it.game.title + ': ' + it.title : it.title }}{{ ICONS[it.node] ? '' : ' (' + it.nodeName + ')' }}
+            </span>
             <UiPill v-if="it.release" :tone="it.release.stable ? 'ok' : 'idle'">v{{ it.release.version }}</UiPill>
             <UiPill v-else-if="it.noRelease" tone="warn" class="hb__private" :title="'Never released: ' + it.noRelease">Private: {{ it.noRelease }}</UiPill>
             <UiPill v-else tone="idle">Unreleased</UiPill>
