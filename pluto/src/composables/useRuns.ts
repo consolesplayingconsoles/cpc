@@ -17,6 +17,13 @@ export interface Run {
   output:   Ref<TerminalOutput>
   lastMs:   number | null
   onClose?: () => void
+  after?:   RunAction        // offered in the terminal bar once the run ends ok (e.g. Play the build)
+}
+
+// A follow-up the run's producer offers when it succeeds; a failure is shown in the bar.
+export interface RunAction {
+  label: string
+  run:   () => Promise<void>
 }
 
 const runs     = shallowRef<Run[]>([])
@@ -49,7 +56,7 @@ function focus(id: number) {
 function openRun(
   title: string,
   output: TerminalOutput | Readonly<Ref<TerminalOutput>>,
-  opts: { key?: string; lastMs?: number | null; onClose?: () => void } = {},
+  opts: { key?: string; lastMs?: number | null; onClose?: () => void; after?: RunAction } = {},
 ): Ref<TerminalOutput> {
   const existing = opts.key ? runs.value.find(r => r.key === opts.key) : undefined
   if (existing) {
@@ -60,7 +67,7 @@ function openRun(
   const run: Run = {
     id: ++seq, key: opts.key, title,
     output: (isRef(output) ? output : ref(output)) as Ref<TerminalOutput>,
-    lastMs: opts.lastMs ?? null, onClose: opts.onClose,
+    lastMs: opts.lastMs ?? null, onClose: opts.onClose, after: opts.after,
   }
   runs.value = [...runs.value, run]
   focus(run.id)

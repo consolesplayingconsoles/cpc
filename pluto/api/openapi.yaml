@@ -364,10 +364,11 @@ paths:
   /homebrew/stream:
     get:
       tags: [homebrew]
-      summary: "SSE: build, publish to Lab + sync (catalogue games), and with node send it there; a send reuses the last build if its output still exists ('line', 'step', 'media', 'done')"
+      summary: "SSE: build, publish to Lab + sync (catalogue games), and with node send it there; a send reuses the last build if its output still exists ('line', 'step', 'media', 'done'). Runs as a job: a second request while it runs follows it (console replayed from the start)"
       parameters:
         - { name: id, in: query, required: true, schema: { type: string }, description: 'item id, e.g. megadrive/mods/sonic1/sonic-infinite-jump' }
         - { name: node, in: query, required: false, schema: { type: string }, description: 'a sendTargets id; omit to build and sync only. With it, the build step is skipped when the last output is still on disk' }
+        - { name: attach, in: query, required: false, schema: { type: string, enum: ['1'] }, description: "only follow the item's running job; with none running answers 'done' 'none'" }
       responses: { '200': { description: text/event-stream }, '404': { description: no such item } }
   /homebrew/params:
     put:
@@ -382,6 +383,12 @@ paths:
       summary: Stop an item's running action (kills its process group)
       parameters: [{ name: id, in: query, required: true, schema: { type: string } }]
       responses: { '200': { description: "{ stopped: bool }" } }
+  /homebrew/forget:
+    post:
+      tags: [homebrew]
+      summary: Drop an item's finished job and its kept console (its terminal tab was closed); a running job stays
+      parameters: [{ name: id, in: query, required: true, schema: { type: string } }]
+      responses: { '200': { description: "{ forgotten: bool }" } }
   /homebrew/favourite:
     post:
       tags: [homebrew]

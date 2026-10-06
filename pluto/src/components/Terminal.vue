@@ -12,11 +12,23 @@ export interface TerminalOutput {
 
 <script setup lang="ts">
 import { ref, watch, computed, nextTick, onMounted, onUnmounted } from 'vue'
+import type { RunAction } from '../composables/useRuns'
+
+// The follow-up: busy while it runs, its error (the API's reason) shown next to it
+const afterBusy  = ref(false)
+const afterError = ref('')
+async function runAfter() {
+  if (!props.after || afterBusy.value) return
+  afterBusy.value = true
+  afterError.value = ''
+  try { await props.after.run() } catch (e) { afterError.value = (e as Error).message } finally { afterBusy.value = false }
+}
 
 const props = defineProps<{
   title:     string          // bar label, e.g. "deploy", "sync"
   output:    TerminalOutput
   lastMs?:   number | null   // previous run's duration, shown as "~last"
+  after?:    RunAction       // a follow-up offered once the run ends ok (e.g. Play the build)
   cardStyle: Record<string, string>
 }>()
 
@@ -98,6 +110,17 @@ async function copyOutput() {
         </span>
       </span>
       <span class="term__tools">
+        <span v-if="after && output.ok === true && afterError" class="term__after-err" :title="afterError">{{ afterError }}</span>
+        <button
+          v-if="after && output.ok === true"
+          class="term__after"
+          :disabled="afterBusy"
+          :title="after.label + ' the result'"
+          @click="runAfter"
+        >
+          <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>
+          {{ after.label }}
+        </button>
         <button class="term__btn" :title="copied ? 'copied' : 'copy'" @click="copyOutput">
           <svg v-if="!copied" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="9" y="9" width="11" height="11" rx="2"/>
@@ -224,5 +247,20 @@ async function copyOutput() {
 @keyframes borderPulse {
   0%   { border-color: #3deb76; box-shadow: 0 0 40px rgba(61,235,118,0.7); }
   100% { border-color: #1a3d22; box-shadow: 0 8px 30px rgba(0,0,0,0.45), 0 0 22px rgba(10,51,32,0.55); }
+}
+/* the follow-up (Play the build): shown once the run ends ok, in the bar's own green */
+.term__after {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 24px; padding: 0 9px;
+  font: 600 12px var(--font-sans);
+  color: #3deb76; background: transparent;
+  border: 1px solid #235e38; border-radius: 4px;
+  cursor: pointer;
+}
+.term__after:hover:not(:disabled) { background: #12301e; }
+.term__after:disabled { opacity: 0.6; cursor: progress; }
+.term__after-err {
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 12px var(--font-sans); color: #ff8a80;
 }
 </style>

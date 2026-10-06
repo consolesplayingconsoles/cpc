@@ -56,6 +56,91 @@ _outputs_lock = threading.Lock()
 _procs = {}                    # item id -> Popen of the running action
 _procs_lock = threading.Lock()
 
+_jobs = {}                     # item id -> the build/send job: its events so far, kept for re-attaching
+_jobs_lock = threading.Lock()
+
+
+class Job:
+    """A build or send that runs on its own thread, whoever is watching. Its events are kept,
+    so a reloaded page (or a second tab) re-attaches and replays the console from the start."""
+
+    def __init__(self, item_id, node):
+        self.item_id, self.node = item_id, node or None
+        self.events = []                       # [(event, data)]
+        self.done = False
+        self.cond = threading.Condition()
+
+    def emit(self, event, data):
+        with self.cond:
+            self.events.append((event, str(data)))
+            if event == "done":
+                self.done = True
+            self.cond.notify_all()
+
+    def follow(self, timeout=15):
+        """Yield every event from the first, then new ones as they come; None now and then
+        (every `timeout` s) so the caller can keep the connection alive. Ends after 'done'."""
+        i = 0
+        while True:
+            with self.cond:
+                if i >= len(self.events) and not self.done:
+                    self.cond.wait(timeout)
+                batch = self.events[i:]
+                finished = self.done
+            if not batch:
+                if finished:
+                    return
+                yield None
+                continue
+            for ev in batch:
+                yield ev
+            i += len(batch)
+            if finished and i >= len(self.events):
+                return
+
+
+def job(item_id):
+    """The item's running job, or None."""
+    with _jobs_lock:
+        j = _jobs.get(item_id)
+        return j if j and not j.done else None
+
+
+def new_job(item_id, node):
+    """Register a new job; RuntimeError if one is already running for this item."""
+    with _jobs_lock:
+        j = _jobs.get(item_id)
+        if j and not j.done:
+            raise RuntimeError("%s is already running" % item_id)
+        j = _jobs[item_id] = Job(item_id, node)
+        return j
+
+
+def forget_job(item_id):
+    """Drop the item's finished job (its kept console); a running one stays. -> dropped?"""
+    with _jobs_lock:
+        j = _jobs.get(item_id)
+        if j and j.done:
+            del _jobs[item_id]
+            return True
+        return False
+
+
+def _orphan(folder, action):
+    """PID of a <folder>/<action>.sh still running from before an API restart (its job died
+    with the old API, the script did not), or None."""
+    script = os.path.join(folder, action + ".sh")
+    try:
+        out = subprocess.run(["ps", "-axo", "pid=,command="], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True).stdout
+    except OSError:
+        return None
+    for line in out.splitlines():
+        pid, _, cmd = line.strip().partition(" ")
+        if cmd.strip() in ("bash " + script, "/bin/bash " + script) or cmd.strip().endswith(" " + script):
+            return int(pid)
+    return None
+
 
 def is_running(item_id):
     """Whether an action is still going. A process that has exited counts as finished even
@@ -242,6 +327,26 @@ def _catalogue_game(repo_root, folder):
     return {"system": system, "key": key, "title": _nodash(titles.get(key) or key), "listed": key in titles}
 
 
+def game_env(repo_root, system, key):
+    """The settings of the homebrew game folder whose CATALOGUE is "<system> <key>": its
+    .env.sample defaults overlaid with its .env. {} when no folder claims the game. Lets a
+    game carry how it should be played (e.g. FLYCAST_SINGLE_THREADED) next to how it's built."""
+    local = os.path.join(repo_root, "nodes", "local")
+    for node in _dirs(local):
+        hb = os.path.join(local, node, "homebrew")
+        for folder in ([os.path.join(hb, "mods", g) for g in _dirs(os.path.join(hb, "mods"))] +
+                       [os.path.join(hb, "games", g) for g in _dirs(os.path.join(hb, "games"))]):
+            game = _catalogue_game(repo_root, folder)
+            if game and game["system"] == system and game["key"] == key:
+                values = {}
+                sample = os.path.join(folder, ".env.sample")
+                if os.path.isfile(sample):
+                    values = {p["key"]: p["default"] for p in _parse_sample(sample)}
+                values.update(_parse_env(os.path.join(folder, ".env")))
+                return values
+    return {}
+
+
 def _param_scopes(folder, group):
     """[(scope, sample_path)] for an item: its game's sample first (mods only), then its own."""
     scopes = []
@@ -284,7 +389,8 @@ def _item(repo_root, node, kind, group, name, folder):
         "actions": [a for a in ACTIONS if os.path.isfile(os.path.join(folder, a + ".sh"))],
         "params": params,
         "paramsPaths": env_paths,
-        "running": is_running(item_id),
+        "running": is_running(item_id) or job(item_id) is not None,
+        "runningSend": (job(item_id) or Job(None, None)).node,   # where the running job sends (null = a build)
         "release": _release(folder),
         # never publishable (IP that is not ours), with the reason: not the same as unreleased
         "noRelease": _unreleasable(folder),
@@ -385,6 +491,9 @@ def start(repo_root, item, action):
     env["PYTHONUNBUFFERED"] = "1"
     if is_running(item["id"]):
         raise RuntimeError("%s is already running" % item["id"])
+    pid = _orphan(folder, action)
+    if pid:
+        raise RuntimeError("%s.sh is still running from before (pid %d): wait for it, or kill it" % (action, pid))
     with _procs_lock:
         proc = subprocess.Popen(["bash", os.path.join(folder, action + ".sh")], cwd=folder, env=env,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

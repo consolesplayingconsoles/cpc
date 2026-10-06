@@ -55,6 +55,7 @@ export interface HomebrewItem {
   params: HomebrewParam[]
   paramsPaths: string[]   // the .env files the params are saved to (game's, then its own)
   running: boolean
+  runningSend: string | null        // the node a running job sends to (null = a build)
   release: HomebrewRelease | null   // from a RELEASE file: newest stable GitHub release
   noRelease: string | null          // MOD_NO_RELEASE: why this one can never be published
   game: HomebrewGame | null         // from the game's CATALOGUE file
@@ -89,6 +90,11 @@ export async function setFavourite(id: string, on: boolean): Promise<void> {
   }))
 }
 
+// The run's terminal tab was closed: the API drops the finished job's kept console
+export async function forgetRun(id: string): Promise<void> {
+  await json<{ forgotten: boolean }>(await fetch(`${BASE}/forget?id=${enc(id)}`, { method: 'POST' }))
+}
+
 export async function stopItem(id: string): Promise<boolean> {
   return (await json<{ stopped: boolean }>(await fetch(`${BASE}/stop?id=${enc(id)}`, { method: 'POST' }))).stopped
 }
@@ -105,6 +111,7 @@ export async function openFolder(id: string, output = false): Promise<void> {
 }
 
 // Build (no node): build, publish to Lab, sync. Send (node): the same, then send it there.
-export function streamUrl(id: string, node?: string): string {
-  return `${BASE}/stream?id=${enc(id)}${node ? `&node=${enc(node)}` : ''}`
+// attach: only follow the item's running job (replayed from its start); never starts one.
+export function streamUrl(id: string, node?: string, attach = false): string {
+  return `${BASE}/stream?id=${enc(id)}${node ? `&node=${enc(node)}` : ''}${attach ? '&attach=1' : ''}`
 }
