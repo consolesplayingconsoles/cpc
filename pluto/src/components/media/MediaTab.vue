@@ -563,6 +563,9 @@ function sendAll(node: string, name: string, path?: string, from?: string, game?
       <!-- stage: the non-scrolling frame the peek drawer pins to, as on a system page -->
       <div class="md__stage">
       <div class="md__body" @click="peek = null">
+        <!-- what you are looking at, and what is narrowing it: one line, since neither
+             fills a row of its own -->
+        <div v-if="systems.length || gridFilters" class="md__summary">
         <p v-if="systems.length" class="md__stats">{{ stats.join(' · ') }}</p>
         <span v-if="gridFilters" class="md__pills md__pills--grid">
           <button v-if="favSystemsOnly" class="md__pill" @click="favSystemsOnly = false">Favourite consoles ✕</button>
@@ -573,6 +576,7 @@ function sendAll(node: string, name: string, path?: string, from?: string, game?
           <button v-if="deletedGames" class="md__pill" @click="toggleGameFilter('deleted')">Deleted ✕</button>
           <button class="md__pill-clear" @click="favSystemsOnly = ownedOnly = false; clearGameFilters()">Clear all</button>
         </span>
+        </div>
         <template v-if="missingOpen">
           <UiState v-if="missingLoading" loading>Loading…</UiState>
           <UiState v-else-if="missing && !missing.length">{{ listMode === 'hardware' ? 'No hardware recorded.' : [physOnly, missingOnly, favGames, deletedGames].filter(Boolean).length > 1 ? 'No results for these filters.' : favGames ? 'No favourite games yet.' : deletedGames ? 'No deleted games.' : missingOnly ? 'Every game has a cover.' : 'Every physical game has a digital copy.' }}</UiState>
@@ -867,7 +871,9 @@ function sendAll(node: string, name: string, path?: string, from?: string, game?
 .md__view { width: 110px; flex: none; }
 .md__view--wide { width: 140px; }
 .md__pills { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; padding: 4px 0; }
-.md__pills--grid { justify-content: flex-end; margin: calc(-1 * var(--sp-2)) 0 var(--sp-3); }
+.md__pills--grid { justify-content: flex-end; margin: 0; }
+/* stats on the left, the filters narrowing them on the right; wraps on a narrow panel */
+.md__summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-3); min-height: 26px; }
 .md__pill { font: inherit; font-size: 12px; padding: 3px 10px; color: var(--accent); background: var(--accent-soft, var(--surface-2)); border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
 .md__pill-clear { font: inherit; font-size: 12px; color: var(--text-muted); background: none; border: 0; cursor: pointer; }
 .md__pill-clear:hover { color: var(--text); }
@@ -960,7 +966,7 @@ function sendAll(node: string, name: string, path?: string, from?: string, game?
 .md__node.is-save { color: var(--ok); }
 .md__node.is-deleted { color: var(--bad); background: transparent; border: 1px dashed var(--bad); }
 
-.md__stats { margin: 0 0 var(--sp-3); font-size: 12.5px; color: var(--text-muted); }
+.md__stats { margin: 0; font-size: 12.5px; color: var(--text-muted); }
 @media (max-width: 640px) {
   .md__stats { display: none; }
   .md__bar, .md__row { padding-left: var(--sp-4); padding-right: var(--sp-4); }
