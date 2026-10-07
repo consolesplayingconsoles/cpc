@@ -2424,7 +2424,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/catalogue/{system}"),
         ("GET", "/catalogue/{system}/cover/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
-        ("GET", "/homebrew"), ("GET", "/homebrew/stream"), ("PUT", "/homebrew/params"), ("POST", "/homebrew/stop"), ("POST", "/homebrew/forget"), ("POST", "/homebrew/open"), ("POST", "/homebrew/start"), ("POST", "/homebrew/favourite"),
+        ("GET", "/homebrew"), ("GET", "/homebrew/stream"), ("PUT", "/homebrew/params"), ("POST", "/homebrew/stop"), ("POST", "/homebrew/forget"), ("POST", "/homebrew/open"), ("POST", "/homebrew/start"), ("POST", "/homebrew/favourite"), ("POST", "/homebrew/releases/refresh"),
         ("POST", "/messages"), ("POST", "/dreame/login"), ("POST", "/dreame/logout"),
         ("POST", "/control/signal"), ("POST", "/control/capture"),
         ("POST", "/control/listen"), ("POST", "/roomba-ai/audio"),
@@ -2716,6 +2716,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_dreame_login()
         elif parsed.path == "/dreame/logout":
             self._handle_dreame_logout()
+        elif parsed.path == "/homebrew/releases/refresh":
+            # fetch the GitHub releases (and their download counts) again instead of the cached copy
+            homebrew.refresh_releases()
+            self._send(200, {"items": self._homebrew_items()})
         elif parsed.path == "/homebrew/stop":
             item_id = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
             self._send(200, {"stopped": homebrew.stop(item_id)})

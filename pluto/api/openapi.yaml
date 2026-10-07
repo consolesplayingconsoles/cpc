@@ -403,6 +403,11 @@ paths:
         - { name: id, in: query, required: true, schema: { type: string } }
         - { name: output, in: query, required: false, schema: { type: string, enum: ['1'] } }
       responses: { '200': { description: "{ opened: path }" }, '404': { description: no such item } }
+  /homebrew/releases/refresh:
+    post:
+      tags: [homebrew]
+      summary: Fetch every released item's GitHub releases again (the download counts with them) instead of the 10-minute cache
+      responses: { '200': { description: "{ items: [...] }, as GET /homebrew" } }
   /homebrew/start:
     post:
       tags: [homebrew]
