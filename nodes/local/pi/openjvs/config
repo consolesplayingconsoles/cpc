@@ -3,17 +3,17 @@
 
 # Setup the default game to emulate
 # Use ROTARY for the rotary controller on the HAT
-DEFAULT_GAME generic
+DEFAULT_GAME virtua-tennis
 
 # Setup which IO to emulate by default
-EMULATE sega-type-3
+EMULATE sega-type-1
 
 # Setup the sense line
 # SENSE_LINE_TYPE 0 - USB to RS485 with no sense line
 # SENSE_LINE_TYPE 1 - USB to RS485 with sense line
 # SENSE_LINE_TYPE 2 - Raspberry Pi OpenJVS Hat
-SENSE_LINE_TYPE 0
-SENSE_LINE_PIN 12
+SENSE_LINE_TYPE 1
+SENSE_LINE_PIN 581
 
 # Setup the debug mode for outputting debug information
 # DEBUG_MODE 1 - This will show the JVS outputs
@@ -21,7 +21,7 @@ SENSE_LINE_PIN 12
 DEBUG_MODE 1
 
 # Setup the device path
-DEVICE_PATH /dev/ttyUSB0
+DEVICE_PATH /dev/openjvs-rs485
 
 # Automatic Controller Detection
 # If set to 0 OpenJVS will ignore all controllers
