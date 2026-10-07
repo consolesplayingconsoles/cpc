@@ -17,7 +17,7 @@ import UiSubTabs from '../ui/UiSubTabs.vue'
 import { ICONS } from '../../composables/useIcons'
 import { catalogueApi } from '../../api/catalogue'
 import {
-  listItems, saveParams, stopItem, openFolder, startItem, streamUrl, setFavourite, forgetRun,
+  listItems, saveParams, stopItem, openFolder, startItem, streamUrl, setFavourite, forgetRun, refreshReleases,
   type HomebrewItem, type HomebrewKind,
 } from '../../api/homebrew'
 
@@ -43,11 +43,12 @@ const loading = ref(false)
 const error = ref('')
 const loaded = ref(false)
 
-async function load() {
+// fresh: also ask GitHub for the releases (and download counts) instead of the API's cache
+async function load(fresh = false) {
   loading.value = true
   error.value = ''
   try {
-    all.value = await listItems()
+    all.value = fresh ? await refreshReleases() : await listItems()
     loaded.value = true
     // A build still running (started before a reload, or in another tab): pick its console back up
     for (const it of all.value) {
@@ -60,6 +61,7 @@ async function load() {
   }
 }
 watch(() => props.active, (on) => { if (on && !loaded.value) load() }, { immediate: true })
+
 
 const coverUrl = (it: HomebrewItem) => it.game?.listed ? catalogueApi.coverUrl(it.game.system, it.game.key) : null
 const mediaLink = (it: HomebrewItem) => it.game?.listed ? `/media/${it.game.system}/${it.game.key}` : null
@@ -290,7 +292,7 @@ const EMPTY: Record<HomebrewKind, string> = {
   <div class="hb">
     <header class="hb__bar">
       <h2 class="hb__heading">Homebrew</h2>
-      <UiButton variant="secondary" :loading="loading" loading-text="Refreshing" @click="load">Refresh</UiButton>
+      <UiButton variant="secondary" :loading="loading" loading-text="Refreshing" title="Re-read the projects and ask GitHub for the release download counts" @click="load(true)">Refresh</UiButton>
     </header>
     <UiSubTabs
       :model-value="kind"

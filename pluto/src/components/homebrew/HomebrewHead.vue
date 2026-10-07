@@ -12,6 +12,7 @@ import { RouterLink } from 'vue-router'
 import type { HomebrewItem } from '../../api/homebrew'
 import RomCard from '../RomCard.vue'
 import UiPill from '../ui/UiPill.vue'
+import UiInfoTip from '../ui/UiInfoTip.vue'
 
 const props = defineProps<{
   item: HomebrewItem
@@ -30,10 +31,10 @@ defineEmits<{ build: []; play: []; openOutput: []; send: [node: string]; stop: [
 
 function hideImg(e: Event) { (e.target as HTMLImageElement).style.display = 'none' }
 
-// A build is ALWAYS build/ under the game folder and always carries the ROM's own name
-// (CLAUDE.md, rom_name.py), so the path says nothing the project row above has not said
-// already: print the ROM, keep the full path on hover.
-const outName = computed(() => props.item.output?.path.split('/').pop() ?? null)
+// GitHub's own counts (each release's assets), as of the last fetch: cached by the API for
+// ten minutes; the tab's Refresh asks again.
+const downloads = computed(() => props.item.release?.downloads ?? null)
+const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(0, 16) ?? '')
 </script>
 
 <template>
@@ -62,6 +63,20 @@ const outName = computed(() => props.item.output?.path.split('/').pop() ?? null)
           <UiPill v-else-if="item.noRelease" tone="warn" :title="'Never released: ' + item.noRelease">Private: {{ item.noRelease }}</UiPill>
           <UiPill v-else tone="idle">Unreleased</UiPill>
 
+          <!-- downloads are the release's, so they read beside it: the number, and the
+               per-version split in the tip rather than strung across the card -->
+          <span v-if="downloads" class="hbh__dl">
+            <b>{{ downloads.total }}</b> downloads
+            <UiInfoTip>
+              <template v-if="item.release?.bundledWith.length">
+                Released together with {{ item.release.bundledWith.join(', ') }}, so these count the whole release.<br />
+              </template>
+              <template v-for="v in downloads.versions" :key="v.url">
+                <a :href="v.url" target="_blank" rel="noopener" :title="v.name">v{{ v.version }}</a>{{ v.prerelease ? ' (pre-release)' : '' }}: {{ v.count }}<br />
+              </template>
+              Counted by GitHub, as of {{ checked }}.
+            </UiInfoTip>
+          </span>
         </div>
 
         <!-- What you came here to do, so it gets its own row under the title at a size
@@ -82,21 +97,8 @@ const outName = computed(() => props.item.output?.path.split('/').pop() ?? null)
 
         <p v-if="item.description" class="hbh__desc">{{ item.description }}</p>
 
-        <div class="hbh__paths">
-          <span class="hbh__label">Project</span>
-          <code class="hbh__path">{{ item.path }}</code>
-          <span />
-
-          <span class="hbh__label">Dev build</span>
-          <code v-if="outName" class="hbh__path" :title="item.output?.path">{{ outName }}</code>
-          <span v-else class="hbh__hint">Not built yet.</span>
-          <span />
-        </div>
       </div>
     </div>
-
-    <!-- when it was last built is the quietest fact here, so it closes the card -->
-    <p v-if="item.output" class="hbh__built">Built {{ item.output.at.replace('T', ' ') }}</p>
   </header>
 </template>
 
@@ -131,11 +133,7 @@ const outName = computed(() => props.item.output?.path.split('/').pop() ?? null)
 .hbh__actions :deep(.send-label) { font-size: 13px; }
 .hbh__actions :deep(.send-ic) { width: 22px; height: 22px; }
 .hbh__desc { margin: var(--sp-2) 0 0; font-size: 13.5px; line-height: 1.55; color: var(--text-muted); }
-/* label, value, then whatever closes the row: a grid so the two lines align and a label
-   never wraps onto two of its own */
-.hbh__paths { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 2px var(--sp-3); margin-top: var(--sp-3); }
-.hbh__path { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hbh__label { font-size: 11.5px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
-.hbh__hint { font-size: 11.5px; color: var(--text-faint); white-space: nowrap; }
-.hbh__built { margin: var(--sp-3) 0 0; text-align: right; font-size: 11.5px; color: var(--text-faint); }
+/* the count is data, so the number is mono and the word around it stays quiet */
+.hbh__dl { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-faint); }
+.hbh__dl b { font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; color: var(--text-muted); }
 </style>

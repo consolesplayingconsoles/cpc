@@ -16,11 +16,28 @@ export interface HomebrewParam {
   scope: 'game' | 'item'  // game = shared by every mod of the game (mods/<game>/.env)
 }
 
+export interface HomebrewVersionDownloads {
+  version: string         // "1.0", "1.0-beta"
+  name: string
+  url: string
+  prerelease: boolean
+  count: number           // the sum of the release's assets' download counts
+}
+
+export interface HomebrewDownloads {
+  total: number
+  versions: HomebrewVersionDownloads[]   // newest first
+  checked: string         // when GitHub was asked, local time
+}
+
 export interface HomebrewRelease {
   url: string
   name: string
   version: string | null  // "1.0", "1.0-beta"
   stable: boolean         // false = only a pre-release exists
+  downloads: HomebrewDownloads
+  source: string          // "<owner>/<repo> <tag-prefix>", from the RELEASE file
+  bundledWith: string[]   // other items released together (same source): the counts are shared
 }
 
 export interface HomebrewGame {
@@ -75,6 +92,11 @@ async function json<T>(res: Response): Promise<T> {
 
 export async function listItems(): Promise<HomebrewItem[]> {
   return (await json<{ items: HomebrewItem[] }>(await fetch(BASE))).items
+}
+
+// Ask GitHub for the releases (and their download counts) again instead of the cached copy
+export async function refreshReleases(): Promise<HomebrewItem[]> {
+  return (await json<{ items: HomebrewItem[] }>(await fetch(`${BASE}/releases/refresh`, { method: 'POST' }))).items
 }
 
 export async function saveParams(id: string, values: Record<string, string>): Promise<HomebrewItem> {
