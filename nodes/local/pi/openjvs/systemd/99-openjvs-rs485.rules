@@ -1,0 +1,5 @@
+# The JVS RS485 adapter, pinned by its FTDI serial so a replug cannot rename it.
+# /dev/ttyUSB* is enumeration order: unplugging once already moved it to ttyUSB1 and
+# left OpenJVS pointing at a device that no longer existed. Same pattern as
+# 99-dreampi-modem.rules.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTRS{serial}=="BH003716", SYMLINK+="openjvs-rs485"
