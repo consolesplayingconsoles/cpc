@@ -23,7 +23,11 @@ publish it into the Lab library as a catalogue file and send it on to other node
 
 A released item has a RELEASE file: one line "<owner>/<repo> <tag-prefix>" pointing at its
 GitHub releases (the distribution repo, e.g. game-mods). The newest stable release whose
-tag starts with the prefix is shown; if there is none, the newest pre-release.
+tag starts with the prefix is shown; if there is none, the newest pre-release. Its download
+counts come with it: per release (the sum of its assets' download_count) and in total, as of
+the last fetch (cached _RELEASES_TTL; refresh_releases() drops the cache). Items whose RELEASE
+files name the same repo and prefix ship as one bundle, so the counts are shared; each lists
+the others (bundledWith).
 """
 import os
 import re
@@ -280,6 +284,25 @@ def _releases(repo):
     return data
 
 
+def refresh_releases():
+    """Forget the cached GitHub releases: the next listing fetches them (and their counts) again."""
+    _releases_cache.clear()
+
+
+def _downloads(releases, prefix, fetched_at):
+    """Download counts of the releases whose tag starts with prefix: per release, newest first,
+    and the total. A release's count is the sum of its assets' download_count."""
+    versions = []
+    for r in releases:
+        version = _VERSION.search(r["tag_name"])
+        versions.append({"version": version.group(1) if version else r["tag_name"][len(prefix):],
+                         "name": _nodash(r.get("name") or r["tag_name"]), "url": r.get("html_url"),
+                         "prerelease": bool(r.get("prerelease")),
+                         "count": sum(a.get("download_count") or 0 for a in r.get("assets") or [])})
+    return {"total": sum(v["count"] for v in versions), "versions": versions,
+            "checked": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(fetched_at))}
+
+
 def _release(folder):
     path = os.path.join(folder, "RELEASE")
     if not os.path.isfile(path):
@@ -297,7 +320,9 @@ def _release(folder):
     pick = (stable or matches)[0]
     version = _VERSION.search(pick["tag_name"])
     return {"url": pick.get("html_url"), "name": _nodash(pick.get("name") or pick["tag_name"]),
-            "version": version.group(1) if version else None, "stable": bool(stable)}
+            "version": version.group(1) if version else None, "stable": bool(stable),
+            "downloads": _downloads(matches, prefix, _releases_cache[repo][0]),
+            "source": "%s %s" % (repo, prefix), "bundledWith": []}
 
 
 def _catalogue_game(repo_root, folder):
@@ -424,6 +449,13 @@ def discover(repo_root):
                 folder = os.path.join(hb, kind, name)
                 if os.path.isfile(os.path.join(folder, "build.sh")):
                     items.append(_item(repo_root, node, kind, None, name, folder))
+    # Items whose RELEASE files point at the same releases ship as one bundle (e.g. both
+    # languages of a translation): the counts are the bundle's, so each names the others.
+    for it in items:
+        rel = it.get("release")
+        if rel:
+            rel["bundledWith"] = [o["title"] for o in items if o is not it and o.get("release")
+                                  and o["release"]["source"] == rel["source"]]
     return items
 
 
