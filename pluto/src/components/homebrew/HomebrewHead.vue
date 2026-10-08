@@ -16,7 +16,8 @@ import UiInfoTip from '../ui/UiInfoTip.vue'
 
 const props = defineProps<{
   item: HomebrewItem
-  icon?: string | null          // the console's avatar
+  icon?: string | null          // the console's avatar (the one the build is FOR)
+  originIcon?: string | null    // a port only: the avatar of the system it converts FROM
   coverUrl?: string | null      // the base game's cover, when it is a catalogued game
   mediaLink?: string | null     // where that game lives in Media
   sendTargets: { id: string; name: string }[]
@@ -48,8 +49,22 @@ const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(
       <div class="hbh__body">
         <div class="hbh__line">
           <h2 class="hbh__title">{{ item.title }}</h2>
-          <RouterLink v-if="item.game?.listed" :to="`/media/${item.game.system}`" class="hbh__link" :title="'Open ' + item.nodeName + ' in Media'">{{ item.nodeName }}</RouterLink>
-          <span v-else>{{ item.nodeName }}</span>
+          <!-- A port names BOTH consoles, in the order it converts them: the game's own
+               system, then the one this build runs on. Each links to its own Media shelf,
+               which the single-console line could not do (it labelled one and linked the
+               other). Everything else keeps the one console it has. -->
+          <template v-if="item.origin">
+            <img v-if="originIcon" :src="originIcon" class="hbh__ic-sm" alt="" @error="hideImg" />
+            <RouterLink v-if="item.game?.listed" :to="`/media/${item.origin}`" class="hbh__link" :title="'Open ' + (item.originName ?? item.origin) + ' in Media'">{{ item.originName ?? item.origin }}</RouterLink>
+            <span v-else>{{ item.originName ?? item.origin }}</span>
+            <span class="hbh__arrow" title="converted to run on">-&gt;</span>
+            <img v-if="icon" :src="icon" class="hbh__ic-sm" alt="" @error="hideImg" />
+            <RouterLink :to="`/media/${item.system}`" class="hbh__link" :title="'Open ' + item.nodeName + ' in Media'">{{ item.nodeName }}</RouterLink>
+          </template>
+          <template v-else>
+            <RouterLink v-if="item.game?.listed" :to="`/media/${item.game.system}`" class="hbh__link" :title="'Open ' + item.nodeName + ' in Media'">{{ item.nodeName }}</RouterLink>
+            <span v-else>{{ item.nodeName }}</span>
+          </template>
           <template v-if="item.game">
             <span class="hbh__sep">/</span>
             <RouterLink v-if="mediaLink" :to="mediaLink" class="hbh__link">{{ item.game.title }}</RouterLink>
@@ -120,6 +135,9 @@ const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(
 .hbh__line { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: 13px; color: var(--text-muted); }
 .hbh__title { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.2; }
 .hbh__sep { color: var(--text-faint); }
+/* a port's two consoles sit inline in the title line, so their marks are glyph-sized */
+.hbh__ic-sm { flex: none; width: 18px; height: 18px; object-fit: contain; vertical-align: -3px; }
+.hbh__arrow { font-family: var(--font-mono); font-size: 12px; color: var(--text-faint); }
 .hbh__link { color: var(--text-muted); text-decoration: none; border-bottom: 1px dotted var(--line-strong); }
 .hbh__link:hover { color: var(--accent); border-bottom-color: var(--accent); }
 .hbh__release { text-decoration: none; }
