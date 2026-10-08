@@ -70,7 +70,6 @@ const mediaLink = (it: HomebrewItem) => it.game?.listed ? `/media/${it.game.syst
 // A port's category is the PAIR it converts, in order: a Pico game made to run on a Mega
 // Drive is not the same job as the reverse, and the two should never share a heading.
 const pair = (it: HomebrewItem) => (it.origin ? it.origin + ' -> ' + it.system : '')
-const pairTitle = (it: HomebrewItem) => (it.origin ? (it.originName ?? it.origin) + ' -> ' + it.nodeName : '')
 
 // node -> group (the game for mods, the pair for ports; '' otherwise) -> items.
 const sections = computed(() => {
@@ -294,9 +293,9 @@ const EMPTY: Record<HomebrewKind, string> = {
   ports: 'No ports found. A port is a folder with build.sh at nodes/local/<node>/homebrew/ports/<game>/<port>/, converting a game from another system to this one.',
 }
 
-// Up in Favourites there is no group heading, so a port's row says the conversion itself
-// there. Technical labels, in the mono data type the diagram uses.
-const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' -> ' + it.system : it.name)
+// Up in Favourites there is no group heading, so a port's row carries the conversion there.
+// Keys, not names: it sits in the mono data type the diagram uses.
+const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' ➡️ ' + it.system : it.name)
 </script>
 
 <template>
@@ -349,7 +348,16 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' -> ' + it.syste
           <template v-if="shown(sec)">
           <template v-for="[group, list] in sec.groups" :key="group">
             <h4 v-if="group" class="hb__group">
-              <span class="hb__group-title">{{ list[0].kind === 'ports' ? pairTitle(list[0]) : (list[0].game?.title ?? group) }}</span>
+              <!-- a port's heading IS the conversion: the two consoles' own marks, in order.
+                   Names only where a system has no mark to show (hover names either). -->
+              <span v-if="list[0].kind === 'ports'" class="hb__group-title hb__pair">
+                <img v-if="ICONS[list[0].origin ?? '']" :src="ICONS[list[0].origin!]" class="hb__pair-ic" :alt="list[0].originName ?? ''" :title="list[0].originName ?? list[0].origin ?? ''" />
+                <span v-else>{{ list[0].originName ?? list[0].origin }}</span>
+                <span class="hb__pair-arrow" title="converted to run on">➡️</span>
+                <img v-if="ICONS[list[0].node]" :src="ICONS[list[0].node]" class="hb__pair-ic" :alt="list[0].nodeName" :title="list[0].nodeName" />
+                <span v-else>{{ list[0].nodeName }}</span>
+              </span>
+              <span v-else class="hb__group-title">{{ list[0].game?.title ?? group }}</span>
               <span class="hb__group-dir">{{ group }}</span>
             </h4>
             <div
@@ -430,6 +438,9 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' -> ' + it.syste
 .hb__node-head { background: var(--surface-2); border-bottom: 1px solid var(--line); }
 .hb__node + .hb__node .hb__node-head { border-top: 1px solid var(--line); }
 .hb__group { display: flex; align-items: center; gap: var(--sp-2); margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-1); font-size: 12.5px; font-weight: 600; color: var(--text); min-width: 0; }
+.hb__pair { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.hb__pair-ic { width: 20px; height: 20px; object-fit: contain; }
+.hb__pair-arrow { font-size: 11px; line-height: 1; }
 .hb__group-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .hb__group-dir { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; font-weight: 400; color: var(--text-faint); white-space: nowrap; }
 .hb__row { display: flex; align-items: baseline; gap: var(--sp-2); width: 100%; padding: 7px var(--sp-4) 7px var(--sp-5); font: inherit; text-align: left; color: var(--text); background: none; border: 0; cursor: pointer; }
