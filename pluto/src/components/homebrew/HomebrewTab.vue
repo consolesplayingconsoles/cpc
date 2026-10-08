@@ -29,10 +29,11 @@ const KINDS: { kind: HomebrewKind; label: string }[] = [
   { kind: 'mods', label: 'Mods' },
   { kind: 'games', label: 'Games' },
   { kind: 'tools', label: 'Tools' },
+  { kind: 'ports', label: 'Ports' },
 ]
 const kind = computed<HomebrewKind>(() => {
   const k = route.name === 'homebrew' ? route.params.kind : undefined
-  return k === 'games' || k === 'tools' ? k : 'mods'
+  return k === 'games' || k === 'tools' || k === 'ports' ? k : 'mods'
 })
 function setKind(k: HomebrewKind) { router.push({ name: 'homebrew', params: { kind: k } }) }
 
@@ -285,7 +286,12 @@ const EMPTY: Record<HomebrewKind, string> = {
   mods: 'No mods found. A mod is a folder with build.sh at nodes/local/<node>/homebrew/mods/<game>/<mod>/.',
   games: 'No games found. A game is a folder with build.sh at nodes/local/<node>/homebrew/games/<game>/.',
   tools: 'No tools found. A tool is a folder with build.sh at nodes/local/<node>/homebrew/tools/<tool>/.',
+  ports: 'No ports found. A port is a folder with build.sh at nodes/local/<node>/homebrew/ports/<game>/<port>/, converting a game from another system to this one.',
 }
+
+// A port's row carries the conversion itself: the system the game came from, the system the
+// build is for. Technical labels, so they stay in the mono data type like the diagram's.
+const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' -> ' + it.system : it.name)
 </script>
 
 <template>
@@ -323,7 +329,7 @@ const EMPTY: Record<HomebrewKind, string> = {
             <UiPill v-if="it.release" :tone="it.release.stable ? 'ok' : 'idle'">v{{ it.release.version }}</UiPill>
             <UiPill v-else-if="it.noRelease" tone="warn" class="hb__private" :title="'Never released: ' + it.noRelease">Private: {{ it.noRelease }}</UiPill>
             <UiPill v-else tone="idle">Unreleased</UiPill>
-            <span class="hb__row-name">{{ it.name }}</span>
+            <span class="hb__row-name">{{ rowMeta(it) }}</span>
             <UiStatusDot v-if="isRunning(it.id)" state="ok" title="Running" />
           </div>
         </section>
@@ -353,7 +359,7 @@ const EMPTY: Record<HomebrewKind, string> = {
               <!-- never publishable (someone else's IP) reads differently from not yet released -->
               <UiPill v-else-if="it.noRelease" tone="warn" class="hb__private" :title="'Never released: ' + it.noRelease">Private: {{ it.noRelease }}</UiPill>
               <UiPill v-else tone="idle">Unreleased</UiPill>
-              <span class="hb__row-name">{{ it.name }}</span>
+              <span class="hb__row-name">{{ rowMeta(it) }}</span>
               <UiStatusDot v-if="isRunning(it.id)" state="ok" title="Running" />
             </div>
           </template>
