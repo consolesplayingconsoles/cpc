@@ -360,7 +360,7 @@ paths:
     get:
       tags: [homebrew]
       summary: Every buildable item (mods/<game>/<mod>, games/<game>, tools/<tool>) with actions and .env.sample params
-      responses: { '200': { description: "{ items: [...] }" } }
+      responses: { '200': { description: "{ items: [{id, node, nodeName, system, kind, group, name, title, named, description, path, actions, params, paramsPaths, running, runningSend, output, favourite, game, noRelease, sendTargets, release}] }; release (from a RELEASE file, else null) = {url, name, version, stable, source, bundledWith: [the other items published in the same release], downloads: {total, checked, versions: [{version, count, prerelease, url, name}]}}" } }
   /homebrew/stream:
     get:
       tags: [homebrew]
