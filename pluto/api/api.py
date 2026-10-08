@@ -4660,7 +4660,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 extra = ["-config", "config:rend.ThreadedRendering=no"]
         cmd = ["open", "-a", emu["app"]]
         if emu.get("args"):
-            cmd += ["--args"] + extra + [a.replace("{rom}", path) for a in emu["args"]]
+            # ~ is expanded so an emulator that needs a path of its own (RetroArch's core)
+            # can be configured without hardcoding a home directory.
+            cmd += ["--args"] + extra + [os.path.expanduser(a.replace("{rom}", path))
+                                         for a in emu["args"]]
         else:
             cmd += (["--args"] + extra + [path]) if extra else [path]
         r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
