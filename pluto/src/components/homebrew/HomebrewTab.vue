@@ -27,9 +27,9 @@ const router = useRouter()
 
 const KINDS: { kind: HomebrewKind; label: string }[] = [
   { kind: 'mods', label: 'Mods' },
+  { kind: 'ports', label: 'Ports' },
   { kind: 'games', label: 'Games' },
   { kind: 'tools', label: 'Tools' },
-  { kind: 'ports', label: 'Ports' },
 ]
 const kind = computed<HomebrewKind>(() => {
   const k = route.name === 'homebrew' ? route.params.kind : undefined

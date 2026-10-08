@@ -1,4 +1,4 @@
-# Ports: a fourth homebrew kind
+# Ports: a fourth homebrew kind, the second tab
 
 Built. This is what it does, and what it decided.
 
@@ -96,7 +96,8 @@ itself.
 
 ## What changes in the UI
 
-`HomebrewTab.vue` gains a fourth sub-tab, Ports, and the kind route accepts it.
+`HomebrewTab.vue` gains a sub-tab, **Ports, second of the four** (Mods, Ports,
+Games, Tools), and the kind route accepts it.
 A port's row ends with the conversion instead of its folder name, in the mono
 data type:
 
