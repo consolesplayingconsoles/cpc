@@ -4,6 +4,7 @@ Convention (one naming, scripts are free to differ):
     nodes/local/<node>/homebrew/mods/<game>/<mod>/build.sh    -> kind "mods"
     nodes/local/<node>/homebrew/games/<game>/build.sh         -> kind "games"
     nodes/local/<node>/homebrew/tools/<tool>/build.sh         -> kind "tools"
+    nodes/local/<node>/homebrew/ports/<game>/<port>/build.sh  -> kind "ports"
 
 A folder is an item when it has build.sh, except a game's vanilla/ (the original game rebuilt) and
 its decomp (mods/<game>/<x>-decomp/): the plain game lives in the Media catalogue, so Pluto lists
@@ -11,6 +12,13 @@ only real mods. Both still build from a terminal. Parameters come from .env.samp
 by every mod of that game, e.g. the base ROM path) plus its own; each value is saved to the
 .env beside the sample it came from, which every repo gitignores. A mod's own key wins over
 a game key of the same name.
+
+A port is the one kind whose game and whose output live on different systems: a Sega Pico
+game converted to run on a Mega Drive is still that Pico game (its title, its cover, its
+Media link), while the ROM it builds is a Mega Drive ROM. So for a port CATALOGUE names the
+game on its ORIGIN system and the port's own node is its target, which is why it sits under
+the node whose hardware runs the build. A port targeting something other than its node says
+so in a TARGET file (one line, a system name).
 
 A game folder (mods/<game>/) can carry a CATALOGUE file: one line "<system> <game-key>",
 the game's identity in the Media catalogue (catalogue/<system>/digital.json). It gives the
@@ -381,6 +389,21 @@ def _param_scopes(folder, group):
     return [(sc, p) for sc, p in scopes if os.path.isfile(p)]
 
 
+def _target(folder):
+    """The system a port's build is for, from its TARGET file, or None.
+
+    Only a port needs it, and only when that system is not the node it is built on.
+    """
+    path = os.path.join(folder, "TARGET")
+    if not os.path.isfile(path):
+        return None
+    for line in open(path, encoding="utf-8"):
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line.split()[0]
+    return None
+
+
 def _item(repo_root, node, kind, group, name, folder):
     scopes = _param_scopes(folder, group)
     own = set()
@@ -404,7 +427,16 @@ def _item(repo_root, node, kind, group, name, folder):
     # A homebrew ROM's system is its own -- its homebrew node (nodes/local/<node>/homebrew),
     # e.g. megadrive -- with an optional CATALOGUE override. It does NOT need to match a game
     # in the retail catalogue: a tool or an original game is sendable on its own terms.
-    system = (game or {}).get("system") or node
+    #
+    # A port is the exception: its CATALOGUE names the game on the system it came FROM, which
+    # must not decide where the build goes. A Pico game converted to a Mega Drive ROM belongs
+    # in the megadrive library and on megadrive cards, so a port takes its TARGET, else its
+    # node, and never the origin game's system.
+    target = _target(folder)
+    if kind == "ports":
+        system = target or node
+    else:
+        system = target or (game or {}).get("system") or node
     return {
         "id": item_id, "node": node, "nodeName": _node_name(repo_root, node),
         "kind": kind, "group": group, "name": name,
@@ -422,6 +454,8 @@ def _item(repo_root, node, kind, group, name, folder):
         "output": last_output(item_id),
         "system": system,
         "game": game,
+        # the system a port came FROM, so the UI can say "Pico -> Mega Drive" (None otherwise)
+        "origin": (game or {}).get("system") if kind == "ports" else None,
     }
 
 
@@ -444,6 +478,13 @@ def discover(repo_root):
                 folder = os.path.join(hb, "mods", game, mod)
                 if os.path.isfile(os.path.join(folder, "build.sh")):
                     items.append(_item(repo_root, node, "mods", game, mod, folder))
+        for game in _dirs(os.path.join(hb, "ports")):
+            for port in _dirs(os.path.join(hb, "ports", game)):
+                if port == "vanilla" or port.endswith("-decomp"):
+                    continue
+                folder = os.path.join(hb, "ports", game, port)
+                if os.path.isfile(os.path.join(folder, "build.sh")):
+                    items.append(_item(repo_root, node, "ports", game, port, folder))
         for kind in ("games", "tools"):
             for name in _dirs(os.path.join(hb, kind)):
                 folder = os.path.join(hb, kind, name)

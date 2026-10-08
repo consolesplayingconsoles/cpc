@@ -1,11 +1,11 @@
-// REST wrappers for the /homebrew API (Mods, Games and Tools tabs). Same contract as
+// REST wrappers for the /homebrew API (Mods, Games, Tools and Ports tabs). Same contract as
 // catalogue.ts: one place for URLs, failures are THROWN so the tab can say so.
 import { API_BASE } from '../composables/useNodes'
 
 const BASE = `${API_BASE}/homebrew`
 const enc = encodeURIComponent
 
-export type HomebrewKind = 'mods' | 'games' | 'tools'
+export type HomebrewKind = 'mods' | 'games' | 'tools' | 'ports'
 export type HomebrewAction = 'build'   // scripts present in the folder
 
 export interface HomebrewParam {
@@ -76,6 +76,8 @@ export interface HomebrewItem {
   release: HomebrewRelease | null   // from a RELEASE file: newest stable GitHub release
   noRelease: string | null          // MOD_NO_RELEASE: why this one can never be published
   game: HomebrewGame | null         // from the game's CATALOGUE file
+  system: string                    // the system this item's build IS, so where it is filed and sent
+  origin: string | null             // a port only: the system the game came FROM (its build is for `system`)
   output: HomebrewOutput | null     // last build output, if the file still exists
   sendTargets: HomebrewTarget[]     // nodes Send can take it to (catalogue send, or its deploy.sh)
   favourite: boolean                // starred: pinned on top of the list (catalogue/favourites.json)
