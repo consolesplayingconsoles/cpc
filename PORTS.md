@@ -98,12 +98,25 @@ itself.
 
 `HomebrewTab.vue` gains a sub-tab, **Ports, second of the four** (Mods, Ports,
 Games, Tools), and the kind route accepts it.
-A port's row ends with the conversion instead of its folder name, in the mono
-data type:
+**A port's category is the pair it converts, in order.** Not the target: a Pico
+game made to run on a Mega Drive is a different job from the reverse, and the
+two never share a heading. So the group heading inside a console is the pair,
+and the row names the game:
 
 ```
-Sonic The Hedgehog's Gameworld: Genesis Conversion    Unreleased    pico -> megadrive
+pico -> Mega Drive
+  Sonic The Hedgehog's Gameworld: Genesis Conversion   Unreleased   sonic-gameworld-genesis
 ```
+
+(`pico` stays a key because no Pico node exists to give it a console name,
+which is honest rather than invented.) Up in Favourites there is no heading, so
+a port's row says `pico -> megadrive` itself.
+
+**The detail header names both consoles**, in conversion order, each linking to
+its own Media shelf: `Genesis Conversion · [icon] pico -> [icon] Mega Drive ·
+Sonic The Hedgehog's Gameworld`. That also fixes something the single-console
+line got wrong for a port: it labelled one console and linked the other. Same
+header component, two more props (`originIcon`, and `originName` on the item).
 
 Nothing else about the tab changes. The app header and tab row are untouched.
 

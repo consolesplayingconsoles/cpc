@@ -67,12 +67,17 @@ watch(() => props.active, (on) => { if (on && !loaded.value) load() }, { immedia
 const coverUrl = (it: HomebrewItem) => it.game?.listed ? catalogueApi.coverUrl(it.game.system, it.game.key) : null
 const mediaLink = (it: HomebrewItem) => it.game?.listed ? `/media/${it.game.system}/${it.game.key}` : null
 
-// node -> group (game, mods only; '' otherwise) -> items.
+// A port's category is the PAIR it converts, in order: a Pico game made to run on a Mega
+// Drive is not the same job as the reverse, and the two should never share a heading.
+const pair = (it: HomebrewItem) => (it.origin ? it.origin + ' -> ' + it.system : '')
+const pairTitle = (it: HomebrewItem) => (it.origin ? (it.originName ?? it.origin) + ' -> ' + it.nodeName : '')
+
+// node -> group (the game for mods, the pair for ports; '' otherwise) -> items.
 const sections = computed(() => {
   const byNode = new Map<string, { name: string; groups: Map<string, HomebrewItem[]> }>()
   for (const it of items.value) {
     const sec = byNode.get(it.node) ?? { name: it.nodeName, groups: new Map<string, HomebrewItem[]>() }
-    const key = it.group ?? ''
+    const key = it.kind === 'ports' ? pair(it) : (it.group ?? '')
     sec.groups.set(key, [...(sec.groups.get(key) ?? []), it])
     byNode.set(it.node, sec)
   }
@@ -289,8 +294,8 @@ const EMPTY: Record<HomebrewKind, string> = {
   ports: 'No ports found. A port is a folder with build.sh at nodes/local/<node>/homebrew/ports/<game>/<port>/, converting a game from another system to this one.',
 }
 
-// A port's row carries the conversion itself: the system the game came from, the system the
-// build is for. Technical labels, so they stay in the mono data type like the diagram's.
+// Up in Favourites there is no group heading, so a port's row says the conversion itself
+// there. Technical labels, in the mono data type the diagram uses.
 const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' -> ' + it.system : it.name)
 </script>
 
@@ -344,7 +349,7 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' -> ' + it.syste
           <template v-if="shown(sec)">
           <template v-for="[group, list] in sec.groups" :key="group">
             <h4 v-if="group" class="hb__group">
-              <span class="hb__group-title">{{ list[0].game?.title ?? group }}</span>
+              <span class="hb__group-title">{{ list[0].kind === 'ports' ? pairTitle(list[0]) : (list[0].game?.title ?? group) }}</span>
               <span class="hb__group-dir">{{ group }}</span>
             </h4>
             <div
@@ -354,12 +359,12 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' -> ' + it.syste
             >
               <button class="hb__fav" :class="{ 'is-on': it.favourite }" :title="it.favourite ? 'Unfavourite' : 'Favourite'"
                       @click.stop="toggleFavourite(it)">{{ it.favourite ? '★' : '☆' }}</button>
-              <span class="hb__row-title">{{ it.title }}</span>
+              <span class="hb__row-title">{{ it.kind === 'ports' && it.game ? it.game.title + ': ' + it.title : it.title }}</span>
               <UiPill v-if="it.release" :tone="it.release.stable ? 'ok' : 'idle'">v{{ it.release.version }}</UiPill>
               <!-- never publishable (someone else's IP) reads differently from not yet released -->
               <UiPill v-else-if="it.noRelease" tone="warn" class="hb__private" :title="'Never released: ' + it.noRelease">Private: {{ it.noRelease }}</UiPill>
               <UiPill v-else tone="idle">Unreleased</UiPill>
-              <span class="hb__row-name">{{ rowMeta(it) }}</span>
+              <span class="hb__row-name">{{ it.name }}</span>
               <UiStatusDot v-if="isRunning(it.id)" state="ok" title="Running" />
             </div>
           </template>
@@ -373,6 +378,7 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' -> ' + it.syste
         <template v-else>
           <HomebrewHead
             :item="selected" :icon="ICONS[selected.node]"
+            :origin-icon="selected.origin ? ICONS[selected.origin] : null"
             :cover-url="coverUrl(selected)" :media-link="mediaLink(selected)"
             :send-targets="selected.sendTargets" :send-busy="runOf(selected)?.sendTo ?? null"
             :busy="!!runs[selected.node]" :building="!!runOf(selected) && !runOf(selected)?.sendTo"

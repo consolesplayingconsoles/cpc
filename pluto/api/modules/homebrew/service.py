@@ -454,8 +454,12 @@ def _item(repo_root, node, kind, group, name, folder):
         "output": last_output(item_id),
         "system": system,
         "game": game,
-        # the system a port came FROM, so the UI can say "Pico -> Mega Drive" (None otherwise)
+        # the system a port came FROM, so the UI can say "Pico -> Mega Drive" (None otherwise).
+        # Its name is the node's when that system has one; a system with no node of its own
+        # (there is no Pico node) keeps its catalogue key, which is honest rather than invented.
         "origin": (game or {}).get("system") if kind == "ports" else None,
+        "originName": (_node_name(repo_root, (game or {}).get("system"))
+                       if kind == "ports" and (game or {}).get("system") else None),
     }
 
 

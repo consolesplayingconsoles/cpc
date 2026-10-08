@@ -78,6 +78,7 @@ export interface HomebrewItem {
   game: HomebrewGame | null         // from the game's CATALOGUE file
   system: string                    // the system this item's build IS, so where it is filed and sent
   origin: string | null             // a port only: the system the game came FROM (its build is for `system`)
+  originName: string | null         // that system's console name, or its catalogue key when it has no node
   output: HomebrewOutput | null     // last build output, if the file still exists
   sendTargets: HomebrewTarget[]     // nodes Send can take it to (catalogue send, or its deploy.sh)
   favourite: boolean                // starred: pinned on top of the list (catalogue/favourites.json)
