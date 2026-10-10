@@ -4,8 +4,29 @@
     {
       "name": "pluto",
       "runtimeExecutable": "/usr/local/Cellar/node/26.0.0/bin/node",
-      "runtimeArgs": ["pluto/node_modules/vite/bin/vite.js", "pluto", "--host", "--port", "5174", "--strictPort"],
+      "runtimeArgs": [
+        "pluto/node_modules/vite/bin/vite.js",
+        "pluto",
+        "--host",
+        "--port",
+        "5174",
+        "--strictPort"
+      ],
       "port": 5174
+    },
+    {
+      "name": "namek-patcher",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5180",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "nodes/local/megadrive/homebrew/mods/sonic1/is-this-namek/patcher"
+      ],
+      "port": 5180
     }
   ]
 }
