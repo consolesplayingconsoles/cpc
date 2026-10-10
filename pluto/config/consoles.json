@@ -35,7 +35,7 @@
   },
   "_systemsComment": "Per-SYSTEM facts shared by every feature (saves, SD backup, the Media catalogue). Keys are Batocera folder names, same namespace as `consoles`. brand = manufacturer, the grid groups families by it; name = display name; icon = avatar key in pluto/src/composables/useIcons.ts (omit = lettered tile); header = which ROM header reader identifies its games (pluto/api/modules/catalogue/headers.py formats: megadrive, sms, gba, saturn, dreamcast; omit = match by filename only); thumbnails = libretro-thumbnails repo for box art (github.com/libretro-thumbnails); emulator = key into `emulators` overriding `defaultEmulator` for this system. Several systems can share a format (mastersystem + gamegear both read the SMS header).",
   "systems": {
-    "megadrive":      { "brand": "Sega", "name": "Mega Drive", "icon": "megadrive", "header": "megadrive", "thumbnails": "Sega_-_Mega_Drive_-_Genesis", "emulator": "retroarch-megadrive" },
+    "megadrive":      { "brand": "Sega", "name": "Mega Drive", "icon": "megadrive", "header": "megadrive", "thumbnails": "Sega_-_Mega_Drive_-_Genesis" },
     "mastersystem":   { "brand": "Sega", "name": "Master System", "icon": "sms", "header": "sms", "thumbnails": "Sega_-_Master_System_-_Mark_III", "thumbnailsFallback": ["Sega_-_Game_Gear", "Sega_-_Mega_Drive_-_Genesis"], "extensions": [".sms"] },
     "sg1000":         { "brand": "Sega", "name": "SG-1000", "icon": "sg1000", "thumbnails": "Sega_-_SG-1000", "thumbnailsFallback": ["Microsoft_-_MSX"], "extensions": [".sg", ".sc"] },
     "gamegear":       { "brand": "Sega", "name": "Game Gear", "icon": "gamegear", "header": "sms", "thumbnails": "Sega_-_Game_Gear" },
@@ -76,13 +76,14 @@
     "neogeocd":       { "brand": "SNK", "name": "Neo Geo CD", "icon": "neogeocd", "thumbnails": "SNK_-_Neo_Geo_CD" },
     "pcengine":       { "brand": "NEC", "name": "PC Engine", "icon": "pcengine", "thumbnails": "NEC_-_PC_Engine_-_TurboGrafx_16" },
     "pico":           { "brand": "Sega", "name": "Pico", "icon": "pico", "thumbnails": "Sega_-_PICO" },
+    "vflash":         { "brand": "VTech", "name": "V.Flash", "icon": "vflash", "emulator": "retroarch-vflash" },
     "pokemini":       { "brand": "Nintendo", "name": "Pokémon Mini", "icon": "pokemini", "thumbnails": "Nintendo_-_Pokemon_Mini" },
     "sega32x":        { "brand": "Sega", "name": "32X", "icon": "sega32x", "thumbnails": "Sega_-_32X" },
     "virtualboy":     { "brand": "Nintendo", "name": "Virtual Boy", "icon": "virtualboy", "thumbnails": "Nintendo_-_Virtual_Boy" },
     "x68000":         { "brand": "Sharp", "name": "X68000", "icon": "x68000", "thumbnails": "Sharp_-_X68000" },
     "namco2x6":      { "brand": "Namco", "name": "System 246 / 256", "icon": "arcade" }
   },
-  "_emulatorsComment": "Desktop emulators on the Lab (macOS) for the Media drawer's Play button, like a file association: `defaultEmulator` for every system, systems.<x>.emulator overrides it. app = the .app name for `open -a`. args = launch arguments with {rom} for the ROM path, passed via `open -a <app> --args ...`, with `~` expanded so a core path needs no home directory in it; omit to hand the ROM over as a document (OpenEmu imports and starts it). RetroArch names its core per system, so it gets one entry per system rather than one shared `retroarch`. Remote start on real consoles will be per node, not here.",
+  "_emulatorsComment": "Desktop emulators on the Lab (macOS) for the Media drawer's Play button, like a file association: `defaultEmulator` for every system, systems.<x>.emulator overrides it. app = the .app name for `open -a`. args = launch arguments with {rom} for the ROM path, passed via `open -a <app> --args ...`, with `~` expanded so a core path needs no home directory in it and `{repo}` = this repo's root (a node's homebrew dir can carry the settings its emulator runs with, e.g. a RetroArch --appendconfig file); omit to hand the ROM over as a document (OpenEmu imports and starts it). RetroArch names its core per system, so it gets one entry per system rather than one shared `retroarch`. Mega Drive stays on OpenEmu deliberately: its core is the strict one, so a ROM that is wrong about boot-time hardware (a live Z80, a locked VDP) fails there the way it fails on the console, while the lenient cores run it and hide the bug until the cartridge is in the slot. Remote start on real consoles will be per node, not here.",
   "_filtersComment": "Metadata fields a system's Media page offers to Group by (libretro-database: genre, developer, publisher, year). defaultFilters for every system; systems.<x>.filters overrides it. A field with no values for that system's games is hidden anyway, so this only narrows or reorders.",
   "_ignoreSystemsComment": "Batocera folders the catalogue never lists: ports and apps Batocera restores on every boot (deleting them doesn't stick). DOS returns on the EEE PC as its own node.",
   "ignoreSystems": ["cannonball", "dos", "iortcw", "moonlight", "mugen", "prboom", "pygame", "steam", "tyrquake"],
@@ -90,6 +91,7 @@
   "defaultEmulator": "openemu",
   "emulators": {
     "openemu": { "name": "OpenEmu", "app": "OpenEmu" },
+    "retroarch-vflash": { "name": "RetroArch (FlashEm)", "app": "RetroArch", "args": ["-L", "~/Library/Application Support/RetroArch/cores/flashem_libretro.dylib", "--appendconfig", "{repo}/nodes/local/vflash/homebrew/retroarch.cfg", "{rom}"] },
     "retroarch-megadrive": { "name": "RetroArch (Genesis Plus GX)", "app": "RetroArch", "args": ["-L", "~/Library/Application Support/RetroArch/cores/genesis_plus_gx_libretro.dylib", "{rom}"] },
     "flycast": { "name": "Flycast", "app": "Flycast", "args": ["{rom}"] },
     "dolphin": { "name": "Dolphin", "app": "Dolphin", "args": ["-b", "-e", "{rom}"] },
@@ -109,6 +111,7 @@
     "ws":        ["wswan", "wswanc"],
     "ps3":       ["ps3"],
     "ps2":       ["ps2"],
+    "vflash":    ["vflash"],
     "batocera":  ["*"],
     "lab":       ["*"]
   }
