@@ -29,6 +29,7 @@ import imgNgpc     from '../assets/avatars/ngpc.png'
 import imgGbc      from '../assets/avatars/gbc.png'
 import imgPsx      from '../assets/avatars/psx.png'
 import imgPs2      from '../assets/avatars/ps2.png'
+import imgVflash   from '../assets/avatars/vflash.png'
 import imgSys_3ds from '../assets/avatars/3ds.png'
 import imgSys_c64 from '../assets/avatars/c64.png'
 import imgSys_dos from '../assets/avatars/dos.png'
@@ -70,6 +71,7 @@ export const ICONS: Record<string, string> = {
   saturn:    imgSaturn,
   megadrive: imgMegadrive,
   sms: imgSms,   // Mark III artwork; see avatars/NOTICES
+  vflash:    imgVflash,
   claude:        imgClaude,
   birdbuddy:     imgBird,
   pi:            imgPi,
