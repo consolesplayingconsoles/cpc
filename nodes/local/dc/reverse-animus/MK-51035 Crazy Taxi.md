@@ -36,7 +36,7 @@ Network gamepad names are Dreamcast buttons (`ra.py press/hold/release/stick`).
 | Walk | camera-relative | stick | Platform-confirmed |
 | Run | while walking | R (hold) | Platform-confirmed |
 | Jump | on foot, no animation | A | Platform-confirmed |
-| Hail | hold about 1.5 s on foot | X | LIVE / TBD (never confirmed working) |
+| Hail | hold about 2 s on foot: a cab parks 45 ahead (away from the camera), side on | X | Platform-confirmed |
 
 ## Engine and game facts
 * **Camera-relative walking**: the stick's up is away from the camera. To walk to a point, take
@@ -66,8 +66,9 @@ Network gamepad names are Dreamcast buttons (`ra.py press/hold/release/stick`).
 One city (Original course), Arcade rules. You start in the cab on the main street.
 
 ## Calibration / LIVE
-* Hail (X): never seen to bring a taxi. TBD.
 * Walking into set objects (crates): the step-out point ignores them. TBD.
+* Driver in a taken pickup sits in its bed: the seat is the cab's (decomp `engine.md`, the
+  seat table at `0x0C0D51E8`); leaning back when accelerating is the game's own. Not fixed yet.
 * Dark spikes under taken cars: which model slot draws them. TBD.
 * Probe timing: reads are UDP and can time out on a busy machine (the client retries); a
   multi-read probe spans frames, so pause around it when the values must agree.
