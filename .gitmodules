@@ -13,3 +13,6 @@
 [submodule "nodes/local/saturn/homebrew"]
 	path = nodes/local/saturn/homebrew
 	url = https://github.com/consolesplayingconsoles/saturn-homebrew.git
+[submodule "nodes/local/vflash/homebrew"]
+	path = nodes/local/vflash/homebrew
+	url = https://github.com/consolesplayingconsoles/vflash-homebrew.git
