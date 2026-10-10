@@ -4661,8 +4661,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         cmd = ["open", "-a", emu["app"]]
         if emu.get("args"):
             # ~ is expanded so an emulator that needs a path of its own (RetroArch's core)
-            # can be configured without hardcoding a home directory.
-            cmd += ["--args"] + extra + [os.path.expanduser(a.replace("{rom}", path))
+            # can be configured without hardcoding a home directory; {repo} points into this
+            # repo (a node's homebrew dir carries the RetroArch settings its core runs with).
+            cmd += ["--args"] + extra + [os.path.expanduser(a.replace("{rom}", path).replace("{repo}", self._repo_root()))
                                          for a in emu["args"]]
         else:
             cmd += (["--args"] + extra + [path]) if extra else [path]
