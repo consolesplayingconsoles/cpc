@@ -2,7 +2,7 @@
 """Print the file name a homebrew build writes its ROM under.
 
 It is the catalogue name Pluto publishes the build as (homebrew.lab_filename):
-"<game> [<mod> by CPC v<version>]<ext>" for a mod, the title for a standalone game or
+"<game> [<mod> by cpc v<version>]<ext>" for a mod, the title for a standalone game or
 tool. A build that writes this name is never renamed on its way to Lab or a card.
 
     rom_name.py <build folder> <ext>      e.g. rom_name.py "$HERE" .bin

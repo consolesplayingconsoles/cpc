@@ -64,7 +64,7 @@ the origin, which is exactly what the title and cover should come from.
 
 **`lab_filename`** (`service.py:573`) is unchanged, and that is the point:
 the game title still comes from `item["game"]["title"]`, so the build is
-`Sonic The Hedgehog's Gameworld [Genesis Conversion by CPC].bin` with no
+`Sonic The Hedgehog's Gameworld [Genesis Conversion by cpc].bin` with no
 seeded entry anywhere.
 
 **The item's `system`** (what everything already reads to decide where a build
@@ -132,7 +132,7 @@ Nothing else about the tab changes. The app header and tab row are untouched.
 
 Discovery now reports it as: game `pico sonic-the-hedgehog-s-gameworld` (listed,
 so cover and Media link work), system `megadrive`, origin `pico`, built as
-`Sonic The Hedgehog's Gameworld [Genesis Conversion by CPC].bin`.
+`Sonic The Hedgehog's Gameworld [Genesis Conversion by cpc].bin`.
 
 ## Decisions
 
