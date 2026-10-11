@@ -6,6 +6,7 @@ import { ICONS } from '../../composables/useIcons'
 import { catalogueApi, type SystemSummary, type SystemView, type Game, type MissingCover, type GameHit } from '../../api/catalogue'
 import consolesConfig from '../../../config/consoles.json'
 import UiButton from '../ui/UiButton.vue'
+import UiFilterMenu from '../ui/UiFilterMenu.vue'
 import UiSpinner from '../ui/UiSpinner.vue'
 import UiState from '../ui/UiState.vue'
 import UiIconButton from '../ui/UiIconButton.vue'
@@ -216,7 +217,6 @@ const favSystemsOnly = ref(false)
 const ownedOnly = ref(true)                   // on by default: your own consoles first
 const gridFilters = computed(() => [favSystemsOnly.value, ownedOnly.value,
   physOnly.value, missingOnly.value, favGames.value, deletedGames.value].filter(Boolean).length)
-const gridFilterOpen = ref(false)
 // ...and a console filter switched on clears the game lists, back to the grid.
 watch([favSystemsOnly, ownedOnly], ([f, o], [pf, po]) => { if ((f && !pf) || (o && !po)) clearGameFilters() })
 
@@ -267,10 +267,9 @@ const noCoverOnly = ref(false)
 const nodeFilter = ref<string[]>([])
 const toggleNode = (n: string) => { nodeFilter.value = nodeFilter.value.includes(n) ? nodeFilter.value.filter(x => x !== n) : [...nodeFilter.value, n] }                  // no image linked in the catalogue (same rule as Missing covers)
 const activeFilters = computed(() => [favOnly.value, onlyDigital.value, onlyPhysical.value, onlySaved.value, deletedOnly.value, noCoverOnly.value, nodeFilter.value.length > 0].filter(Boolean).length)
-const filterOpen = ref(false)
 const sendMenuOpen = ref(false)
 function closeFilterMenu(e: MouseEvent) {
-  if (!(e.target as HTMLElement)?.closest?.('.md__filter-menu')) { filterOpen.value = false; gridFilterOpen.value = false; sendMenuOpen.value = false }
+  if (!(e.target as HTMLElement)?.closest?.('.md__filter-menu')) { sendMenuOpen.value = false }
 }
 onMounted(() => document.addEventListener('click', closeFilterMenu))
 onUnmounted(() => document.removeEventListener('click', closeFilterMenu))
@@ -525,24 +524,18 @@ function sendAll(node: string, name: string, path?: string, from?: string, game?
           <svg width="16" height="16" viewBox="0 0 24 24" :fill="favSystemsOnly ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
         </UiIconButton>
         <!-- same Filter menu + pills pattern as a system page -->
-        <span class="md__filter-menu">
-          <UiButton :class="{ 'is-on': gridFilters }" @click.stop="gridFilterOpen = !gridFilterOpen">
-            Filter<template v-if="gridFilters"> · {{ gridFilters }}</template> ▾
-          </UiButton>
-          <!-- two groups: what narrows the CONSOLES grid, and the GAME lists across all of them -->
-          <div v-if="gridFilterOpen" class="md__menu md__menu--right" role="menu">
-            <!-- two groups that never mix: ticking one side clears the other (the consoles grid
-                 and a game list are different views); inside a group filters stack -->
-            <span class="md__menu-sep">Consoles</span>
-            <label><input v-model="favSystemsOnly" type="checkbox" /> Favourites</label>
-            <label><input v-model="ownedOnly" type="checkbox" /> Owned</label>
-            <span class="md__menu-sep">Games</span>
-            <label><input :checked="favGames" type="checkbox" @change="toggleFavGames()" /> Favourites</label>
-            <label><input :checked="physOnly" type="checkbox" @change="toggleGameFilter('physical')" /> Physical only</label>
-            <label><input :checked="missingOnly" type="checkbox" @change="toggleGameFilter('missing')" /> Missing covers</label>
-            <label><input :checked="deletedGames" type="checkbox" @change="toggleGameFilter('deleted')" /> Deleted</label>
-          </div>
-        </span>
+        <UiFilterMenu :count="gridFilters">
+          <!-- two groups that never mix: ticking one side clears the other (the consoles grid
+               and a game list are different views); inside a group filters stack -->
+          <span class="ui-fmenu__sep">Consoles</span>
+          <label><input v-model="favSystemsOnly" type="checkbox" /> Favourites</label>
+          <label><input v-model="ownedOnly" type="checkbox" /> Owned</label>
+          <span class="ui-fmenu__sep">Games</span>
+          <label><input :checked="favGames" type="checkbox" @change="toggleFavGames()" /> Favourites</label>
+          <label><input :checked="physOnly" type="checkbox" @change="toggleGameFilter('physical')" /> Physical only</label>
+          <label><input :checked="missingOnly" type="checkbox" @change="toggleGameFilter('missing')" /> Missing covers</label>
+          <label><input :checked="deletedGames" type="checkbox" @change="toggleGameFilter('deleted')" /> Deleted</label>
+        </UiFilterMenu>
         <!-- what the grid shows: consoles or your hardware, a select like a system page's Cards/List -->
         <span class="md__view md__view--wide">
           <UiSelect :model-value="listMode === 'hardware' ? 'hardware' : 'consoles'" @update:model-value="setGridView($event as 'consoles' | 'hardware')">
@@ -707,23 +700,18 @@ function sendAll(node: string, name: string, path?: string, from?: string, game?
         <UiIconButton variant="ghost" :active="favOnly" :title="favOnly ? 'Show every game' : 'Only your favourite games'" @click="favOnly = !favOnly">
           <svg width="16" height="16" viewBox="0 0 24 24" :fill="favOnly ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
         </UiIconButton>
-        <span class="md__filter-menu">
-          <UiButton :class="{ 'is-on': activeFilters }" @click.stop="filterOpen = !filterOpen">
-            Filter<template v-if="activeFilters"> · {{ activeFilters }}</template> ▾
-          </UiButton>
-          <div v-if="filterOpen" class="md__menu md__menu--right" role="menu">
-            <label><input v-model="deletedOnly" type="checkbox" /> Deleted</label>
-            <label><input v-model="onlyDigital" type="checkbox" /> Digital copies</label>
-            <label><input v-model="favOnly" type="checkbox" /> Favourites</label>
-            <label><input v-model="onlySaved" type="checkbox" /> Has a save</label>
-            <label><input v-model="noCoverOnly" type="checkbox" /> Missing cover</label>
-            <label><input v-model="onlyPhysical" type="checkbox" /> Physical copies</label>
-            <span v-if="view?.hosts.length" class="md__menu-sep">Nodes</span>
-            <label v-for="n in view?.hosts ?? []" :key="n">
-              <input type="checkbox" :checked="nodeFilter.includes(n)" @change="toggleNode(n)" /> {{ nodeName(n) }}
-            </label>
-          </div>
-        </span>
+        <UiFilterMenu :count="activeFilters">
+          <label><input v-model="deletedOnly" type="checkbox" /> Deleted</label>
+          <label><input v-model="onlyDigital" type="checkbox" /> Digital copies</label>
+          <label><input v-model="favOnly" type="checkbox" /> Favourites</label>
+          <label><input v-model="onlySaved" type="checkbox" /> Has a save</label>
+          <label><input v-model="noCoverOnly" type="checkbox" /> Missing cover</label>
+          <label><input v-model="onlyPhysical" type="checkbox" /> Physical copies</label>
+          <span v-if="view?.hosts.length" class="ui-fmenu__sep">Nodes</span>
+          <label v-for="n in view?.hosts ?? []" :key="n">
+            <input type="checkbox" :checked="nodeFilter.includes(n)" @change="toggleNode(n)" /> {{ nodeName(n) }}
+          </label>
+        </UiFilterMenu>
         <span v-if="groupFields.length" class="md__group">
           <UiSelect v-model="groupBy">
             <option value="">No grouping</option>
@@ -927,11 +915,8 @@ function sendAll(node: string, name: string, path?: string, from?: string, game?
 .md__card-nodes img { width: 28px; height: 28px; object-fit: contain; }
 .md__filter-menu { position: relative; }
 .md__menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 6; display: flex; flex-direction: column; gap: 2px; min-width: 180px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow-md, var(--shadow-sm)); }
-.md__menu label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 13px; border-radius: var(--r-sm); cursor: pointer; white-space: nowrap; }
-.md__menu label:hover, .md__menu-item:hover { background: var(--surface-2); }
+.md__menu-item:hover { background: var(--surface-2); }
 .md__menu--right { left: auto; right: 0; }
-.md__menu-sep { margin: 4px 0 0; padding: 4px 6px 0; border-top: 1px solid var(--line); font-size: 11px; font-weight: 600; color: var(--text-faint); }
-.md__menu-sep:first-child { margin-top: 0; padding-top: 0; border-top: 0; }   /* a leading heading needs no rule above it */
 .md__menu-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font: inherit; font-size: 13px; color: var(--text); text-align: left; background: none; border: 0; border-radius: var(--r-sm); cursor: pointer; white-space: nowrap; }
 .md__menu-item img { width: 20px; height: 20px; object-fit: contain; }
 .md__body--list .ui-state { padding: var(--sp-4) var(--sp-5); margin: 0; }

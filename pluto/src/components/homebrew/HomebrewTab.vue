@@ -9,6 +9,7 @@ import { useRuns } from '../../composables/useRuns'
 import { useRunDurations } from '../../composables/useRunDurations'
 import UiButton from '../ui/UiButton.vue'
 import HomebrewHead from './HomebrewHead.vue'
+import UiFilterMenu from '../ui/UiFilterMenu.vue'
 import UiSidePanel from '../ui/UiSidePanel.vue'
 import UiPill from '../ui/UiPill.vue'
 import UiStatusDot from '../ui/UiStatusDot.vue'
@@ -39,6 +40,36 @@ function setKind(k: HomebrewKind) { router.push({ name: 'homebrew', params: { ki
 
 const all = ref<HomebrewItem[]>([])
 const items = computed(() => all.value.filter(i => i.kind === kind.value))
+
+// ── filters ──────────────────────────────────────────────────────────────────
+// Search, then console and release state. Inside one filter a ticked value is enough (an item
+// lives on ONE console, so "all of them" could only ever show nothing); across filters all
+// of them must hold, as on the Media page. Kind is the tabs, so it is not a filter here.
+type ReleaseState = 'released' | 'pre-release' | 'unreleased' | 'private'
+const STATES: { key: ReleaseState; label: string }[] = [
+  { key: 'released', label: 'Released' }, { key: 'pre-release', label: 'Pre-release' },
+  { key: 'unreleased', label: 'Unreleased' }, { key: 'private', label: 'Private' },
+]
+const releaseState = (i: HomebrewItem): ReleaseState =>
+  i.release ? (i.release.stable ? 'released' : 'pre-release') : i.noRelease ? 'private' : 'unreleased'
+const q = ref('')
+const nodeSel = ref<string[]>([])
+const stateSel = ref<ReleaseState[]>([])
+const activeFilters = computed(() => nodeSel.value.length + stateSel.value.length)
+const consoles = computed(() => {
+  const seen = new Map<string, string>()
+  for (const i of items.value) seen.set(i.node, i.nodeName)
+  return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+})
+const toggleNode = (n: string) => { nodeSel.value = nodeSel.value.includes(n) ? nodeSel.value.filter(x => x !== n) : [...nodeSel.value, n] }
+const toggleState = (st: ReleaseState) => { stateSel.value = stateSel.value.includes(st) ? stateSel.value.filter(x => x !== st) : [...stateSel.value, st] }
+const visible = computed(() => {
+  const needle = q.value.trim().toLowerCase()
+  return items.value.filter(i =>
+    (!needle || [i.title, i.game?.title, i.name, i.path, i.nodeName].some(t => t?.toLowerCase().includes(needle)))
+    && (!nodeSel.value.length || nodeSel.value.includes(i.node))
+    && (!stateSel.value.length || stateSel.value.includes(releaseState(i))))
+})
 const counts = computed(() => Object.fromEntries(KINDS.map(k => [k.kind, all.value.filter(i => i.kind === k.kind).length])))
 const loading = ref(false)
 const error = ref('')
@@ -74,7 +105,7 @@ const pair = (it: HomebrewItem) => (it.origin ? it.origin + ' -> ' + it.system :
 // node -> group (the game for mods, the pair for ports; '' otherwise) -> items.
 const sections = computed(() => {
   const byNode = new Map<string, { name: string; groups: Map<string, HomebrewItem[]> }>()
-  for (const it of items.value) {
+  for (const it of visible.value) {
     const sec = byNode.get(it.node) ?? { name: it.nodeName, groups: new Map<string, HomebrewItem[]>() }
     const key = it.kind === 'ports' ? pair(it) : (it.group ?? '')
     sec.groups.set(key, [...(sec.groups.get(key) ?? []), it])
@@ -90,7 +121,7 @@ const sections = computed(() => {
 // ── favourites ───────────────────────────────────────────────────────────────
 // Starred items (what you are working on) are pinned on top of the list, across consoles,
 // and stay in their console below too. Stored with the game favourites, as Media does.
-const favourites = computed(() => items.value.filter(i => i.favourite)
+const favourites = computed(() => visible.value.filter(i => i.favourite)
   .sort((a, b) => a.title.localeCompare(b.title)))
 async function toggleFavourite(it: HomebrewItem) {
   it.favourite = !it.favourite
@@ -312,9 +343,23 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' ➡️ ' + it.s
 
     <div class="hb__stage">
       <UiSidePanel :width="320" storage-key="cpc.homebrew.listWidth" label="list">
+      <div class="hb__filters">
+        <input v-model="q" class="hb__search" type="search" placeholder="Search" />
+        <UiFilterMenu :count="activeFilters">
+          <span class="ui-fmenu__sep">Console</span>
+          <label v-for="[node, name] in consoles" :key="node">
+            <input type="checkbox" :checked="nodeSel.includes(node)" @change="toggleNode(node)" /> {{ name }}
+          </label>
+          <span class="ui-fmenu__sep">Release</span>
+          <label v-for="st in STATES" :key="st.key">
+            <input type="checkbox" :checked="stateSel.includes(st.key)" @change="toggleState(st.key)" /> {{ st.label }}
+          </label>
+        </UiFilterMenu>
+      </div>
       <nav class="hb__list">
         <div v-if="error" class="hb__state hb__state--bad">{{ error }}</div>
         <div v-else-if="loaded && !items.length" class="hb__state">{{ EMPTY[kind] }}</div>
+        <div v-else-if="loaded && !visible.length" class="hb__state">Nothing matches.</div>
         <!-- what you are working on: starred items on top, across consoles -->
         <section v-if="favourites.length" class="hb__node hb__favs">
           <h4 class="hb__group"><span class="hb__group-title">Favourites</span></h4>
@@ -430,6 +475,10 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' ➡️ ' + it.s
 .hb__bar { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-5); background: var(--surface); border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .hb__heading { margin: 0 auto 0 0; font-size: 16px; font-weight: 600; }
 .hb__stage { position: relative; flex: 1; min-height: 0; display: flex; }
+/* search and the Filter menu above the list; the list below keeps its own scroll */
+.hb__filters { flex: none; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); }
+.hb__search { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 13px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--text); }
+.hb__search:focus { outline: none; border-color: var(--accent); }
 .hb__list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 96px; }   /* frame (surface, edge border) comes from UiSidePanel */
 .hb__node { padding-bottom: var(--sp-3); }
 .hb__node.is-folded { padding-bottom: 0; }   /* folded: the header IS the block, no gap under it */
