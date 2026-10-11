@@ -627,9 +627,9 @@ def lab_filename(item, output_path):
     title = _UNSAFE.sub(" ", game.get("title") or item["name"]).strip()
     mod = item["title"]
     version = (item.get("release") or {}).get("version")
-    # "by CPC" is what marks the file as ours, so a send replaces it on a node instead of
+    # "by cpc" is what marks the file as ours, so a send replaces it on a node instead of
     # skipping it: our bytes change from build to build under the same catalogue name.
-    tag = _UNSAFE.sub(" ", "%s by CPC v%s" % (mod, version) if version else "%s by CPC" % mod)
+    tag = _UNSAFE.sub(" ", "%s by cpc v%s" % (mod, version) if version else "%s by cpc" % mod)
     tag = tag.replace("[", "(").replace("]", ")").strip()
     return "%s [%s]%s" % (title, tag, ext)
 

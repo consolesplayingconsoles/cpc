@@ -1338,8 +1338,8 @@ def test_a_mod_is_named_after_the_mod_inside_its_game_folder():
     s1 = {"title": "Sonic The Hedgehog", "name": "Sonic The Hedgehog (Japan, USA, Europe)"}
     # a flat Mods/ folder: the game leads, so every mod of a game sits together, and the
     # mod's own name is written exactly as the file says it (no re-wording)
-    assert send.variant_file_name(dict(s1, variant={"name": "Infinite Jump", "author": "CPC", "version": "1.0"})) \
-        == "Sonic The Hedgehog [Infinite Jump by CPC v1.0]"
+    assert send.variant_file_name(dict(s1, variant={"name": "Infinite Jump", "author": "cpc", "version": "1.0"})) \
+        == "Sonic The Hedgehog [Infinite Jump by cpc v1.0]"
     assert send.variant_file_name(dict(s1, variant={"name": "Chao Walker"})) == "Sonic The Hedgehog [Chao Walker]"
     # a hack distributed under a bare name repeats its game: only a WHOLE-title prefix comes off
     assert send.variant_file_name({"title": "Streets of Rage 2",
@@ -1394,10 +1394,10 @@ def test_a_moved_copy_is_the_same_copy_not_a_deletion():
 
 
 def test_our_own_build_keeps_its_name_from_the_lab_to_the_card():
-    """homebrew names a build "<game> [<mod> by CPC v<version>]"; the card copy must read the
-    same, because "by CPC" is what tells the next send this copy is ours and a rebuild
+    """homebrew names a build "<game> [<mod> by cpc v<version>]"; the card copy must read the
+    same, because "by cpc" is what tells the next send this copy is ours and a rebuild
     REPLACES it. Dropping the author made every rebuild skip as "already there"."""
-    lab = "Sonic The Hedgehog [Infinite Jump by CPC v1.0].bin"
+    lab = "Sonic The Hedgehog [Infinite Jump by cpc v1.0].bin"
     p = names.parse(lab)
     card = send.variant_file_name({"title": p["title"], "variant": p["variants"][0]}) + ".bin"
     assert card == lab, card
@@ -1420,8 +1420,8 @@ def test_send_writes_a_mod_into_its_game_folder_under_its_own_name():
             "put": lambda src, name: put.append(name), "finish": lambda: []}
     p = {"copies": [{"game": "sonic-the-hedgehog", "name": "Sonic The Hedgehog (Japan, USA, Europe)",
                      "kind": "mod", "title": "Sonic The Hedgehog",
-                     "variant": {"name": "Infinite Jump", "author": "CPC", "version": "1.0"},
-                     "source": {"node": "lab", "path": "Sonic The Hedgehog [Infinite Jump by CPC v1.0].bin"}},
+                     "variant": {"name": "Infinite Jump", "author": "cpc", "version": "1.0"},
+                     "source": {"node": "lab", "path": "Sonic The Hedgehog [Infinite Jump by cpc v1.0].bin"}},
                     {"game": "aladdin", "name": "Aladdin (Europe)", "kind": "game",
                      "title": "Aladdin", "source": {"node": "lab", "path": "Aladdin (Europe).md"}}],
          "skipped": []}
@@ -1430,7 +1430,7 @@ def test_send_writes_a_mod_into_its_game_folder_under_its_own_name():
                     "rom_ext": lambda src: "." + src["path"].rsplit(".", 1)[-1],
                     "ranges": ["0-D", "E-H", "I-L", "M-P", "Q-T", "U-Z"],
                     "kind_dirs": {"mod": "Mods", "game": "<range>"}})
-    assert put == ["Mods/Sonic The Hedgehog [Infinite Jump by CPC v1.0].bin", "0-D/Aladdin (Europe).md"], put
+    assert put == ["Mods/Sonic The Hedgehog [Infinite Jump by cpc v1.0].bin", "0-D/Aladdin (Europe).md"], put
 
 
 
