@@ -1,19 +1,19 @@
-# Crazy Taxi (Dreamcast), sandbox mod
+# Crazy Taxi (Dreamcast), Walking Tour mod
 
-MK-51035 (Europe, V1.000). Hitmaker / Sega, 2000. Drive the cab, or, in the sandbox mod
-(`nodes/local/dc/homebrew/mods/crazy-taxi/sandbox`), step out and walk, run, jump, hail and take
-over traffic cars. This file covers playing the sandbox build for testing.
+MK-51035 (Europe, V1.000). Hitmaker / Sega, 2000. Drive the cab, or, in the Walking Tour mod
+(`nodes/local/dc/homebrew/mods/crazy-taxi/walking-tour`), step out and walk, run, jump, hail and take
+over traffic cars. This file covers playing the Walking Tour build for testing.
 
 Operating doctrine (the loop, confidence tiers, the format of this file) lives in
 [`REVERSE-ANIMUS.md`](../../../../REVERSE-ANIMUS.md). One difference from it: here the eyes and
-limbs are not Pluto's capture and pad but RetroArch's network ports, through the sandbox's
+limbs are not Pluto's capture and pad but RetroArch's network ports, through Walking Tour's
 `tools/ra.py` (memory reads by address, screenshots, network gamepad). So you read numbers first
 and frames only when a number cannot settle it.
 
 ## Menu and boot
 * **Launch**: `python3 tools/ra.py launch` (RetroArch in the background, Flycast core, the
-  sandbox's own build). Check `ra.py status` first: RetroArch is shared with other sessions, and
-  `ra.py` refuses to act on a game that is not the sandbox. Never quit, pause or write to another
+  mod's own build). Check `ra.py status` first: RetroArch is shared with other sessions, and
+  `ra.py` refuses to act on a game that is not Walking Tour. Never quit, pause or write to another
   game.
 * **To the city**: wait about 15 s (BIOS animation), then Start, Start (title), Down (Original),
   A, A (first driver), then about 20 s of intro. If a Start lands in the
@@ -51,7 +51,7 @@ Network gamepad names are Dreamcast buttons (`ra.py press/hold/release/stick`).
 * **The city is hilly**: a car's height changing fast is usually a crest, not a fall. A real fall
   is a car below its own ground height (`_car + 0x104`).
 * **Door side**: the door point is +15 along the car's x axis (side +1 in the helpers).
-* **On foot** (sandbox, stable 2026-10-11): set objects fly when you walk into them; passers-by run
+* **On foot** (Walking Tour, stable 2026-10-11): set objects fly when you walk into them; passers-by run
   aside (earlier when you sprint), may cross roads, and cars bump or launch them (they tilt flat in
   the air); waiting customers block you and dodge; no customer boards while you are on foot; a fare
   riding when you step out jogs behind you and is dropped off where you stop at their destination.
@@ -80,5 +80,5 @@ One city (Original course), Arcade rules. You start in the cab on the main stree
 ## Sources
 * `nodes/local/dc/homebrew/mods/crazy-taxi/crazy-taxi-decomp/docs/engine.md` (addresses, traffic,
   camera, player car).
-* `nodes/local/dc/homebrew/mods/crazy-taxi/sandbox/src/mod.c` (the mod's controls).
+* `nodes/local/dc/homebrew/mods/crazy-taxi/walking-tour/src/mod.c` (the mod's controls).
 * Live sessions, 2026-10-08 (RetroArch + Flycast).
