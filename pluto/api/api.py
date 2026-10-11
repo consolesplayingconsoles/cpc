@@ -4658,7 +4658,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             flag = homebrew.game_env(self._repo_root(), system, game_key).get("FLYCAST_SINGLE_THREADED", "")
             if flag.strip().lower() in ("1", "yes", "true"):
                 extra = ["-config", "config:rend.ThreadedRendering=no"]
-        cmd = ["open", "-a", emu["app"]]
+        # newInstance: a copy of its own even when the app already runs (another session's
+        # RetroArch); plain `open -a` would only bring that one forward and drop the args.
+        cmd = ["open"] + (["-n"] if emu.get("newInstance") else []) + ["-a", emu["app"]]
         if emu.get("args"):
             # ~ is expanded so an emulator that needs a path of its own (RetroArch's core)
             # can be configured without hardcoding a home directory; {repo} points into this
