@@ -24,7 +24,7 @@
         "--bind",
         "127.0.0.1",
         "--directory",
-        "nodes/local/megadrive/homebrew/mods/sonic1/is-this-namek/patcher"
+        "nodes/local/megadrive/homebrew/mods/sonic1/wait-this-is-not-namek/patcher"
       ],
       "port": 5180
     }
