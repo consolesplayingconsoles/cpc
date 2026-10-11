@@ -16,7 +16,7 @@ and frames only when a number cannot settle it.
   `ra.py` refuses to act on a game that is not the sandbox. Never quit, pause or write to another
   game.
 * **To the city**: wait about 15 s (BIOS animation), then Start, Start (title), Down (Original),
-  A, A (Play by Arcade Rules), A (first driver), then about 20 s of intro. If a Start lands in the
+  A, A (first driver), then about 20 s of intro. If a Start lands in the
   attract demo, it only returns to the title: one more Start. Confirm you are in by reading the
   mod's car count (`_carCount` from `build/work/mod/mod.map`, non-zero) and `MainMode` = 1.
 * **Arcade rules**: the timer is frozen by the mod; the run does not end.
@@ -30,13 +30,13 @@ Network gamepad names are Dreamcast buttons (`ra.py press/hold/release/stick`).
 |------|----------|-----------|------|
 | Accelerate | drive | R (hold) | Platform-confirmed |
 | Gear | reverse / forward | A / B | operator |
-| Step out | leave the cab beside its door | Y | Platform-confirmed |
+| Step out | beside the door; not in mid-air; above speed 4 he falls out (lies a moment, no control) | Y | Platform-confirmed |
 | Get in | at the driver's door (cab's left side), within 10 on the ground | Y | Platform-confirmed |
-| Take over | a traffic car (types 0-10) beside you | Y | Platform-confirmed |
-| Walk | camera-relative | stick | Platform-confirmed |
+| Take over | a traffic car (types 0-10) beside you; it keeps its tilt | Y | Platform-confirmed |
+| Walk | camera-relative; the camera rises for ground climbing ahead | stick | Platform-confirmed |
 | Run | while walking | R (hold) | Platform-confirmed |
-| Jump | on foot, no animation | A | Platform-confirmed |
-| Hail | hold about 2 s on foot: a cab parks 45 ahead (away from the camera), side on | X | Platform-confirmed |
+| Jump | on foot, about 1 m, no animation | A | Platform-confirmed |
+| Hail | one press: a cab parks 45 ahead (away from the camera), the last one and your old cab go | X | Platform-confirmed |
 
 ## Engine and game facts
 * **Camera-relative walking**: the stick's up is away from the camera. To walk to a point, take
@@ -51,6 +51,12 @@ Network gamepad names are Dreamcast buttons (`ra.py press/hold/release/stick`).
 * **The city is hilly**: a car's height changing fast is usually a crest, not a fall. A real fall
   is a car below its own ground height (`_car + 0x104`).
 * **Door side**: the door point is +15 along the car's x axis (side +1 in the helpers).
+* **On foot** (sandbox, stable 2026-10-11): set objects fly when you walk into them; passers-by run
+  aside (earlier when you sprint), may cross roads, and cars bump or launch them (they tilt flat in
+  the air); waiting customers block you and dodge; no customer boards while you are on foot; a fare
+  riding when you step out jogs behind you and is dropped off where you stop at their destination.
+* **Menu**: no Crazy Box entry and no rules screen: Start, Start, (Down for Original), A, then A for
+  the driver.
 
 ## Signature moves
 * **Bail at speed**: hold R about 5 s, press Y, then A: the cab rolls on without you.
@@ -67,8 +73,6 @@ One city (Original course), Arcade rules. You start in the cab on the main stree
 
 ## Calibration / LIVE
 * Walking into set objects (crates): the step-out point ignores them. TBD.
-* Driver in a taken pickup sits in its bed: the seat is the cab's (decomp `engine.md`, the
-  seat table at `0x0C0D51E8`); leaning back when accelerating is the game's own. Not fixed yet.
 * Dark spikes under taken cars: which model slot draws them. TBD.
 * Probe timing: reads are UDP and can time out on a busy machine (the client retries); a
   multi-read probe spans frames, so pause around it when the values must agree.
