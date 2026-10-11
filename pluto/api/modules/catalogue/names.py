@@ -11,7 +11,7 @@ names.py -- read a ROM filename into a title, its tags and its variants.
   (...)       tags, kept raw for display only. Regions come from the header, never
               from the name (headers.py): a filename can be wrong.
   [T-foo]     translation into foo. "[T-En by Some Team v1.0]" also carries its author,
-              and so does a mod: "[Tokyo BS Guide by CPC v1.0]"
+              and so does a mod: "[Tokyo BS Guide by cpc v1.0]"
               (credited) and version.
   [anything]  a mod -- [!], [b], [h], [T+Eng] included. Cleanup happens by renaming.
   " vX.Y..."  a trailing version inside a bracket is split off, so "Boss Versus v0.3"
