@@ -7,7 +7,7 @@
 // subject on the page. They are the same RomCard as the Media drawer's copies -- passed
 // `flat` so it draws no frame of its own inside this one -- so there is one definition of
 // those buttons and the catalogue is untouched.
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { HomebrewItem } from '../../api/homebrew'
 import RomCard from '../RomCard.vue'
@@ -32,6 +32,9 @@ defineEmits<{ build: []; play: []; openOutput: []; send: [node: string]; stop: [
 
 function hideImg(e: Event) { (e.target as HTMLImageElement).style.display = 'none' }
 
+// A cover that fails to load drops the whole link rather than leaving a broken-image icon
+const coverFailed = ref<string | null>(null)
+
 // GitHub's own counts (each release's assets), as of the last fetch: cached by the API for
 // ten minutes; the tab's Refresh asks again.
 const downloads = computed(() => props.item.release?.downloads ?? null)
@@ -41,8 +44,8 @@ const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(
 <template>
   <header class="hbh">
     <div class="hbh__top">
-      <RouterLink v-if="mediaLink && coverUrl" :to="mediaLink" class="hbh__cover-link" :title="'Open ' + item.game?.title + ' in Media'">
-        <img :src="coverUrl" class="hbh__cover" alt="" @error="hideImg" />
+      <RouterLink v-if="mediaLink && coverUrl && coverFailed !== coverUrl" :to="mediaLink" class="hbh__cover" :title="'Open ' + item.game?.title + ' in Media'">
+        <img :src="coverUrl" class="hbh__cover-art" alt="" @error="coverFailed = coverUrl" />
       </RouterLink>
       <img v-else-if="icon" :src="icon" class="hbh__ic" alt="" />
 
@@ -131,8 +134,12 @@ const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(
   border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
 }
 .hbh__top { display: flex; align-items: flex-start; gap: var(--sp-4); }
-.hbh__cover-link { flex: none; line-height: 0; }
-.hbh__cover { width: 148px; height: auto; max-height: 208px; object-fit: contain; border-radius: var(--r); box-shadow: var(--shadow); }
+/* The cover is the original picture, in its own shape, with the rounded corners and the
+   soft shadow: only the WIDTH is shared, so a landscape and a portrait cover line up on
+   the same edge and differ only in height. No frame, no crop, no letterbox. */
+.hbh__cover { display: block; flex: none; width: var(--hbh-cover, 200px); line-height: 0; overflow: hidden; border-radius: var(--r); box-shadow: var(--shadow); }
+.hbh__cover-art { display: block; width: 100%; height: auto; }
+@media (max-width: 640px) { .hbh__cover { width: 120px; } }   /* phone: the title keeps its room */
 .hbh__ic { flex: none; width: 56px; height: 56px; object-fit: contain; }
 .hbh__body { min-width: 0; flex: 1; }
 .hbh__line { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: 13px; color: var(--text-muted); }
