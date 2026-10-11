@@ -105,3 +105,13 @@ A port of someone else's translation (e.g. Zoinkity's Densha de Go! 64 English o
 * **Every string comes verbatim from the source translation.** Match by the Japanese: a DC string takes the English only when the source translation has the same Japanese (e.g. the same-numbered texture in the source's original and translated sets). No near-equivalents, no composing, no choosing between the source and the original game's own English.
 * **Claude writes no wording** — no proposals, no coinings, no "suggested" English in notes or tables. Claude's part is technical: decoding, repainting supplied strings, building.
 * **Anything without an exact source equivalent stays in the original Japanese** (the original art is left untouched) and goes on the **gap list**: Japanese only, by screen and record, no English. The gap list is release-notes material.
+
+### 12. Reporting Work (numbered tables)
+Every multi-item update (a batch of fixes, a build, a research round, a status question) ends in **one numbered table**, not paragraphs:
+
+| # | Item | Change | State |
+|---|---|---|---|
+| 1 | the item, in the operator's words | what was done, one or two sentences (the cause, for a bug) | Seen live / Built, untested / Not done (why) / Done (confirmed) |
+
+* Number the rows and keep the numbers stable within a round, so the operator can answer per row ("1 confirmed, 3 fixed").
+* Around the table, a line or two at most: what is uncommitted, one question if one is needed.
