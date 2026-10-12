@@ -12,7 +12,7 @@ export interface HomebrewParam {
   key: string
   default: string
   value: string
-  help: string            // the comment lines above the key in .env.sample
+  help: string            // the comment lines above the key in its .env
   scope: 'game' | 'item'  // game = shared by every mod of the game (mods/<game>/.env)
 }
 

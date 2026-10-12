@@ -8,10 +8,12 @@ Convention (one naming, scripts are free to differ):
 
 A folder is an item when it has build.sh, except a game's vanilla/ (the original game rebuilt) and
 its decomp (mods/<game>/<x>-decomp/): the plain game lives in the Media catalogue, so Pluto lists
-only real mods. Both still build from a terminal. Parameters come from .env.sample files: a mod gets its game's (mods/<game>/, shared
-by every mod of that game, e.g. the base ROM path) plus its own; each value is saved to the
-.env beside the sample it came from, which every repo gitignores. A mod's own key wins over
-a game key of the same name.
+only real mods. Both still build from a terminal. Parameters are the keys of the gitignored .env
+files (this machine's values): a mod gets its game's (mods/<game>/.env, shared by every mod of
+that game, e.g. the base ROM path) plus its own (<mod>/.env); a mod's own key wins over a game
+key of the same name. An item's constant config (the same on every machine) is its committed
+config.json: {"name": its display name, "noRelease": why it can never be published,
+"decomp": the decomp or disassembly folder it is built on, always its sibling}.
 
 A port is the one kind whose game and whose output live on different systems: a Sega Pico
 game converted to run on a Mega Drive is still that Pico game (its title, its cover, its
@@ -36,6 +38,11 @@ counts come with it: per release (the sum of its assets' download_count) and in 
 the last fetch (cached _RELEASES_TTL; refresh_releases() drops the cache). Items whose RELEASE
 files name the same repo and prefix ship as one bundle, so the counts are shared; each lists
 the others (bundledWith).
+
+A mod names what it is built on in config.json's "decomp" (a folder name, always the mod's
+sibling: mods/<game>/<name>, e.g. crazy-taxi-decomp, s1disasm); the item carries the name.
+decomp_levels() gives one such folder's levels by its path: its tools/progress.py's printout as
+it is, cached until the folder's commit changes or _DECOMP_TTL passes.
 """
 import os
 import re
@@ -46,6 +53,7 @@ except (ImportError, ValueError):
     from catalogue import names as catalogue_names
 import signal
 import subprocess
+import sys
 import threading
 import time
 import json
@@ -59,6 +67,8 @@ _STAGE = re.compile(r"(alpha|beta|rc|pre)", re.I)
 _VERSION = re.compile(r"v?(\d+(?:\.\d+)*(?:-[A-Za-z0-9.]+)?)$")
 _releases_cache = {}           # "owner/repo" -> (fetched_at, releases list or None)
 _RELEASES_TTL = 600            # GitHub unauthenticated API allows 60 calls/hour
+_DECOMP_TTL = 24 * 3600        # a decomp's levels move with its commits: kept a day unless HEAD moves
+_decomp_cache = {}             # decomp folder -> (HEAD, time, entry)
 
 _titles_cache = {}             # system -> (mtime, {game-key: title})
 
@@ -200,8 +210,8 @@ def _parse_env(path):
     return values
 
 
-def _parse_sample(path):
-    """Ordered params from a .env.sample. Comment lines directly above a key are its help;
+def _parse_params(path):
+    """Ordered params from a .env: key, value, and the comment lines directly above it as its help;
     a blank line ends a comment block (so a file's header comment is not a param's help)."""
     params, notes = [], []
     with open(path, encoding="utf-8") as f:
@@ -214,38 +224,38 @@ def _parse_sample(path):
             else:
                 m = _KEY.match(s)
                 if m:
-                    params.append({"key": m.group(1), "default": _unquote(m.group(2)),
+                    params.append({"key": m.group(1), "value": _unquote(m.group(2)), "default": "",
                                    "help": " ".join(notes)})
                 notes = []
     return params
 
 
-def _mod_name(folder):
-    """The item's display name: MOD_NAME in its own .env, else its .env.sample.
+def _config(folder):
+    """The item's constant config (config.json, committed): {} when it has none."""
+    try:
+        with open(os.path.join(folder, "config.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
 
-    Same convention as a node's NODE_NAME -- identity is env, committed in the sample and
-    overridable in the gitignored .env. It used to be scraped from the README's first
-    heading, which made documentation double as metadata: with no README a build went out
+
+def _mod_name(folder):
+    """The item's display name: config.json's "name". It used to be scraped from the README's
+    first heading, which made documentation double as metadata: with no README a build went out
     named after its folder ("sonic-infinite-jump").
     """
-    for f in (".env", ".env.sample"):
-        name = _parse_env(os.path.join(folder, f)).get("MOD_NAME")
-        if name:
-            return _nodash(name.strip())
-    return None
+    name = _config(folder).get("name")
+    return _nodash(name.strip()) if name and name.strip() else None
 
 
 def _unreleasable(folder):
-    """Why this is never going out, from MOD_NO_RELEASE in the item's .env -- the value IS
-    the reason ("Nintendo IP", "uses art from another game"). Some mods cannot be published
-    whatever state they are in, so "Unreleased" is the wrong thing to say about them: it
-    reads as pending. Empty or missing = a normal mod.
+    """Why this is never going out, from config.json's "noRelease" -- the value IS the reason
+    ("Nintendo IP", "uses art from another game"). Some mods cannot be published whatever state
+    they are in, so "Unreleased" is the wrong thing to say about them: it reads as pending.
+    Empty or missing = a normal mod.
     """
-    for f in (".env", ".env.sample"):
-        why = _parse_env(os.path.join(folder, f)).get("MOD_NO_RELEASE")
-        if why and why.strip():
-            return _nodash(why.strip())
-    return None
+    why = _config(folder).get("noRelease")
+    return _nodash(why.strip()) if why and why.strip() else None
 
 
 def _readme(folder):
@@ -290,6 +300,60 @@ def _releases(repo):
         data = None                                   # offline / rate limited: no links, retry later
     _releases_cache[repo] = (now, data)
     return data
+
+
+def _git_head(folder):
+    """The commit a git folder is at (its .git/HEAD resolved; a submodule's .git file points at its
+    git dir), or None."""
+    git = os.path.join(folder, ".git")
+    try:
+        if os.path.isfile(git):                       # "gitdir: <path>"
+            line = open(git, encoding="utf-8").read().strip()
+            git = os.path.normpath(os.path.join(folder, line.split(":", 1)[1].strip()))
+        head = open(os.path.join(git, "HEAD"), encoding="utf-8").read().strip()
+        if not head.startswith("ref: "):
+            return head
+        ref = head[5:]
+        path = os.path.join(git, ref)
+        if os.path.isfile(path):
+            return open(path, encoding="utf-8").read().strip()
+        for line in open(os.path.join(git, "packed-refs"), encoding="utf-8"):
+            if line.endswith(" " + ref + "\n"):
+                return line.split()[0]
+    except OSError:
+        pass
+    return None
+
+
+def decomp_levels(repo_root, path, refresh=False):
+    """One decomp's levels, by its repo-relative folder (a mod's sibling, named in its config.json
+    "decomp"): {name, path, commit, progress (tools/progress.py's printout as it is, or null when
+    the folder has none, e.g. a disassembly), updated (epoch seconds of that run, or null),
+    error}. Cached until the folder's commit changes or _DECOMP_TTL passes; refresh runs it again.
+    ValueError when the path is not a folder under nodes/local/<node>/homebrew/."""
+    homebrew_root = os.path.realpath(os.path.join(repo_root, "nodes", "local"))
+    folder = os.path.realpath(os.path.join(repo_root, path or ""))
+    if not path or not folder.startswith(homebrew_root + os.sep) or "/homebrew/" not in folder \
+            or not os.path.isdir(folder):
+        raise ValueError("no homebrew folder %s" % path)
+    head, now = _git_head(folder), time.time()
+    entry = {"name": os.path.basename(folder), "path": os.path.relpath(folder, repo_root),
+             "commit": head, "progress": None, "updated": None, "error": None}
+    if not os.path.isfile(os.path.join(folder, "tools", "progress.py")):
+        return entry                                  # a disassembly: no levels
+    hit = _decomp_cache.get(folder)
+    if not refresh and hit and hit[0] == head and now - hit[1] < _DECOMP_TTL:
+        return hit[2]
+    try:
+        run = subprocess.run([sys.executable, "tools/progress.py"], cwd=folder, capture_output=True,
+                             text=True, timeout=30)
+        text = run.stdout.rstrip("\n")
+        error = None if run.returncode == 0 else (run.stderr.strip() or "exit %d" % run.returncode)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        text, error = "", str(e)
+    entry = dict(entry, progress=text, updated=int(now), error=error)
+    _decomp_cache[folder] = (head, now, entry)
+    return entry
 
 
 def refresh_releases():
@@ -362,7 +426,7 @@ def _catalogue_game(repo_root, folder):
 
 def game_env(repo_root, system, key):
     """The settings of the homebrew game folder whose CATALOGUE is "<system> <key>": its
-    .env.sample defaults overlaid with its .env. {} when no folder claims the game. Lets a
+    .env. {} when no folder claims the game. Lets a
     game carry how it should be played (e.g. FLYCAST_SINGLE_THREADED) next to how it's built."""
     local = os.path.join(repo_root, "nodes", "local")
     for node in _dirs(local):
@@ -371,21 +435,16 @@ def game_env(repo_root, system, key):
                        [os.path.join(hb, "games", g) for g in _dirs(os.path.join(hb, "games"))]):
             game = _catalogue_game(repo_root, folder)
             if game and game["system"] == system and game["key"] == key:
-                values = {}
-                sample = os.path.join(folder, ".env.sample")
-                if os.path.isfile(sample):
-                    values = {p["key"]: p["default"] for p in _parse_sample(sample)}
-                values.update(_parse_env(os.path.join(folder, ".env")))
-                return values
+                return _parse_env(os.path.join(folder, ".env"))
     return {}
 
 
 def _param_scopes(folder, group):
-    """[(scope, sample_path)] for an item: its game's sample first (mods only), then its own."""
+    """[(scope, env_path)] for an item: its game's .env first (mods only), then its own."""
     scopes = []
     if group:
-        scopes.append(("game", os.path.join(os.path.dirname(folder), ".env.sample")))
-    scopes.append(("item", os.path.join(folder, ".env.sample")))
+        scopes.append(("game", os.path.join(os.path.dirname(folder), ".env")))
+    scopes.append(("item", os.path.join(folder, ".env")))
     return [(sc, p) for sc, p in scopes if os.path.isfile(p)]
 
 
@@ -407,18 +466,15 @@ def _target(folder):
 def _item(repo_root, node, kind, group, name, folder):
     scopes = _param_scopes(folder, group)
     own = set()
-    for sc, sample in scopes:
+    for sc, env_path in scopes:
         if sc == "item":
-            own = {p["key"] for p in _parse_sample(sample)}
+            own = {p["key"] for p in _parse_params(env_path)}
     params, env_paths = [], []
-    for sc, sample in scopes:
-        env_path = os.path.join(os.path.dirname(sample), ".env")
+    for sc, env_path in scopes:
         env_paths.append(os.path.relpath(env_path, repo_root))
-        current = _parse_env(env_path)
-        for p in _parse_sample(sample):
+        for p in _parse_params(env_path):
             if sc == "game" and p["key"] in own:
                 continue
-            p["value"] = current.get(p["key"], p["default"])
             p["scope"] = sc
             params.append(p)
     title, description = _mod_name(folder), _readme(folder)
@@ -460,6 +516,8 @@ def _item(repo_root, node, kind, group, name, folder):
         "origin": (game or {}).get("system") if kind == "ports" else None,
         "originName": (_node_name(repo_root, (game or {}).get("system"))
                        if kind == "ports" and (game or {}).get("system") else None),
+        # config.json's "decomp": the folder name of what it is built on (its sibling), else None
+        "decomp": _config(folder).get("decomp"),
     }
 
 
@@ -514,44 +572,26 @@ def _quote(value):
 
 
 def save_params(repo_root, item, values):
-    """Write each .env the item's params come from (game, then own), in its .env.sample's
-    layout: a key gets the submitted value (or keeps its current one), comments stay, and
-    keys only present in the old .env are kept at the end so nothing set by hand is lost."""
+    """Write each .env the item's params come from (game, then own), in place: a key gets the
+    submitted value (or keeps its current one); comments and order stay."""
     folder = os.path.join(repo_root, item["path"])
     scopes = _param_scopes(folder, item["group"])
     if not scopes:
         raise ValueError("this item has no parameters")
     owners = {p["key"]: p["scope"] for p in item["params"]}
-    for sc, sample_path in scopes:
-        _write_env(sample_path, {k: v for k, v in values.items() if owners.get(k) == sc})
+    for sc, env_path in scopes:
+        _write_env(env_path, {k: v for k, v in values.items() if owners.get(k) == sc})
 
 
-def _write_env(sample_path, values):
-    env_path = os.path.join(os.path.dirname(sample_path), ".env")
-    current = _parse_env(env_path)
-    raw_lines = {}                                   # key -> its original line, for keys kept as-is
-    if os.path.isfile(env_path):
-        with open(env_path, encoding="utf-8") as f:
-            for line in f:
-                m = _KEY.match(line.strip())
-                if m:
-                    raw_lines[m.group(1)] = line.strip() + "\n"
-    declared = set()
+def _write_env(env_path, values):
     out = []
-    with open(sample_path, encoding="utf-8") as f:
+    with open(env_path, encoding="utf-8") as f:
         for line in f:
             m = _KEY.match(line.strip())
-            if m:
-                key = m.group(1)
-                declared.add(key)
-                val = values.get(key, current.get(key, _unquote(m.group(2))))
-                out.append("%s=%s\n" % (key, _quote(str(val))))
+            if m and m.group(1) in values:
+                out.append("%s=%s\n" % (m.group(1), _quote(str(values[m.group(1)]))))
             else:
                 out.append(line if line.endswith("\n") else line + "\n")
-    extra = [k for k in current if k not in declared]
-    if extra:
-        out.append("\n# kept from the previous .env (not in .env.sample)\n")
-        out.extend(raw_lines[k] for k in extra)
     tmp = env_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.writelines(out)
