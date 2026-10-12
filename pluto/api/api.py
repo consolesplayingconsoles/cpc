@@ -2424,7 +2424,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/catalogue/{system}"),
         ("GET", "/catalogue/{system}/cover/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
-        ("GET", "/homebrew"), ("GET", "/homebrew/stream"), ("PUT", "/homebrew/params"), ("POST", "/homebrew/stop"), ("POST", "/homebrew/forget"), ("POST", "/homebrew/open"), ("POST", "/homebrew/start"), ("POST", "/homebrew/favourite"), ("POST", "/homebrew/releases/refresh"),
+        ("GET", "/homebrew"), ("GET", "/homebrew/stream"), ("PUT", "/homebrew/params"), ("POST", "/homebrew/stop"), ("POST", "/homebrew/forget"), ("POST", "/homebrew/open"), ("POST", "/homebrew/start"), ("POST", "/homebrew/favourite"), ("POST", "/homebrew/releases/refresh"), ("GET", "/homebrew/decomp"),
         ("POST", "/messages"), ("POST", "/dreame/login"), ("POST", "/dreame/logout"),
         ("POST", "/control/signal"), ("POST", "/control/capture"),
         ("POST", "/control/listen"), ("POST", "/roomba-ai/audio"),
@@ -2486,6 +2486,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif parsed.path == "/homebrew":
             self._send(200, {"items": self._homebrew_items()})
+        elif parsed.path == "/homebrew/decomp":
+            # one decomp's levels: its repo-relative folder (the item's sibling, named in config.json)
+            qs = urllib.parse.parse_qs(parsed.query)
+            try:
+                self._send(200, homebrew.decomp_levels(self._repo_root(), (qs.get("path") or [""])[0],
+                                                       (qs.get("refresh") or [""])[0] == "1"))
+            except ValueError as e:
+                self._send(404, {"error": str(e)})
 
         elif parsed.path == "/homebrew/stream":
             self._handle_homebrew_stream(urllib.parse.parse_qs(parsed.query))

@@ -359,8 +359,8 @@ paths:
   /homebrew:
     get:
       tags: [homebrew]
-      summary: Every buildable item (mods/<game>/<mod>, games/<game>, tools/<tool>, ports/<game>/<port>) with actions and .env.sample params
-      responses: { '200': { description: "{ items: [{id, node, nodeName, system, kind, group, name, title, named, description, path, actions, params, paramsPaths, running, runningSend, output, favourite, game, noRelease, sendTargets, release}] }; release (from a RELEASE file, else null) = {url, name, version, stable, source, bundledWith: [the other items published in the same release], downloads: {total, checked, versions: [{version, count, prerelease, url, name}]}}" } }
+      summary: Every buildable item (mods/<game>/<mod>, games/<game>, tools/<tool>, ports/<game>/<port>) with actions, .env params (this machine's values) and config.json (name, noRelease, decomp)
+      responses: { '200': { description: "{ items: [{id, node, nodeName, system, kind, group, name, title, named, description, path, actions, params, paramsPaths, running, runningSend, output, favourite, game, noRelease, sendTargets, release, decomp}] }; decomp = config.json's "decomp": the folder name of the decomp or disassembly it is built on (always its sibling), or null; release (from a RELEASE file, else null) = {url, name, version, stable, source, bundledWith: [the other items published in the same release], downloads: {total, checked, versions: [{version, count, prerelease, url, name}]}}" } }
   /homebrew/stream:
     get:
       tags: [homebrew]
@@ -373,7 +373,7 @@ paths:
   /homebrew/params:
     put:
       tags: [homebrew]
-      summary: Save an item's parameters to the .env beside its .env.sample
+      summary: Save an item's parameters into its .env files (game's, own)
       parameters: [{ name: id, in: query, required: true, schema: { type: string } }]
       requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { values: { type: object, additionalProperties: { type: string } } } } } } }
       responses: { '200': { description: The updated item }, '400': { description: no params / bad body }, '404': { description: no such item } }
@@ -408,6 +408,14 @@ paths:
       tags: [homebrew]
       summary: Fetch every released item's GitHub releases again (the download counts with them) instead of the 10-minute cache
       responses: { '200': { description: "{ items: [...] }, as GET /homebrew" } }
+  /homebrew/decomp:
+    get:
+      tags: [homebrew]
+      summary: One decomp's levels, by its repo-relative folder (an item's sibling, named in its config.json decomp)
+      parameters:
+        - { name: path, in: query, required: true, schema: { type: string }, description: "repo-relative folder, e.g. nodes/local/dc/homebrew/mods/crazy-taxi/crazy-taxi-decomp" }
+        - { name: refresh, in: query, required: false, schema: { type: string, enum: ['1'] }, description: run progress.py again instead of the cached printout }
+      responses: { '200': { description: "{ name, path, commit, progress: tools/progress.py's printout as it is (fixed-width text; null when the folder has none, e.g. a disassembly), updated: epoch seconds of that run (or null), error: null or why progress.py failed }, cached until the folder's commit changes or a day passes" }, '404': { description: not a folder under nodes/local/<node>/homebrew/ } }
   /homebrew/start:
     post:
       tags: [homebrew]
