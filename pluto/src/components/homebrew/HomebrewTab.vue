@@ -9,6 +9,7 @@ import { useRuns } from '../../composables/useRuns'
 import { useRunDurations } from '../../composables/useRunDurations'
 import UiButton from '../ui/UiButton.vue'
 import HomebrewHead from './HomebrewHead.vue'
+import HomebrewDecomp from './HomebrewDecomp.vue'
 import UiFilterMenu from '../ui/UiFilterMenu.vue'
 import UiSidePanel from '../ui/UiSidePanel.vue'
 import UiPill from '../ui/UiPill.vue'
@@ -447,6 +448,9 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' ➡️ ' + it.s
           />
           <p v-if="openError" class="hb__state--bad">{{ openError }}</p>
 
+          <!-- the decomp this is built on and how far along it is, when config.json names one -->
+          <HomebrewDecomp :item="selected" />
+
           <section v-if="selected.params.length" class="hb__params">
             <div class="hb__params-head">
               <h3 class="hb__section">Parameters</h3>
@@ -510,7 +514,7 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' ➡️ ' + it.s
 .hb__row-name { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); white-space: nowrap; margin-left: auto; }
 .hb__detail { flex: 1; min-width: 0; overflow-y: auto; padding: var(--sp-5) var(--sp-5) 340px; }   /* bottom: clear of the floating terminal */
 .hb__path { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-faint); word-break: break-all; }
-.hb__params { padding: var(--sp-4); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); }
+.hb__params { margin-top: var(--sp-4); padding: var(--sp-4); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); }
 .hb__params-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-3); margin-bottom: var(--sp-3); }
 .hb__shared { margin-left: 6px; }
 .hb__section { margin: 0; font-size: 13px; font-weight: 600; }
