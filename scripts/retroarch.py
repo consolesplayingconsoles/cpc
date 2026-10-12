@@ -102,17 +102,33 @@ def address(addr):
     return addr & sysdef['mask'] if sysdef else addr
 
 
+CHUNK = 2048            # Flycast answers up to 3,000 bytes a read (a 3,500-byte reply never comes)
+_ram_only = []          # set once the core has shown it has no memory map (READ_CORE_RAM only)
+
+
 def _raw(addr, n):
     sysdef, addr = system(), address(addr)
-    tries = [('READ_CORE_MEMORY', addr)]
-    if sysdef:
-        tries.append(('READ_CORE_RAM', addr - sysdef['ram']))
-    for _ in range(3):                            # a busy machine drops or delays answers
-        for name, a in tries:
-            r = cmd('%s %x %d' % (name, a, n))
-            if r and not r.split()[2:3] == ['-1']:
-                return bytes(int(b, 16) for b in r.split()[2:])
-    sys.exit('read failed at %08X (is the game running?)' % addr)
+    out = bytearray()
+    while len(out) < n:
+        k, a = min(CHUNK, n - len(out)), addr + len(out)
+        tries = [] if _ram_only else [('READ_CORE_MEMORY', a)]
+        if sysdef:
+            tries.append(('READ_CORE_RAM', a - sysdef['ram']))
+        for _ in range(3):                        # a busy machine drops or delays answers
+            got = None
+            for name, at in tries:
+                r = cmd('%s %x %d' % (name, at, k))
+                if r and r.split()[2:3] != ['-1'] and len(r.split()) == k + 2:
+                    got = bytes(int(b, 16) for b in r.split()[2:])
+                    if name == 'READ_CORE_RAM' and not _ram_only:
+                        _ram_only.append(1)
+                    break
+            if got is not None:
+                break
+        else:
+            sys.exit('read failed at %08X (is the game running?)' % a)
+        out += got
+    return bytes(out)
 
 
 def read(addr, n):
@@ -135,11 +151,16 @@ def read(addr, n):
 
 
 def write(addr, data):
+    """In 256-byte commands; without a memory map each WRITE_CORE_MEMORY waits out a timeout, so
+    once the core has shown it has none, straight to WRITE_CORE_RAM."""
     sysdef, addr = system(), address(addr)
-    hexes = ' '.join('%02x' % b for b in data)
-    r = cmd('WRITE_CORE_MEMORY %x %s' % (addr, hexes))
-    if (r is None or r.split()[2:3] == ['-1']) and sysdef:
-        cmd('WRITE_CORE_RAM %x %s' % (addr - sysdef['ram'], hexes), reply=False)
+    for i in range(0, len(data), 256):
+        a, hexes = addr + i, ' '.join('%02x' % b for b in data[i:i + 256])
+        r = None if _ram_only else cmd('WRITE_CORE_MEMORY %x %s' % (a, hexes))
+        if (r is None or r.split()[2:3] == ['-1']) and sysdef:
+            if not _ram_only:
+                _ram_only.append(1)
+            cmd('WRITE_CORE_RAM %x %s' % (a - sysdef['ram'], hexes), reply=False)
 
 
 def pad(device, index, ident, state):
