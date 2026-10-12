@@ -111,10 +111,14 @@ const sections = computed(() => {
     sec.groups.set(key, [...(sec.groups.get(key) ?? []), it])
     byNode.set(it.node, sec)
   }
+  // Inside a console the starred come first: a game whose mods you starred goes to the top,
+  // and within a game the starred mods lead. Everything else keeps the order it had.
+  const starFirst = (a: HomebrewItem, b: HomebrewItem) => Number(b.favourite) - Number(a.favourite)
   return [...byNode.entries()].map(([node, sec]) => ({
     node, name: sec.name,
-    groups: [...sec.groups.entries()].map(([g, list]) =>
-      [g, list] as [string, HomebrewItem[]]),
+    groups: [...sec.groups.entries()]
+      .map(([g, list]) => [g, [...list].sort(starFirst)] as [string, HomebrewItem[]])
+      .sort(([, a], [, b]) => Number(b.some(i => i.favourite)) - Number(a.some(i => i.favourite))),
   }))
 })
 
