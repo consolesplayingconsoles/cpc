@@ -58,6 +58,17 @@ export interface HomebrewTarget {
   kind: string            // catalogue send strategy (batocera | sd), or "script" for deploy.sh
 }
 
+// One decomp's levels (GET /homebrew/decomp?path=): what its tools/progress.py prints (fixed-width
+// text, shown as it is), cached by the API until the folder's commit changes or a day passes
+export interface HomebrewDecomp {
+  name: string            // the folder, e.g. "crazy-taxi-decomp", "s1disasm"
+  path: string            // repo-relative
+  commit: string | null   // its git HEAD the levels were read at
+  progress: string | null // progress.py's printout; null when it has none (a disassembly)
+  updated: number | null  // epoch seconds of that run
+  error: string | null    // why there is nothing (no such folder, progress.py failed)
+}
+
 export interface HomebrewItem {
   id: string              // "<node>/<kind>/<game>/<mod>" or "<node>/<kind>/<name>"
   node: string
@@ -82,6 +93,7 @@ export interface HomebrewItem {
   output: HomebrewOutput | null     // last build output, if the file still exists
   sendTargets: HomebrewTarget[]     // nodes Send can take it to (catalogue send, or its deploy.sh)
   favourite: boolean                // starred: pinned on top of the list (catalogue/favourites.json)
+  decomp: string | null             // config.json's decomp: the folder name of what it is built on (its sibling)
 }
 
 async function json<T>(res: Response): Promise<T> {
@@ -95,6 +107,12 @@ async function json<T>(res: Response): Promise<T> {
 
 export async function listItems(): Promise<HomebrewItem[]> {
   return (await json<{ items: HomebrewItem[] }>(await fetch(BASE))).items
+}
+
+// One decomp's levels by its repo-relative folder: an item's sibling, path = the item's folder's
+// parent + its decomp name. refresh runs progress.py again instead of the cached printout.
+export async function getDecomp(path: string, refresh = false): Promise<HomebrewDecomp> {
+  return json<HomebrewDecomp>(await fetch(`${BASE}/decomp?path=${enc(path)}${refresh ? '&refresh=1' : ''}`))
 }
 
 // Ask GitHub for the releases (and their download counts) again instead of the cached copy
