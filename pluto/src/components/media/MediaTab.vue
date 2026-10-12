@@ -286,7 +286,16 @@ const groupFields = computed<MetaField[]>(() => {
   return wanted.filter(f => all.some(g => g.meta?.[f]))
 })
 const sections = computed(() => {
-  if (!groupBy.value) return [{ label: '', games: games.value }]
+  if (!groupBy.value) {
+    // starred games are their own list on top, with a heading apiece so the break is seen; with
+    // no stars (or nothing but stars) there is nothing to separate, so no headings at all
+    const stars = games.value.filter(g => g.favourite)
+    if (stars.length && stars.length < games.value.length) {
+      // the second list is named for what it holds: the tab you are on (Games, Tools)
+      return [{ label: 'Favourites', games: stars }, { label: kindTab.value === 'tool' ? 'Tools' : 'Games', games: games.value.filter(g => !g.favourite) }]
+    }
+    return [{ label: '', games: games.value }]
+  }
   const by = new Map<string, Game[]>()
   for (const g of games.value) {
     const k = g.meta?.[groupBy.value] ?? ''
@@ -341,8 +350,11 @@ const games = computed<Game[]>(() => {
     (!noCoverOnly.value || (g.cover !== 'custom' && g.cover !== 'cached')) &&
     // like every filter, ticked nodes narrow: a game must be on ALL of them
     (!nodeFilter.value.length || nodeFilter.value.every(n => g.nodes.includes(n))))
-  return q ? all.filter(g => g.title.toLowerCase().includes(q) || g.files.some(f => f.path.toLowerCase().includes(q))
+  const hits = q ? all.filter(g => g.title.toLowerCase().includes(q) || g.files.some(f => f.path.toLowerCase().includes(q))
                           || Object.values(g.meta ?? {}).some(v => v.toLowerCase().includes(q))) : all
+  // inside a console the starred come first (what you play), the rest in the order they had;
+  // a stable sort, so groupings built from this list lead with them too
+  return [...hits].sort((a, b) => Number(!!b.favourite) - Number(!!a.favourite))
 })
 const openGame = computed(() => view.value?.games.find(g => g.key === gameKey.value) ?? null)
 
