@@ -357,12 +357,18 @@ const EMPTY: Record<HomebrewKind, string> = {
 // Up in Favourites there is no group heading, so a port's row carries the conversion there.
 // Keys, not names: it sits in the mono data type the diagram uses.
 const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' ➡️ ' + it.system : it.name)
+
+// The asset viewer (dc-shuriken-studio) runs beside Pluto on the lab machine (start-pluto-lab.sh), so its link
+// exists only where Pluto is reached through localhost.
+const studioHere = location.hostname === 'localhost' || location.hostname.endsWith('.localhost')
+function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopener') }
 </script>
 
 <template>
   <div class="hb">
     <header class="hb__bar">
       <h2 class="hb__heading">Homebrew</h2>
+      <UiButton v-if="studioHere" variant="secondary" title="Open the asset viewer in a new tab" @click="openStudio">Open Shuriken Studio</UiButton>
       <UiButton variant="secondary" :loading="loading" loading-text="Refreshing" title="Re-read the projects and ask GitHub for the release download counts" @click="load(true)">Refresh</UiButton>
     </header>
     <UiSubTabs
