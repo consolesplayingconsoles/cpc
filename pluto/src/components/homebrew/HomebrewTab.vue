@@ -79,11 +79,14 @@ const loading = ref(false)
 const error = ref('')
 const loaded = ref(false)
 
+let metricsFresh = false        // the next decomp metrics read runs the reports again (Refresh)
+
 // fresh: also ask GitHub for the releases (and download counts) instead of the API's cache
 async function load(fresh = false) {
   loading.value = true
   error.value = ''
   try {
+    metricsFresh = fresh
     all.value = fresh ? await refreshReleases() : await listItems()
     loaded.value = true
     // A build still running (started before a reload, or in another tab): pick its console back up
@@ -100,12 +103,17 @@ watch(() => props.active, (on) => { if (on && !loaded.value) load() }, { immedia
 
 
 // ── a decomp's main metric on its row (decompMetric.ts) ──────────────────────
-// Read through /homebrew/decomp, which the API caches per commit, once the tab is shown.
+// Read through /homebrew/decomp, which the API caches per commit, once the tab is shown;
+// Refresh runs every report again.
 const metrics = ref<Record<string, Metric>>({})
+let metricsFor: HomebrewItem[] | null = null
 watch([kind, all], () => {
-  if (kind.value !== 'decomps') return
-  for (const it of all.value.filter(i => i.kind === 'decomps' && i.hasProgress && !metrics.value[i.id])) {
-    getDecomp(it.path).then(d => {
+  if (kind.value !== 'decomps' || metricsFor === all.value) return
+  metricsFor = all.value
+  const fresh = metricsFresh
+  metricsFresh = false
+  for (const it of all.value.filter(i => i.kind === 'decomps' && i.hasProgress)) {
+    getDecomp(it.path, fresh).then(d => {
       const m = d.progress ? mainMetric(d.progress) : null
       if (m) metrics.value = { ...metrics.value, [it.id]: m }
     }).catch(() => { /* the detail says why */ })

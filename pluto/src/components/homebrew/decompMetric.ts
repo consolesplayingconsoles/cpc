@@ -1,9 +1,9 @@
 // A decomp's main metric: the number that reads 100% when the project is complete. For a decomp
-// the share that is equivalent C (an older report: matching C), for a disassembly the share of
-// the ROM mapped (every byte known as code, art or data). Every report puts it first; looking it
+// the share that is equivalent C (an older report: matching C), for a disassembly the share
+// that is equivalent source (rebuilt byte for byte as named, readable code and data). Every report puts it first; looking it
 // up by label keeps a report that does not still right, and one with none of them falls back to
 // its first percentage. Shared by the list's pill and the progress table's bold row.
-export const MAIN_METRICS = ['done: equivalent C', 'matching C, bytes', 'mapped, bytes']
+export const MAIN_METRICS = ['done: equivalent C', 'matching C, bytes', 'done: equivalent source']
 
 export interface Metric { label: string; pct: string }
 
