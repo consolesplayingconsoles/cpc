@@ -527,10 +527,8 @@ def _is_decomp(name):
 
 
 def _mine(repo_root, folder):
-    """Whether a decomp is ours: its first commit's author (who started it) is this checkout's git
-    user. A fork of someone else's decomp is theirs even when the last commits are ours. Others'
-    decomps (sonicretro's disassemblies, tbg-decomp) measure progress their own way, so they are
-    not tracked."""
+    """Whether a decomp is ours: its last commit's author is this checkout's git user. Others'
+    decomps (sonicretro's disassemblies) measure progress their own way, so they are not tracked."""
     def git(*args, cwd):
         try:
             return subprocess.run(["git"] + list(args), cwd=cwd, capture_output=True, text=True,
@@ -538,8 +536,7 @@ def _mine(repo_root, folder):
         except (OSError, subprocess.TimeoutExpired):
             return ""
     me = git("config", "user.email", cwd=repo_root)
-    root = git("rev-list", "--max-parents=0", "HEAD", cwd=folder).split("\n")[-1]
-    return bool(me) and bool(root) and git("log", "-1", "--format=%ae", root, cwd=folder) == me
+    return bool(me) and git("log", "-1", "--format=%ae", cwd=folder) == me
 
 
 def _decomp_item(repo_root, node, game, name, folder):
