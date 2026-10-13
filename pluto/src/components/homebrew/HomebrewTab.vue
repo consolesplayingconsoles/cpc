@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The Homebrew tab: projects the /homebrew API discovers under nodes/local/<node>/homebrew,
-// split into Mods / Games / Tools sub-tabs. Sub-tab and item ride the URL
+// split into Mods / Ports / Games / Tools sub-tabs, plus Decomp / Disasm: our own decomps and
+// disassemblies next to a game's mods, mod or no mod, with how far along each is. Sub-tab and item ride the URL
 // (/homebrew/mods/<node>/<game>/<mod>, /homebrew/games/<node>/<name>) so a reload keeps
 // them. No polling: the list loads when the tab is first shown and on Refresh.
 import { ref, computed, watch } from 'vue'
@@ -10,6 +11,7 @@ import { useRunDurations } from '../../composables/useRunDurations'
 import UiButton from '../ui/UiButton.vue'
 import HomebrewHead from './HomebrewHead.vue'
 import HomebrewDecomp from './HomebrewDecomp.vue'
+import { mainMetric, progressStyle, type Metric } from './decompMetric'
 import UiFilterMenu from '../ui/UiFilterMenu.vue'
 import UiSidePanel from '../ui/UiSidePanel.vue'
 import UiPill from '../ui/UiPill.vue'
@@ -19,7 +21,7 @@ import UiSubTabs from '../ui/UiSubTabs.vue'
 import { ICONS } from '../../composables/useIcons'
 import { catalogueApi } from '../../api/catalogue'
 import {
-  listItems, saveParams, stopItem, openFolder, startItem, streamUrl, setFavourite, forgetRun, refreshReleases,
+  listItems, saveParams, stopItem, openFolder, startItem, streamUrl, setFavourite, forgetRun, refreshReleases, getDecomp,
   type HomebrewItem, type HomebrewKind,
 } from '../../api/homebrew'
 
@@ -32,10 +34,11 @@ const KINDS: { kind: HomebrewKind; label: string }[] = [
   { kind: 'ports', label: 'Ports' },
   { kind: 'games', label: 'Games' },
   { kind: 'tools', label: 'Tools' },
+  { kind: 'decomps', label: 'Decomp / Disasm' },
 ]
 const kind = computed<HomebrewKind>(() => {
   const k = route.name === 'homebrew' ? route.params.kind : undefined
-  return k === 'games' || k === 'tools' || k === 'ports' ? k : 'mods'
+  return k === 'games' || k === 'tools' || k === 'ports' || k === 'decomps' ? k : 'mods'
 })
 function setKind(k: HomebrewKind) { router.push({ name: 'homebrew', params: { kind: k } }) }
 
@@ -95,6 +98,19 @@ async function load(fresh = false) {
 }
 watch(() => props.active, (on) => { if (on && !loaded.value) load() }, { immediate: true })
 
+
+// ── a decomp's main metric on its row (decompMetric.ts) ──────────────────────
+// Read through /homebrew/decomp, which the API caches per commit, once the tab is shown.
+const metrics = ref<Record<string, Metric>>({})
+watch([kind, all], () => {
+  if (kind.value !== 'decomps') return
+  for (const it of all.value.filter(i => i.kind === 'decomps' && i.hasProgress && !metrics.value[i.id])) {
+    getDecomp(it.path).then(d => {
+      const m = d.progress ? mainMetric(d.progress) : null
+      if (m) metrics.value = { ...metrics.value, [it.id]: m }
+    }).catch(() => { /* the detail says why */ })
+  }
+}, { immediate: true })
 
 const coverUrl = (it: HomebrewItem) => it.game?.listed ? catalogueApi.coverUrl(it.game.system, it.game.key) : null
 const mediaLink = (it: HomebrewItem) => it.game?.listed ? `/media/${it.game.system}/${it.game.key}` : null
@@ -327,6 +343,7 @@ const EMPTY: Record<HomebrewKind, string> = {
   games: 'No games found. A game is a folder with build.sh at nodes/local/<node>/homebrew/games/<game>/.',
   tools: 'No tools found. A tool is a folder with build.sh at nodes/local/<node>/homebrew/tools/<tool>/.',
   ports: 'No ports found. A port is a folder with build.sh at nodes/local/<node>/homebrew/ports/<game>/<port>/, converting a game from another system to this one.',
+  decomps: 'No decomps found. A decomp or disassembly is a folder named <game>-decomp or ...disasm at nodes/local/<node>/homebrew/mods/<game>/ whose last commit is yours; its tools/progress.py gives its levels.',
 }
 
 // Up in Favourites there is no group heading, so a port's row carries the conversion there.
@@ -355,10 +372,12 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' ➡️ ' + it.s
           <label v-for="[node, name] in consoles" :key="node">
             <input type="checkbox" :checked="nodeSel.includes(node)" @change="toggleNode(node)" /> {{ name }}
           </label>
+          <template v-if="kind !== 'decomps'">
           <span class="ui-fmenu__sep">Release</span>
           <label v-for="st in STATES" :key="st.key">
             <input type="checkbox" :checked="stateSel.includes(st.key)" @change="toggleState(st.key)" /> {{ st.label }}
           </label>
+          </template>
         </UiFilterMenu>
       </div>
       <nav class="hb__list">
@@ -380,7 +399,11 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' ➡️ ' + it.s
             <span class="hb__row-title">
               {{ it.game?.title ? it.game.title + ': ' + it.title : it.title }}{{ ICONS[it.node] ? '' : ' (' + it.nodeName + ')' }}
             </span>
-            <UiPill v-if="it.release" :tone="it.release.stable ? 'ok' : 'idle'">v{{ it.release.version }}</UiPill>
+            <template v-if="it.kind === 'decomps'">
+              <UiPill v-if="metrics[it.id]" :style="progressStyle(metrics[it.id].pct)" :title="'Main metric: ' + metrics[it.id].label">{{ metrics[it.id].pct }}</UiPill>
+              <UiPill v-else-if="!it.hasProgress" tone="idle" title="No tools/progress.py">No report</UiPill>
+            </template>
+            <UiPill v-else-if="it.release" :tone="it.release.stable ? 'ok' : 'idle'">v{{ it.release.version }}</UiPill>
             <UiPill v-else-if="it.noRelease" tone="warn" class="hb__private" :title="'Never released: ' + it.noRelease">Private: {{ it.noRelease }}</UiPill>
             <UiPill v-else tone="idle">Unreleased</UiPill>
             <span class="hb__row-name">{{ rowMeta(it) }}</span>
@@ -418,7 +441,12 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' ➡️ ' + it.s
               <button class="hb__fav" :class="{ 'is-on': it.favourite }" :title="it.favourite ? 'Unfavourite' : 'Favourite'"
                       @click.stop="toggleFavourite(it)">{{ it.favourite ? '★' : '☆' }}</button>
               <span class="hb__row-title">{{ it.kind === 'ports' && it.game ? it.game.title + ': ' + it.title : it.title }}</span>
-              <UiPill v-if="it.release" :tone="it.release.stable ? 'ok' : 'idle'">v{{ it.release.version }}</UiPill>
+              <!-- a decomp has no release: it only says when there is no progress report to show -->
+              <template v-if="it.kind === 'decomps'">
+                <UiPill v-if="metrics[it.id]" :style="progressStyle(metrics[it.id].pct)" :title="'Main metric: ' + metrics[it.id].label">{{ metrics[it.id].pct }}</UiPill>
+                <UiPill v-else-if="!it.hasProgress" tone="idle" title="No tools/progress.py">No report</UiPill>
+              </template>
+              <UiPill v-else-if="it.release" :tone="it.release.stable ? 'ok' : 'idle'">v{{ it.release.version }}</UiPill>
               <!-- never publishable (someone else's IP) reads differently from not yet released -->
               <UiPill v-else-if="it.noRelease" tone="warn" class="hb__private" :title="'Never released: ' + it.noRelease">Private: {{ it.noRelease }}</UiPill>
               <UiPill v-else tone="idle">Unreleased</UiPill>
@@ -433,6 +461,26 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' ➡️ ' + it.s
 
       <main class="hb__detail">
         <div v-if="!selected" class="hb__state" />
+        <!-- a decomp or disassembly: nothing to build or set, only where it is and its levels -->
+        <template v-else-if="selected.kind === 'decomps'">
+          <header class="hb__dhead">
+            <img v-if="ICONS[selected.node]" :src="ICONS[selected.node]" class="hb__dhead-ic" :alt="selected.nodeName" />
+            <div class="hb__dhead-text">
+              <h3 class="hb__dhead-title">{{ selected.title }}</h3>
+              <div class="hb__dhead-meta">
+                <span>{{ selected.nodeName }}</span>
+                <template v-if="selected.game"><span aria-hidden="true">·</span>
+                  <RouterLink v-if="mediaLink(selected)" :to="mediaLink(selected)!" class="hb__dhead-link">{{ selected.game.title }}</RouterLink>
+                  <span v-else>{{ selected.game.title }}</span>
+                </template>
+                <code class="hb__path">{{ selected.path }}</code>
+              </div>
+            </div>
+            <UiButton variant="secondary" title="Open the folder" @click="openDir">Open folder</UiButton>
+          </header>
+          <p v-if="openError" class="hb__state--bad">{{ openError }}</p>
+          <HomebrewDecomp :item="selected" />
+        </template>
         <template v-else>
           <HomebrewHead
             :item="selected" :icon="ICONS[selected.node]"
@@ -447,9 +495,6 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' ➡️ ' + it.s
             @stop="stop" @open-dir="openDir"
           />
           <p v-if="openError" class="hb__state--bad">{{ openError }}</p>
-
-          <!-- the decomp this is built on and how far along it is, when config.json names one -->
-          <HomebrewDecomp :item="selected" />
 
           <section v-if="selected.params.length" class="hb__params">
             <div class="hb__params-head">
@@ -526,5 +571,12 @@ const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' ➡️ ' + it.s
 .hb__save { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-3); margin-top: var(--sp-3); }
 .hb__hint { font-size: 12px; color: var(--text-faint); }
 .hb__state { padding: var(--sp-4) var(--sp-5); font-size: 13px; color: var(--text-muted); }
+/* a decomp's header: the console mark, its name, where it is; the levels card follows */
+.hb__dhead { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); }
+.hb__dhead-ic { width: 32px; height: 32px; object-fit: contain; flex: none; }
+.hb__dhead-text { flex: 1; min-width: 0; }
+.hb__dhead-title { margin: 0; font-size: 16px; font-weight: 600; }
+.hb__dhead-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2); margin-top: 2px; font-size: 12.5px; color: var(--text-muted); }
+.hb__dhead-link { color: var(--accent); text-decoration: none; }
 .hb__state--bad { color: var(--bad); font-size: 12.5px; }
 </style>

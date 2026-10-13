@@ -1,8 +1,7 @@
 <script setup lang="ts">
-// A mod's decomp (or disassembly) progress: what the project's tools/progress.py prints, shown
-// as it is. The mod names what it is built on in its config.json "decomp" (always a sibling
-// folder), and GET /homebrew/decomp answers with that printout, cached by the API until the
-// decomp's commit changes. The printout has one layout across projects (a heading per section,
+// A decomp's (or disassembly's) progress, in the Decomp / Disasm tab: what the project's
+// tools/progress.py prints. The item names itself as its decomp, and GET /homebrew/decomp
+// answers with that printout, cached by the API until the decomp's commit changes. The printout has one layout across projects (a heading per section,
 // then rows of label, percentage or "-", detail), so it is drawn as a table with a bar on each
 // percentage. The text is parsed here and anything that does not fit the layout falls back to the
 // printout exactly as printed, in a monospace block: a changed progress.py degrades, never breaks.
@@ -10,6 +9,7 @@ import { computed, ref, watch } from 'vue'
 import { getDecomp, type HomebrewDecomp, type HomebrewItem } from '../../api/homebrew'
 import UiButton from '../ui/UiButton.vue'
 import UiState from '../ui/UiState.vue'
+import { mainMetric } from './decompMetric'
 
 const props = defineProps<{ item: HomebrewItem }>()
 
@@ -61,6 +61,9 @@ function parseProgress(text: string): Section[] | null {
 }
 const table = computed(() => levels.value?.progress ? parseProgress(levels.value.progress) : null)
 const width = (pct: string) => Math.min(100, parseFloat(pct)) + '%'
+// the main metric's row is bold, the same number the list shows in its pill
+const main = computed(() => levels.value?.progress ? mainMetric(levels.value.progress) : null)
+const isMain = (r: Row) => !!main.value && r.label === main.value.label && r.pct === main.value.pct
 
 const stamp = (s: number) => new Date(s * 1000).toLocaleString('sv-SE').slice(0, 16)   // 2026-10-12 23:09
 </script>
@@ -87,7 +90,7 @@ const stamp = (s: number) => new Date(s * 1000).toLocaleString('sv-SE').slice(0,
           <span class="hbd__sec-title">{{ sec.title }}</span>
           <span v-if="sec.detail" class="hbd__sec-detail">{{ sec.detail }}</span>
         </div>
-        <div v-for="(r, n) in sec.rows" :key="n" class="hbd__row">
+        <div v-for="(r, n) in sec.rows" :key="n" class="hbd__row" :class="{ 'is-main': isMain(r) }" :title="isMain(r) ? 'Main metric: 100% when complete' : undefined">
           <span class="hbd__label" :style="{ paddingLeft: r.level * 14 + 'px' }">{{ r.label }}</span>
           <span class="hbd__pct">
             <template v-if="r.pct.endsWith('%')">
@@ -125,6 +128,7 @@ const stamp = (s: number) => new Date(s * 1000).toLocaleString('sv-SE').slice(0,
    heading is the first child of its section, which makes the odd children the second, fourth... row */
 .hbd__row:nth-child(odd) { background: var(--surface-2); }
 .hbd__label { color: var(--text); }
+.hbd__row.is-main .hbd__label, .hbd__row.is-main .hbd__num { font-weight: 700; }
 .hbd__pct { display: flex; align-items: center; gap: var(--sp-2); }
 /* the number is always printed: the bar is a glance, never the only carrier of the value */
 .hbd__bar { flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }

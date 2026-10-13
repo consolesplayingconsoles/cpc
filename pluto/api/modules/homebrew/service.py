@@ -521,6 +521,34 @@ def _item(repo_root, node, kind, group, name, folder):
     }
 
 
+def _is_decomp(name):
+    """A decomp or disassembly folder next to a game's mods: <game>-decomp, s1disasm, dbzbr-disasm."""
+    return name.endswith("-decomp") or "disasm" in name
+
+
+def _mine(repo_root, folder):
+    """Whether a decomp is ours: its last commit's author is this checkout's git user. Others'
+    decomps (sonicretro's disassemblies) measure progress their own way, so they are not tracked."""
+    def git(*args, cwd):
+        try:
+            return subprocess.run(["git"] + list(args), cwd=cwd, capture_output=True, text=True,
+                                  timeout=5).stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+    me = git("config", "user.email", cwd=repo_root)
+    return bool(me) and git("log", "-1", "--format=%ae", cwd=folder) == me
+
+
+def _decomp_item(repo_root, node, game, name, folder):
+    """A decomp or disassembly as an item of its own (the Decomp / Disasm sub-tab), mod or no mod:
+    nothing to build, release or set, just its levels. It names itself as its decomp, so the
+    detail asks /homebrew/decomp for its own folder."""
+    it = _item(repo_root, node, "decomps", game, name, folder)
+    it.update(actions=[], params=[], paramsPaths=[], release=None, noRelease=None, output=None,
+              decomp=name, hasProgress=os.path.isfile(os.path.join(folder, "tools", "progress.py")))
+    return it
+
+
 def _dirs(parent):
     if not os.path.isdir(parent):
         return []
@@ -535,9 +563,13 @@ def discover(repo_root):
         hb = os.path.join(local, node, "homebrew")
         for game in _dirs(os.path.join(hb, "mods")):
             for mod in _dirs(os.path.join(hb, "mods", game)):
-                if mod == "vanilla" or mod.endswith("-decomp"):
-                    continue
                 folder = os.path.join(hb, "mods", game, mod)
+                if _is_decomp(mod):
+                    if _mine(repo_root, folder):           # only our own: others' are not tracked
+                        items.append(_decomp_item(repo_root, node, game, mod, folder))
+                    continue
+                if mod == "vanilla":
+                    continue
                 if os.path.isfile(os.path.join(folder, "build.sh")):
                     items.append(_item(repo_root, node, "mods", game, mod, folder))
         for game in _dirs(os.path.join(hb, "ports")):
