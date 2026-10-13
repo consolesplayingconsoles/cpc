@@ -5,7 +5,7 @@ import { API_BASE } from '../composables/useNodes'
 const BASE = `${API_BASE}/homebrew`
 const enc = encodeURIComponent
 
-export type HomebrewKind = 'mods' | 'games' | 'tools' | 'ports'
+export type HomebrewKind = 'mods' | 'games' | 'tools' | 'ports' | 'decomps'
 export type HomebrewAction = 'build'   // scripts present in the folder
 
 export interface HomebrewParam {
@@ -94,6 +94,7 @@ export interface HomebrewItem {
   sendTargets: HomebrewTarget[]     // nodes Send can take it to (catalogue send, or its deploy.sh)
   favourite: boolean                // starred: pinned on top of the list (catalogue/favourites.json)
   decomp: string | null             // config.json's decomp: the folder name of what it is built on (its sibling)
+  hasProgress?: boolean             // a decomp item only: its folder has tools/progress.py
 }
 
 async function json<T>(res: Response): Promise<T> {
