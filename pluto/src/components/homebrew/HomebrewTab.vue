@@ -4,7 +4,7 @@
 // disassemblies next to a game's mods, mod or no mod, with how far along each is. Sub-tab and item ride the URL
 // (/homebrew/mods/<node>/<game>/<mod>, /homebrew/games/<node>/<name>) so a reload keeps
 // them. No polling: the list loads when the tab is first shown and on Refresh.
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useRuns } from '../../composables/useRuns'
 import { useRunDurations } from '../../composables/useRunDurations'
@@ -91,7 +91,7 @@ async function load(fresh = false) {
     loaded.value = true
     // A build still running (started before a reload, or in another tab): pick its console back up
     for (const it of all.value) {
-      if (it.running && !runs.value[it.node]) follow(it, it.runningSend ?? undefined, true)
+      if (it.running && !isRunning(it.id)) follow(it, it.runningSend ?? undefined, true)
     }
   } catch (e) {
     error.value = `API unreachable: ${(e as Error).message}`
@@ -248,47 +248,76 @@ const { durations: lastRuns, remember: rememberRun } = useRunDurations('cpc.home
 const runKey = (itemId: string, node?: string | null) => itemId + ':' + (node || 'build')
 
 const { openRun } = useRuns()
-// One run per console at a time (builds of one console can share a toolchain and its
-// caches); different consoles build side by side, each in its own terminal tab.
-// console (item.node) -> the run: which item, and where it is sending (null = a build).
+// What may run side by side. The API refuses the SAME item twice and nothing else, so the page
+// decides the rest with lanes: a run occupies a lane, one run per lane.
+//   - a build takes its GAME's lane (the mods of one game share its build folder and decomp
+//     tree, so those go one at a time); other games, and other consoles, build side by side;
+//   - sending an item that is already built compiles nothing, so it has a lane of its own and
+//     never waits on a build;
+//   - and an item that is running cannot be started again, whichever button asks.
+// lane -> the run: which item, and where it is sending (null = a build).
 const runs = ref<Record<string, { id: string; sendTo: string | null }>>({})
 const streams: Record<string, EventSource> = {}
+// When this component goes away (a hot reload while you work on it included), its streams go
+// with it: the jobs carry on in the API, and the next instance reattaches to them. Left open,
+// the old streams kept writing into the tabs while the new instance opened its own.
+onBeforeUnmount(() => { for (const es of Object.values(streams)) es.close() })
 const isRunning = (id: string) => Object.values(runs.value).some(r => r.id === id)
-const runOf = (it: HomebrewItem) => (runs.value[it.node]?.id === it.id ? runs.value[it.node] : null)
+const runOf = (it: HomebrewItem) => Object.values(runs.value).find(r => r.id === it.id) ?? null
+const lane = (it: HomebrewItem, node?: string | null) =>
+  node && it.output ? it.id : it.group ? it.node + '/' + it.group : it.id
+// Build, and Send when there is nothing built to send yet (it builds first): wait for the lane
+const buildLocked = (it: HomebrewItem) => isRunning(it.id) || !!runs.value[lane(it)]
+// Send: an item that is already built only waits for its own run
+const sendLocked = (it: HomebrewItem) => isRunning(it.id) || (!it.output && !!runs.value[lane(it)])
 
-// Build: build, publish to Lab, sync (it shows up in Media). Send: rebuild and send it to the
-// node, then open the game in Media, as the Translation tab's build does.
+// Build: build, publish to Lab, sync (it shows up in Media). Send: send it to the node (a
+// build first only when there is none). Either way you stay on this page: a finished run
+// does not navigate anywhere; the header links the game in Media for when you want it.
+// Between the click and the stream the run is not in `runs` yet (the form is saved first), so the
+// item and its lane are held here: a second click, or another item of the same game, in that
+// gap would otherwise slip past the check and open a second tab on the same job.
+const queued = new Set<string>()
 async function build(node?: string) {
   const it = selected.value
-  if (!it || runs.value[it.node]) return
-  if (!(await save())) return
-  follow(it, node, false)
+  if (!it) return
+  const key = lane(it, node)
+  if (queued.has(it.id) || queued.has(key) || isRunning(it.id) || runs.value[key]) return
+  queued.add(it.id); queued.add(key)
+  try {
+    if (!(await save())) return
+    follow(it, node, false)
+  } finally {
+    queued.delete(it.id); queued.delete(key)
+  }
 }
 
 // Open a terminal on the item's run. attach: follow a run that is already going (the API
 // replays its console from the start); otherwise this starts it.
 function follow(it: HomebrewItem, node: string | undefined, attach: boolean) {
   const target = node ? it.sendTargets.find(t => t.id === node) : null
+  // One tab per item and action, reused by the next run: with no key every Build opened another
+  // tab, so rebuilding the same item left a row of identically named ones behind.
+  const fresh = () => ({ raw: '', ok: null as boolean | null, step: 'build', startedAt: Date.now() })
   const output = openRun(target ? `Send ${it.name} to ${target.name}` : `Build ${it.name}`,
-    { raw: '', ok: null, step: 'build', startedAt: Date.now() },
-    { lastMs: lastRuns.value[runKey(it.id, node)] ?? null,
+    fresh(),
+    { key: 'hb:' + runKey(it.id, node), lastMs: lastRuns.value[runKey(it.id, node)] ?? null,
       // once it ends ok: Play what it just built, the same as the item's Start button
       after: { label: 'Play', run: () => startItem(it.id) },
       // closing the tab (or Clear done) drops the finished job in the API too
       onClose: () => { forgetRun(it.id).catch(() => { /* the API may be down: nothing to drop */ }) } })
-  const consoleId = it.node
-  runs.value = { ...runs.value, [consoleId]: { id: it.id, sendTo: node ?? null } }
+  output.value = fresh()                              // a reused tab starts a clean log, not the last run's
+  const laneId = lane(it, node)
+  runs.value = { ...runs.value, [laneId]: { id: it.id, sendTo: node ?? null } }
   const finish = () => {
-    streams[consoleId]?.close()
-    delete streams[consoleId]
+    streams[laneId]?.close()
+    delete streams[laneId]
     const rest = { ...runs.value }
-    delete rest[consoleId]
+    delete rest[laneId]
     runs.value = rest
   }
-  let mediaPath: string | null = null
   const es = new EventSource(streamUrl(it.id, node, attach))
-  streams[consoleId] = es
-  es.addEventListener('media', (e: MessageEvent) => { mediaPath = e.data })
+  streams[laneId] = es
   es.addEventListener('line', (e: MessageEvent) => {
     output.value = { ...output.value, raw: output.value.raw + e.data + '\n' }
   })
@@ -301,15 +330,15 @@ function follow(it: HomebrewItem, node: string | undefined, attach: boolean) {
       output.value = { ...output.value, ok: null, step: 'done', raw: output.value.raw + '[finished before this page attached]' }
       load(); return
     }
+    const endedAt = Date.now()
     const ok = e.data === 'ok'
     const stopped = e.data === 'failed:-15'          // SIGTERM from Stop
     output.value = {
-      ...output.value, ok, step: ok ? 'done' : stopped ? 'stopped' : 'failed',
+      ...output.value, ok, endedAt, step: ok ? 'done' : stopped ? 'stopped' : 'failed',
       raw: ok ? output.value.raw : output.value.raw + (stopped ? '\n[stopped]' : `\n[${e.data}]`),
     }
     if (ok) rememberRun(runKey(it.id, node), Date.now() - output.value.startedAt)
     load()   // the build recorded a new output
-    if (ok && mediaPath) router.push(mediaPath)
   })
   es.onerror = () => {
     finish()
@@ -501,7 +530,7 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
             :origin-icon="selected.origin ? ICONS[selected.origin] : null"
             :cover-url="coverUrl(selected)" :media-link="mediaLink(selected)"
             :send-targets="selected.sendTargets" :send-busy="runOf(selected)?.sendTo ?? null"
-            :busy="!!runs[selected.node]" :building="!!runOf(selected) && !runOf(selected)?.sendTo"
+            :busy="buildLocked(selected)" :send-locked="sendLocked(selected)" :building="!!runOf(selected) && !runOf(selected)?.sendTo"
             :running="isRunning(selected.id)"
             :build-title="selected.game?.listed ? 'Build, publish to Lab and sync the catalogue' : 'Build'"
             :error="cardError"

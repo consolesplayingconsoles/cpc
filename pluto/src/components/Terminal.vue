@@ -7,6 +7,7 @@ export interface TerminalOutput {
   ok:        boolean | null  // null = in progress
   step:      string          // current step label, shown as-is
   startedAt: number          // epoch ms when the run began
+  endedAt?:  number          // epoch ms when it finished: shown as a clock time once it has
 }
 </script>
 
@@ -68,6 +69,9 @@ function fmtDur(ms: number): string {
 
 const elapsed = computed(() => props.output.startedAt ? fmtDur(now.value - props.output.startedAt) : '0s')
 const lastRef = computed(() => (props.lastMs ? fmtDur(props.lastMs) : null))
+// the clock time it finished at: how long it took is the timer, WHEN is this
+const endedAt = computed(() => props.output.endedAt && props.output.ok !== null
+  ? new Date(props.output.endedAt).toLocaleTimeString('sv-SE') : null)
 
 // Auto-scroll to bottom when output grows, and on mount (switching drawer tabs remounts it)
 function scrollDown() {
@@ -106,7 +110,7 @@ async function copyOutput() {
         <span class="term__name" :title="title">▶ {{ title }}</span> ·
         <span class="term__step">{{ output.step }}</span>
         <span class="term__timer">
-          {{ elapsed }}<span v-if="lastRef" class="term__last"> / ~{{ lastRef }}</span>
+          {{ elapsed }}<span v-if="lastRef" class="term__last"> / ~{{ lastRef }}</span><span v-if="endedAt" class="term__last"> · done {{ endedAt }}</span>
         </span>
       </span>
       <span class="term__tools">
