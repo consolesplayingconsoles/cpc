@@ -7,7 +7,7 @@
 #    - the web dev server (yarn dev) at http://pluto.dev.localhost:5173/
 #    - the API docs      (Swagger UI, dev-only, http://localhost:7800/)
 #    - the asset viewer  (dc-shuriken-studio, http://127.0.0.1:8765/, linked from the
-#                         Homebrew tab; skipped when its folder or .env is not there)
+#                         Homebrew tab; skipped when its folder is not there)
 #
 #  The dev host is kept distinct from prod (pluto.localhost, via pluto/serve.sh)
 #  so the browser password manager doesn't mix dev/prod DreameHome logins.
@@ -85,9 +85,9 @@ if [[ "$WANT_API" == 1 ]]; then
 fi
 
 # The asset viewer opens in its own browser tab from the Homebrew tab. It stops with the rest (cleanup
-# kills this subshell; start.sh's own trap then stops its backend).
+# kills this subshell; start.sh's own trap then stops its page server).
 STUDIO="$ROOT/nodes/local/dc/homebrew/tools/dc-shuriken-studio"
-if [[ "$WANT_WEB" == 1 && -f "$STUDIO/.env" ]]; then
+if [[ "$WANT_WEB" == 1 && -x "$STUDIO/start.sh" ]]; then
   echo "==> Studio      http://127.0.0.1:8765/   (dc-shuriken-studio)"
   ( cd "$STUDIO" && NO_OPEN=1 exec ./start.sh ) &
   pids+=($!)
