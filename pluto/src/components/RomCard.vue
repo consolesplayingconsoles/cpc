@@ -24,6 +24,7 @@ withDefaults(defineProps<{
   sendTargets?: { id: string; name: string }[]
   sendBusy?: string | null
   busy?: boolean           // something runs: disable the actions that would start another
+  sendLocked?: boolean     // Send's own lock when it differs from busy (a built item can send while another builds)
   building?: boolean       // the build itself runs: Build shows its spinner
   buildTitle?: string
   playTitle?: string
@@ -58,7 +59,7 @@ defineEmits<{ build: []; play: []; quit: []; open: []; send: [node: string]; rem
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
         </UiIconButton>
         </UiButtonGroup>
-        <SendButtons :targets="sendTargets" :disabled="busy" :busy="sendBusy" @send="id => $emit('send', id)" />
+        <SendButtons :targets="sendTargets" :disabled="sendLocked ?? busy" :busy="sendBusy" @send="id => $emit('send', id)" />
         <UiButton v-if="stop" variant="secondary" @click="$emit('stop')">Stop</UiButton>
         <UiIconButton v-if="remove" variant="ghost" class="rom-card__right" :title="removeTitle" @click="$emit('remove')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>

@@ -22,7 +22,8 @@ const props = defineProps<{
   mediaLink?: string | null     // where that game lives in Media
   sendTargets: { id: string; name: string }[]
   sendBusy?: string | null
-  busy?: boolean                // this console is already running something
+  busy?: boolean                // Build (and Play) wait: this item or its game is already building
+  sendLocked?: boolean          // Send waits: this item is running, or it has nothing built and its game is building
   building?: boolean
   running?: boolean             // the item itself is running (Stop is offered)
   buildTitle?: string
@@ -37,6 +38,8 @@ const coverFailed = ref<string | null>(null)
 
 // GitHub's own counts (each release's assets), as of the last fetch: cached by the API for
 // ten minutes; the tab's Refresh asks again.
+// when the last build finished (the output's own time), to the minute; none until it has built
+const built = computed(() => props.item.output?.at ? props.item.output.at.replace('T', ' ').slice(0, 16) : null)
 const downloads = computed(() => props.item.release?.downloads ?? null)
 const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(0, 16) ?? '')
 </script>
@@ -106,7 +109,7 @@ const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(
         <RomCard
           flat group="Build" build play open :stop="running"
           :send-targets="sendTargets" :send-busy="sendBusy ?? null"
-          :busy="busy" :building="building"
+          :busy="busy" :send-locked="sendLocked" :building="building"
           :build-title="buildTitle"
           play-title="Start the last build from its dev tree in the desktop emulator (no rebuild)"
           open-title="Open the project folder"
@@ -115,6 +118,8 @@ const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(
           @build="$emit('build')" @play="$emit('play')" @open="$emit('openOutput')"
           @send="id => $emit('send', id)" @stop="$emit('stop')"
         />
+
+        <p class="hbh__built">{{ built ? 'Built ' + built : 'Not built yet' }}</p>
 
         <p v-if="item.description" class="hbh__desc">{{ item.description }}</p>
 
@@ -160,6 +165,7 @@ const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(
 .hbh__actions :deep(.send-box) { padding: 4px 6px 4px 12px; }
 .hbh__actions :deep(.send-label) { font-size: 13px; }
 .hbh__actions :deep(.send-ic) { width: 22px; height: 22px; }
+.hbh__built { margin: var(--sp-2) 0 0; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-faint); }
 .hbh__desc { margin: var(--sp-2) 0 0; font-size: 13.5px; line-height: 1.55; color: var(--text-muted); }
 /* the count is data, so the number is mono and the word around it stays quiet */
 .hbh__dl { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-faint); }
