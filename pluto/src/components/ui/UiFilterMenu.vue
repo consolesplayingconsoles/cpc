@@ -25,7 +25,7 @@ onUnmounted(() => document.removeEventListener('click', away))
 <template>
   <span ref="root" class="ui-fmenu">
     <UiButton @click.stop="open = !open">
-      Filter<template v-if="count"> · {{ count }}</template> ▾
+      Filter<template v-if="count"> · {{ count }}</template><span class="ui-chev" aria-hidden="true" />
     </UiButton>
     <div v-if="open" class="ui-fmenu__menu" :class="{ 'is-left': align === 'left' }" role="menu">
       <slot />

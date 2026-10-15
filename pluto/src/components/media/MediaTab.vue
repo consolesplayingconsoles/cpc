@@ -695,7 +695,7 @@ function sendAll(node: string, name: string, path?: string, from?: string, game?
           <UiButton :loading="syncing" loading-text="Syncing…" @click="sync(system)">Sync</UiButton>
           <UiButton :disabled="syncing" @click="syncSaves(system)">Sync saves</UiButton>
           <span v-if="sendTargets.length" class="md__filter-menu">
-            <UiButton :disabled="syncing" @click.stop="sendMenuOpen = !sendMenuOpen">Send all to ▾</UiButton>
+            <UiButton :disabled="syncing" @click.stop="sendMenuOpen = !sendMenuOpen">Send all to<span class="ui-chev" aria-hidden="true" /></UiButton>
             <div v-if="sendMenuOpen" class="md__menu md__menu--right" role="menu">
               <button v-for="t in sendTargets" :key="t.id" class="md__menu-item" :title="'Copy every game ' + t.name + ' doesn\'t have yet'"
                       @click="sendMenuOpen = false; sendAll(t.id, t.name)">
