@@ -387,7 +387,7 @@ const EMPTY: Record<HomebrewKind, string> = {
 // Keys, not names: it sits in the mono data type the diagram uses.
 const rowMeta = (it: HomebrewItem) => (it.origin ? it.origin + ' ➡️ ' + it.system : it.name)
 
-// The asset viewer (dc-shuriken-studio) runs beside Pluto on the lab machine (start-pluto-lab.sh), so its link
+// The asset viewer (dc-shuriken-explorer) runs beside Pluto on the lab machine (start-pluto-lab.sh), so its link
 // exists only where Pluto is reached through localhost.
 const studioHere = location.hostname === 'localhost' || location.hostname.endsWith('.localhost')
 function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopener') }
