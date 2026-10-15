@@ -13,7 +13,9 @@ names.py -- read a ROM filename into a title, its tags and its variants.
   [T-foo]     translation into foo. "[T-En by Some Team v1.0]" also carries its author,
               and so does a mod: "[Tokyo BS Guide by cpc v1.0]"
               (credited) and version.
-  [anything]  a mod -- [!], [b], [h], [T+Eng] included. Cleanup happens by renaming.
+  [!]         not a mod: the GoodTools/TOSEC "verified good dump" flag, which says nothing about
+              the game. It is ignored, so the copy is the game's own.
+  [anything]  a mod -- [b], [h], [T+Eng] included. Cleanup happens by renaming.
   " vX.Y..."  a trailing version inside a bracket is split off, so "Boss Versus v0.3"
               and "Boss Versus v0.4" are the same mod.
 
@@ -119,7 +121,7 @@ def parse(filename):
                 version = rev.group(1) or rev.group(2)
             continue
         bracket = bracket.strip()
-        if not bracket:
+        if not bracket or bracket == "!":     # [!] is a dump-quality flag, not a mod of the game
             continue
         kind = "translation" if bracket.startswith("T-") and len(bracket) > 2 else "mod"
         name, version = _split_version(bracket[2:] if kind == "translation" else bracket)

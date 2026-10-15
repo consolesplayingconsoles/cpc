@@ -64,8 +64,9 @@ def test_language_synonyms_and_stray_language_words():
 
 
 def test_every_other_bracket_is_a_mod():
+    # [!] is the one exception (a verified-dump flag, see test_a_verified_dump_flag_is_not_a_mod)
     p = names.parse("Phantasy Star II (J) [!] [T+Eng] [b1] [h].bin")
-    assert [v["name"] for v in p["variants"]] == ["!", "T+Eng", "b1", "h"]
+    assert [v["name"] for v in p["variants"]] == ["T+Eng", "b1", "h"]
     assert all(v["kind"] == "mod" for v in p["variants"])
 
 
@@ -1489,6 +1490,19 @@ def test_gdemu_gdi_renames_tracks_and_drops_quotes():
     assert text.splitlines() == ["3", "1 0 4 2352 track01.bin 0", "2 600 0 2352 track02.raw 0", "3 45000 4 2352 track03.bin 0"], text
     assert rename["My Game (Track 3).bin"] == "track03.bin"
     assert send.gdi_ipbin_track(gdi) == ("My Game (Track 3).bin", 2352)
+
+
+def test_a_verified_dump_flag_is_not_a_mod():
+    """[!] is the GoodTools/TOSEC "verified good dump" flag, not a change to the game: Sonic
+    Adventure's only copy used to show as a mod named "!". Any other bracket still is one."""
+    p = names.parse("Sonic Adventure v1.003 (1999)(Sega)(PAL)(M5)[!].zip")
+    assert p["variants"] == [], p["variants"]
+    assert p["title"].startswith("Sonic Adventure"), p["title"]
+    # next to a real mod, only the real mod counts
+    p = names.parse("Sonic The Hedgehog (USA, Europe) [!] [Chao Walker].bin")
+    assert [v["name"] for v in p["variants"]] == ["Chao Walker"], p["variants"]
+    # the other GoodTools flags are not touched here
+    assert [v["name"] for v in names.parse("Game (USA) [b1].bin")["variants"]] == ["b1"]
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
