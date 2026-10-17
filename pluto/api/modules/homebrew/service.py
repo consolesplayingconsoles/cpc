@@ -351,9 +351,26 @@ def decomp_levels(repo_root, path, refresh=False):
         error = None if run.returncode == 0 else (run.stderr.strip() or "exit %d" % run.returncode)
     except (OSError, subprocess.TimeoutExpired) as e:
         text, error = "", str(e)
+    if error or not text:                             # not set up on this machine (no 1ST_READ.BIN to measure):
+        committed = _readme_progress(folder)          # the report committed in its README, a 0 shown as 0
+        if committed:
+            text, error = committed, None
     entry = dict(entry, progress=text, updated=int(now), error=error)
     _decomp_cache[folder] = (head, now, entry)
     return entry
+
+
+def _readme_progress(folder):
+    """The Progress block committed in a decomp's README (between <!-- progress --> and <!-- /progress -->,
+    the fences stripped): what tools/progress.py printed at the last commit, for a checkout that cannot run
+    it. None when there is none."""
+    try:
+        with open(os.path.join(folder, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+    except OSError:
+        return None
+    m = re.search(r"<!-- progress -->\s*```\n(.*?)```\s*<!-- /progress -->", readme, re.S)
+    return m.group(1).rstrip("\n") if m else None
 
 
 def refresh_releases():
