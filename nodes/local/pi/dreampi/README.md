@@ -3,8 +3,8 @@
 Puts the Dreamcast online through its built-in 56K modem, with no dial-up ISP.
 The daemon answers the DC's "call", runs PPP over the modem line, and bridges
 the console onto your LAN. Once up, the DC is a real pinged node in Pluto
-(`nodes/local/dc`, `HOST_IP=192.0.2.98`), reachable, FTP-writable (DreamShell),
-and drivable headless from the dashboard through the Pico.
+(its address is `HOST_IP` in `nodes/local/dc/.env`), reachable and FTP-writable
+(DreamShell).
 
 This directory is the **integration** only. The daemon itself is a fork:
 
@@ -60,19 +60,19 @@ other devices alone.
   built-in `cdc_acm` driver binds it, no softmodem needed.
 - **Line voltage inducer:** required. With no telephone exchange between the two
   modems there is no loop voltage, and the handshake will not complete without
-  it. Ours is an ~18V build.
+  it.
 - **Plug the modem straight into a Pi USB port,** not a passive/switched hub.
   A flaky hub drops the modem off the bus and it will not re-enumerate behind it.
 
 ## Networking model
 
-DreamPi uses **proxyarp, not NAT**. It assigns the DC a real LAN IP (Pi ppp end
-`.99`, DC `.98`) and proxy-answers ARP for it, so the DC looks like a native LAN
+DreamPi uses **proxyarp, not NAT**. It assigns the DC a real LAN IP (plus one for
+the Pi's ppp end) and proxy-answers ARP for it, so the DC looks like a native LAN
 host. The only firewall rule is a TTL fix. `dnsmasq` on `:53` forwards the DC's
 DNS to the game-server DNS so revived servers resolve.
 
-Keep `.98`/`.99` out of your router's DHCP pool (end the pool at `.97`) so the
-DC's address stays stable and its Pluto node never points at a stray device.
+Keep both addresses out of your router's DHCP pool so the DC's address stays
+stable and its Pluto node never points at a stray device.
 
 ## Gotchas that cost real time
 
@@ -90,6 +90,6 @@ DC's address stays stable and its Pluto node never points at a stray device.
 
 ```sh
 journalctl -t dreampi -f          # <LISTENING> = armed and waiting for a call
-ip -br addr show ppp0              # UP with 192.0.2.99 peer .98 = connected
-ping 192.0.2.98                # the Dreamcast, on your LAN
+ip -br addr show ppp0              # UP with a peer address = connected
+ping <HOST_IP>                    # the Dreamcast, HOST_IP from nodes/local/dc/.env
 ```
