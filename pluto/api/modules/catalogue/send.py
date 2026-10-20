@@ -660,6 +660,73 @@ def _gdemu_locked(p, ctx, card, lines, emit):
     return {"status": "done", "count": copied, "lines": lines}
 
 
+def gdemu_repair_plan(files):
+    """What Repair does to a GDEMU card, from its file list ("NN/name" paths): slot folders
+    holding no disc.* (a send that died before writing its descriptor) are cleared, and the
+    rest renumbered down so the slots run 01, 02, ... with no gap. 01 (openMenu) never moves.
+    -> {"clear": [slot, ...], "moves": [(old, new), ...]} in the order to apply them."""
+    slots, complete = set(), set()
+    for f in files:
+        m = re.match(r"^(\d\d)/(.+)$", f)
+        if m:
+            slots.add(int(m.group(1)))
+            if re.match(r"^disc\.\w+$", m.group(2)):
+                complete.add(int(m.group(1)))
+    clear = sorted(s for s in slots if s not in complete and s != int(GDEMU_MENU))
+    keep = sorted(s for s in slots if s not in clear)
+    moves = [(old, new) for new, old in enumerate(keep, start=1) if old != new]
+    return {"clear": clear, "moves": moves}
+
+
+def gdemu_repair(card, emit):
+    """Repair a GDEMU card: delete what a Mac left on it, clear half-written slots, close the
+    gaps, and rebuild openMenu's list from the slots that remain (each slot's own disc header).
+    card adds clean_mac(), clear(slot) and move(old, new) to the send's words."""
+    with _GDEMU_LOCK:
+        card["mount"]()
+        try:
+            junk = card["clean_mac"]()
+            if junk:
+                emit("deleted %d macOS file%s: %s" % (len(junk), "" if len(junk) == 1 else "s", ", ".join(junk)))
+                card["mount"]()
+            plan = gdemu_repair_plan(card["files"]())
+            for s in plan["clear"]:
+                emit("slot %02d has no disc.gdi or disc.cdi: deleting it" % s)
+                card["clear"](s)
+            for old, new in plan["moves"]:
+                emit("slot %02d -> %02d" % (old, new))
+                card["move"](old, new)
+            if plan["clear"] or plan["moves"]:
+                card["mount"]()                       # the file list as the card is now
+            files = card["files"]()
+            slots = sorted({int(f[:2]) for f in files if re.match(r"^\d\d/", f)})
+            if "%02d/disc.gdi" % int(GDEMU_MENU) not in files:
+                raise NotAvailable("the card has no slot 01 (openMenu): set it up with GDMENUCardManager first")
+            gdi01 = card["read"](GDEMU_MENU + "/disc.gdi", 0, 64 * 1024).decode("ascii", "replace")
+            loc = menu_ini_location(gdi01, lambda f, o, n: card["read"](GDEMU_MENU + "/" + f, o, n))
+            items = parse_openmenu_ini(card["read"](GDEMU_MENU + "/" + loc["file"], loc["offset"], loc["length"])
+                                       .decode("latin-1"))
+            # 01 keeps its own entry; every game slot is read from its disc, since a renumbered
+            # slot's old entry sits under the wrong number
+            fields = {s: items[s] if s == int(GDEMU_MENU) and s in items else
+                      card_slot_fields(card["read"], card["exists"], s) for s in slots}
+            ini = openmenu_ini(fields).encode("latin-1", "replace")
+            if len(ini) > loc["room"]:
+                raise NotAvailable("openMenu's list needs %d bytes but the menu disc has room for %d: "
+                                   "rebuild the menu with GDMENUCardManager" % (len(ini), loc["room"]))
+            card["patch"](GDEMU_MENU + "/" + loc["file"], loc["offset"], ini + bytes(max(0, loc["length"] - len(ini))))
+            rf, roff = loc["record"]
+            card["patch"](GDEMU_MENU + "/" + rf, roff + 10, len(ini).to_bytes(4, "little") + len(ini).to_bytes(4, "big"))
+            if card["read"](GDEMU_MENU + "/" + loc["file"], loc["offset"], len(ini)) != ini:
+                raise NotAvailable("openMenu's list did not read back as written: the card may be failing")
+            for s in slots[1:]:
+                emit("%02d  %s" % (s, fields[s].get("name", "")))
+            emit("openMenu list rebuilt: %d items" % len(slots))
+        finally:
+            for line in card["finish"]():
+                emit(line)
+
+
 def _not_built(kind):
     def run(p, ctx):
         raise NotAvailable("sending games to %s (%s) is not built yet" % (ctx["target"], kind))

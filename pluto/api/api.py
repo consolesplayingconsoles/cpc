@@ -3084,14 +3084,56 @@ class Handler(http.server.BaseHTTPRequestHandler):
         'systemctl is-active "$u" >/dev/null 2>&1 || echo "WARN $l will not automount again: $u is $(systemctl is-active "$u" 2>/dev/null)"; '
         'done')
 
+    # What is on a card, for the terminal: each top-level entry, and the files inside each
+    # folder with their sizes. Read-only (the automount mounts it on first access). A
+    # two-digit folder with no disc.* is a GDEMU slot a failed send left half-written.
+    SD_LIST = (
+        'for l in "$@"; do m=/mnt/cpc-sd/$l; '
+        'if ! ls "$m" >/dev/null 2>&1 || ! mountpoint -q "$m"; then echo "WARN $l is not in the hub"; continue; fi; '
+        'echo "$l: $(df -h "$m" | awk "NR==2{print \\$3\\" used of \\"\\$2}")"; '
+        'for e in "$m"/*; do [ -e "$e" ] || continue; b=${e##*/}; '
+        'if [ -d "$e" ]; then n=""; [ -f "$e/name.txt" ] && n="  $(head -n1 "$e/name.txt")"; echo "$b/$n"; '
+        'find "$e" -maxdepth 1 -type f ! -name ".*" -printf "%s %f\\n" | sort -k2 | '
+        'while read s f; do echo "    $f  $(numfmt --to=iec "$s")"; done; '
+        'case "$b" in [0-9][0-9]) ls "$e"/disc.* >/dev/null 2>&1 || echo "WARN $b/ is incomplete: no disc.gdi or disc.cdi" ;; esac; '
+        'else echo "$b  $(numfmt --to=iec "$(stat -c %s "$e")")"; fi; done; done')
+
     def _handle_native(self, node_id, action):
         """A node's NATIVE-system action (e.g. the Wii's homebrew flash / game library),
         as opposed to its Linux side (SSH deploy / SMB). Batocera: quit-game (stop the
         running emulator) and restart-es (restart EmulationStation, which also drops any
         launches ES queued while a game ran). Any node with an SD card (SD_LABEL): unmount-sd,
         so the card can be pulled -- the Pi hub mounts a card on insert and keeps it mounted,
-        which is what makes it browsable. A PS2 drive on the hub (PS2_HDD_HOST): eject-hdd. Anything else isn't built yet -- we surface the
+        which is what makes it browsable, and list-sd, what is on it. A PS2 drive on the hub (PS2_HDD_HOST): eject-hdd. Anything else isn't built yet -- we surface the
         capability in the drawer and let the API say so honestly, rather than hide it."""
+        if action == "list-sd":
+            cfg = (self.__class__.node_roster or {}).get(node_id) or {}
+            labels = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()]
+            if not labels:
+                self._send(400, {"ok": False, "error": "%s has no SD card (SD_LABEL)" % node_id}); return
+            rc, out = self._node_ssh("pi", ["sh", "-c", self.SD_LIST, "list"] + labels,
+                                     timeout=60, connect_timeout=5)
+            if rc != 0:
+                self._send(502, {"ok": False, "error": (out.strip()[-200:] or "rc %d" % rc)}); return
+            lines = [l for l in out.splitlines() if l.strip()]
+            print("  [NATIVE:%s] list-sd: %d lines" % (node_id, len(lines)))
+            self._send(200, {"ok": True, "lines": lines}); return
+        if action == "repair-sd":
+            # GDEMU only: delete half-written slots, renumber the rest, rebuild openMenu's list
+            cfg = (self.__class__.node_roster or {}).get(node_id) or {}
+            if catalogue_send.strategy_for(cfg, node_id) != "gdemu":
+                self._send(200, {"ok": False,
+                                 "error": "native '%s' for %s is not implemented yet" % (action, node_id)}); return
+            lines = []
+            try:
+                card = self._send_dest("gdemu", node_id, cfg, "dreamcast", ctx_emit=lines.append)
+                catalogue_send.gdemu_repair(card, lines.append)
+            except Exception as exc:
+                lines.append("ERROR " + str(exc))
+                print("  [NATIVE:%s] repair-sd: %s" % (node_id, " | ".join(lines)))
+                self._send(502, {"ok": False, "lines": lines, "error": str(exc)}); return
+            print("  [NATIVE:%s] repair-sd: %s" % (node_id, " | ".join(lines)))
+            self._send(200, {"ok": True, "lines": lines}); return
         if action == "unmount-sd":
             cfg = (self.__class__.node_roster or {}).get(node_id) or {}
             labels = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()]
@@ -5340,6 +5382,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # deleting a slot would leave a gap and a stale openMenu list: not built
                 raise catalogue_send.NotAvailable("deleting from a GDEMU card is not built yet: use GDMENUCardManager")
             card["remove"] = refuse
+
+            # Repair's own words (send.gdemu_repair): a whole slot folder, by number only.
+            def clear(slot):
+                rc, out = ssh_sh(host, '[ -d "$1" ] || { echo "no slot $1 on the card"; exit 4; }; sudo rm -rf -- "$1"',
+                                 "%s/%02d" % (base, slot))
+                if rc != 0:
+                    raise catalogue_send.NotAvailable("could not delete slot %02d: %s" % (slot, out.strip()[-200:]))
+
+            def move(old, new):
+                rc, out = ssh_sh(host, '[ -d "$1" ] || { echo "no slot $1 on the card"; exit 4; }; '
+                                       '[ -e "$2" ] && { echo "slot $2 is taken"; exit 5; }; sudo mv -- "$1" "$2"',
+                                 "%s/%02d" % (base, old), "%s/%02d" % (base, new))
+                if rc != 0:
+                    raise catalogue_send.NotAvailable("could not move slot %02d to %02d: %s" % (old, new, out.strip()[-200:]))
+            def clean_mac():
+                """Delete what a Mac leaves on a card it mounts: ._ shadow files, .DS_Store, and
+                the Spotlight / fsevents / Trash folders. -> what was removed, one line each."""
+                rc, out = ssh_sh(host, 'cd "$1" || exit 4; '
+                                       'find . -maxdepth 3 -type f \\( -name "._*" -o -name .DS_Store \\) -print -exec sudo rm -f {} +; '
+                                       'for d in .Spotlight-V100 .fseventsd .Trashes .TemporaryItems; do '
+                                       '[ -e "$d" ] && sudo rm -rf -- "$d" && echo "./$d/"; done; true', base)
+                if rc != 0:
+                    raise catalogue_send.NotAvailable("could not clean the card: %s" % out.strip()[-200:])
+                return [l[2:] for l in out.splitlines() if l.startswith("./")]
+            card.update(clear=clear, move=move, clean_mac=clean_mac)
         return card
 
     # Archive readers a send can use: .zip from the stdlib, .7z through the 7z command when

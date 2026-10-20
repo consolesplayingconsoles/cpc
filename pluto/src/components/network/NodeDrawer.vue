@@ -120,6 +120,8 @@ watch(() => props.id, () => { nativeNote.value = '' })
 function nativeTitle(action: string): string {
   const on = ' on ' + props.node.name
   if (action === 'unmount-sd') return `Unmount ${props.node.sd ?? props.node.name} SD`
+  if (action === 'list-sd')    return `List ${props.node.sd ?? props.node.name} SD`
+  if (action === 'repair-sd')  return `Repair ${props.node.sd ?? props.node.name} SD`
   if (action === 'eject-hdd')  return `Eject ${props.node.name} drive`
   if (action === 'quit-game')  return 'Quit game' + on
   if (action === 'restart-es') return 'Restart EmulationStation' + on
@@ -375,6 +377,16 @@ function postCommand(text: string) {
            unmounting is a deliberate step before pulling it -->
       <section v-if="node.sd" class="nd__sec">
         <p class="nd__lbl">Card</p>
+        <UiActionRow :disabled="!!nativeBusy" @click="nativeAction('list-sd')">
+          <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M9 11h6M9 14h6M9 17h4"/></svg>
+          <span>List SD card ({{ node.sd }})</span>
+          <span v-if="nativeBusy === 'list-sd'" class="nd__act-note">Reading…</span>
+        </UiActionRow>
+        <UiActionRow :disabled="!!nativeBusy" @click="nativeAction('repair-sd')">
+          <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg>
+          <span>Repair SD card ({{ node.sd }})</span>
+          <span v-if="nativeBusy === 'repair-sd'" class="nd__act-note">Repairing…</span>
+        </UiActionRow>
         <UiActionRow :disabled="!!nativeBusy" @click="nativeAction('unmount-sd')">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M12 17V9M9 12l3-3 3 3"/></svg>
           <span>Unmount SD card ({{ node.sd }})</span>

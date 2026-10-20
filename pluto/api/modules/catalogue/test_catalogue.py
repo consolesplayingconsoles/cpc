@@ -1477,6 +1477,22 @@ def test_gdemu_ipbin_fields_follow_card_manager():
     assert (f["vga"], f["product"], f["disc"]) == ("0", "T23001D", "2/3"), f
 
 
+def test_gdemu_repair_clears_half_written_slots_and_closes_the_gaps():
+    """A send that died after its tracks leaves a slot with no disc.*; the next send went one
+    higher. Repair deletes it and renumbers the rest down, 01 (openMenu) staying put."""
+    files = ["01/disc.gdi", "01/track05.iso", "02/disc.gdi", "03/disc.cdi", "04/disc.gdi",
+             "05/disc.gdi", "05/._disc.gdi", "06/track01.bin", "06/track03.bin",
+             "07/disc.gdi", "07/track03.bin", "GDEMU.ini"]
+    assert send.gdemu_repair_plan(files) == {"clear": [6], "moves": [(7, 6)]}
+    # a macOS ._ shadow file is not a descriptor
+    assert send.gdemu_repair_plan(["01/disc.gdi", "02/._disc.gdi", "03/disc.cdi"]) == \
+        {"clear": [2], "moves": [(3, 2)]}
+    # an existing gap closes too, and a healthy card needs nothing
+    assert send.gdemu_repair_plan(["01/disc.gdi", "03/disc.gdi", "05/disc.cdi"]) == \
+        {"clear": [], "moves": [(3, 2), (5, 3)]}
+    assert send.gdemu_repair_plan(["01/disc.gdi", "02/disc.gdi"]) == {"clear": [], "moves": []}
+
+
 def test_gdemu_openmenu_ini_round_trips_card_managers_layout():
     text = ("[OPENMENU]\nnum_items=2\n\n[ITEMS]\n"
             "01.name=openMenu\n01.disc=1/1\n01.vga=1\n01.region=JUE\n01.version=V0.1.0\n01.date=20210609\n01.product=NEODC_1\n\n"

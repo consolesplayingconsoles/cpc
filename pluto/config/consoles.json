@@ -77,6 +77,7 @@
     "pcengine":       { "brand": "NEC", "name": "PC Engine", "icon": "pcengine", "thumbnails": "NEC_-_PC_Engine_-_TurboGrafx_16" },
     "pico":           { "brand": "Sega", "name": "Pico", "icon": "pico", "thumbnails": "Sega_-_PICO" },
     "vflash":         { "brand": "VTech", "name": "V.Flash", "icon": "vflash", "emulator": "retroarch-vflash" },
+    "cdi":            { "brand": "Philips", "name": "CD-i", "icon": "cdi", "thumbnails": "Philips_-_CD-i" },
     "pokemini":       { "brand": "Nintendo", "name": "Pokémon Mini", "icon": "pokemini", "thumbnails": "Nintendo_-_Pokemon_Mini" },
     "sega32x":        { "brand": "Sega", "name": "32X", "icon": "sega32x", "thumbnails": "Sega_-_32X" },
     "virtualboy":     { "brand": "Nintendo", "name": "Virtual Boy", "icon": "virtualboy", "thumbnails": "Nintendo_-_Virtual_Boy" },
