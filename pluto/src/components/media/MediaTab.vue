@@ -495,11 +495,13 @@ function syncSaves(target: string) {
 // Send all: streams into the terminal drawer like sync. A target that needs admin (PS2 drive)
 // answers with a `command` event instead of copying: the popup shows it.
 // `game` names a single copy (from a game drawer) so its tab reads "Copy <game> to <node>".
-function sendAll(node: string, name: string, path?: string, from?: string, game?: string) {
+// `sys` = the game's own system: a drawer opened from search or the home page has no system
+// in the route, and sending with an empty one came back "bad request".
+function sendAll(node: string, name: string, path?: string, from?: string, game?: string, sys = system.value) {
   const startedAt = Date.now()
-  const out = openRun(game ? `Copy ${game} to ${name}` : `Send all ${systemName(system.value)} games to ${name}`, { raw: '', ok: null, step: 'running', startedAt })
+  const out = openRun(game ? `Copy ${game} to ${name}` : `Send all ${systemName(sys)} games to ${name}`, { raw: '', ok: null, step: 'running', startedAt })
   syncOut.value = { out }
-  const es = new EventSource(catalogueApi.sendStreamUrl(system.value, node, path, from))
+  const es = new EventSource(catalogueApi.sendStreamUrl(sys, node, path, from))
   es.addEventListener('line', (e: MessageEvent) => {
     out.value = { ...out.value, raw: out.value.raw + e.data + '\n' }
   })
@@ -670,7 +672,7 @@ function sendAll(node: string, name: string, path?: string, from?: string, game?
                   :cover-version="coverVersion[peekGame.key]"
                   @close="peek = null" @favourite="togglePeekFavourite(peekGame, $event)"
                   @cover-changed="coverChanged(peekGame)" @relabeled="reloadPeek" @changed="reloadPeek"
-                  @send="sendAll($event.node, nodeName($event.node), $event.path, $event.from, peekGame.title)" />
+                  @send="sendAll($event.node, nodeName($event.node), $event.path, $event.from, peekGame.title, peek.system)" />
       </div>
     </template>
 

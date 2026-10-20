@@ -660,6 +660,11 @@ def _gdemu_locked(p, ctx, card, lines, emit):
     return {"status": "done", "count": copied, "lines": lines}
 
 
+def gdemu_busy():
+    """True while a send or a Repair holds the GDEMU card."""
+    return _GDEMU_LOCK.locked()
+
+
 def gdemu_repair_plan(files):
     """What Repair does to a GDEMU card, from its file list ("NN/name" paths): slot folders
     holding no disc.* (a send that died before writing its descriptor) are cleared, and the

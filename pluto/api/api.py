@@ -2090,6 +2090,27 @@ def _ssh_sh(host, script, *args, stdin=None):
     return r.returncode, r.stdout.decode("utf-8", "replace")
 
 
+def _ssh_sh_feed(host, script, *args, path, progress):
+    """_ssh_sh with a local file fed to the script's stdin, calling progress(sent_bytes) after
+    every chunk, so a long copy can say how far it got. -> (rc, output)."""
+    import shlex as _shlex
+    p = subprocess.Popen(["ssh", "-o", "ConnectTimeout=6", host,
+                          "sh -c %s _ %s" % (_shlex.quote(script), " ".join(_shlex.quote(a) for a in args))],
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    sent = 0
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(4 << 20), b""):
+                p.stdin.write(chunk)
+                sent += len(chunk)
+                progress(sent)
+        p.stdin.close()
+    except BrokenPipeError:
+        pass                                    # the remote side quit early: its output says why
+    out = p.stdout.read()
+    return p.wait(timeout=1800), out.decode("utf-8", "replace")
+
+
 def _mb(n):
     """Bytes as a short human size for a message: 246MB, 3.3GB."""
     return "%.1fGB" % (n / 1024.0 ** 3) if n >= 1024 ** 3 else "%dMB" % (n // 1024 ** 2)
@@ -3124,6 +3145,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if catalogue_send.strategy_for(cfg, node_id) != "gdemu":
                 self._send(200, {"ok": False,
                                  "error": "native '%s' for %s is not implemented yet" % (action, node_id)}); return
+            # Repair answers when it is done, so it cannot say "waiting" while it waits: a send
+            # holding the card is answered at once instead of hanging the button for minutes
+            if catalogue_send.gdemu_busy():
+                self._send(200, {"ok": False, "lines": ["a send to the GDEMU card is running: "
+                                                        "click Repair again when it is done"],
+                                 "error": "a send to the GDEMU card is running"}); return
             lines = []
             try:
                 card = self._send_dest("gdemu", node_id, cfg, "dreamcast", ctx_emit=lines.append)
@@ -5283,11 +5310,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             "%s needs %s but the card has only %s free (a card needs %s spare for a "
                             "file to land in one piece): delete some games from it first"
                             % (name, _mb(size), _mb(free), _mb(self.CARD_HEADROOM)))
-                    with open(local, "rb") as stream:
-                        rc, out = ssh_sh(host, REMOTE_PUT % (sudo, sudo, sudo, sudo), base + "/" + name,
-                                         str(size), stdin=stream)
+                    say = ctx_emit if (ctx_emit and size >= 32 * 1024 * 1024) else None
+                    if say:
+                        # a big file takes minutes over the hub's reader: say how far it got,
+                        # every 10%, so a slow copy does not look like a stuck one
+                        step = {"next": 10}
+
+                        def progress(sent):
+                            pct = sent * 100 // size
+                            if pct >= step["next"] and pct < 100:
+                                say("  %s: %d%% (%s of %s)" % (name, pct, _mb(sent), _mb(size)))
+                                step["next"] = pct - pct % 10 + 10
+                        say("  %s: copying %s" % (name, _mb(size)))
+                        rc, out = _ssh_sh_feed(host, REMOTE_PUT % (sudo, sudo, sudo, sudo), base + "/" + name,
+                                               str(size), path=local, progress=progress)
+                    else:
+                        with open(local, "rb") as stream:
+                            rc, out = ssh_sh(host, REMOTE_PUT % (sudo, sudo, sudo, sudo), base + "/" + name,
+                                             str(size), stdin=stream)
                     if rc == 0 and kind == "gdemu":
+                        if say:
+                            say("  %s: copied, reading it back to check" % name)
                         check(local, name)
+                        if say:
+                            say("  %s: checked" % name)
                 if rc != 0:
                     raise catalogue_send.NotAvailable("copy failed for %s: %s" % (name, out.strip()[-200:]))
                 if state.get("free") is not None:
