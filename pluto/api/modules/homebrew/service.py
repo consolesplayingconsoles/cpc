@@ -558,12 +558,38 @@ def _mine(repo_root, folder):
 
 def _decomp_item(repo_root, node, game, name, folder):
     """A decomp or disassembly as an item of its own (the Decomp / Disasm sub-tab), mod or no mod:
-    nothing to build, release or set, just its levels. It names itself as its decomp, so the
-    detail asks /homebrew/decomp for its own folder."""
+    its levels, and a Build (then Send) when it can make a disc (_decomp_buildable): the game built
+    from the decomp's C, put into a copy of the player's own disc. Nothing to release. It names itself
+    as its decomp, so the detail asks /homebrew/decomp for its own folder."""
     it = _item(repo_root, node, "decomps", game, name, folder)
-    it.update(actions=[], params=[], paramsPaths=[], release=None, noRelease=None, output=None,
+    buildable = _decomp_buildable(folder)
+    it.update(actions=["build"] if buildable else [], release=None, noRelease=None,
               decomp=name, hasProgress=os.path.isfile(os.path.join(folder, "tools", "progress.py")))
+    if not buildable:
+        it.update(params=[], paramsPaths=[], output=None)
     return it
+
+
+# A decomp's Build: the C build and a disc image of it, patched into a copy of the player's own disc
+# (GDI in the decomp's gitignored .env, next to SDK_PATH: this machine's value, never committed).
+# The decomp's own build.sh is the byte-for-byte assembly check, not this. make disc is the
+# skill template's target; the image it writes is announced like any other build's output.
+_DECOMP_BUILD = """set -eu
+[ -f .env ] && . ./.env
+: "${GDI:?GDI is not set: put GDI=\\"/path/to/your original .gdi\\" in the .env of this decomp (%(env)s)}"
+echo "##STEP:build"
+make disc GDI="$GDI"
+echo "##OUTPUT:$PWD/build/disc-cbuild/$(basename "$GDI")"
+"""
+
+
+def _decomp_buildable(folder):
+    """Whether a decomp can make a disc: its Makefile has the template's `disc` target."""
+    try:
+        with open(os.path.join(folder, "Makefile"), encoding="utf-8", errors="replace") as f:
+            return any(line.startswith("disc:") for line in f)
+    except OSError:
+        return False
 
 
 def _dirs(parent):
@@ -650,18 +676,22 @@ def _write_env(env_path, values):
 def start(repo_root, item, action):
     """Start an action; returns the Popen (stdout = merged output) or raises RuntimeError."""
     if action not in item["actions"]:
-        raise RuntimeError("no %s.sh for %s" % (action, item["id"]))
+        raise RuntimeError("no %s for %s" % ("build (no disc target in its Makefile)" if item["kind"] == "decomps" else action + ".sh", item["id"]))
     folder = os.path.join(repo_root, item["path"])
     env = os.environ.copy()
     env["PATH"] = "/usr/local/bin:/opt/homebrew/bin:" + env.get("PATH", "")   # docker/colima when launched outside a login shell
     env["PYTHONUNBUFFERED"] = "1"
     if is_running(item["id"]):
         raise RuntimeError("%s is already running" % item["id"])
-    pid = _orphan(folder, action)
-    if pid:
-        raise RuntimeError("%s.sh is still running from before (pid %d): wait for it, or kill it" % (action, pid))
+    if item["kind"] == "decomps":                     # no build.sh of its own: the disc build above
+        cmd = ["bash", "-c", _DECOMP_BUILD % {"env": os.path.join(item["path"], ".env")}]
+    else:
+        pid = _orphan(folder, action)
+        if pid:
+            raise RuntimeError("%s.sh is still running from before (pid %d): wait for it, or kill it" % (action, pid))
+        cmd = ["bash", os.path.join(folder, action + ".sh")]
     with _procs_lock:
-        proc = subprocess.Popen(["bash", os.path.join(folder, action + ".sh")], cwd=folder, env=env,
+        proc = subprocess.Popen(cmd, cwd=folder, env=env,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, errors="replace", start_new_session=True)
         _procs[item["id"]] = proc
@@ -714,7 +744,7 @@ def lab_filename(item, output_path):
     if not game:
         return "%s%s" % (_UNSAFE.sub(" ", item["title"]).strip(), ext)
     title = _UNSAFE.sub(" ", game.get("title") or item["name"]).strip()
-    mod = item["title"]
+    mod = "Decomp" if item["kind"] == "decomps" else item["title"]
     version = (item.get("release") or {}).get("version")
     # "by cpc" is what marks the file as ours, so a send replaces it on a node instead of
     # skipping it: our bytes change from build to build under the same catalogue name.

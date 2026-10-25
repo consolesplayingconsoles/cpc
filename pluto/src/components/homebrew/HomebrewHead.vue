@@ -85,7 +85,7 @@ const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(
             :href="item.release.url" target="_blank" rel="noopener" :title="item.release.name"
           ><UiPill :tone="item.release.stable ? 'ok' : 'idle'">{{ item.release.stable ? 'Released' : 'Pre-release' }} v{{ item.release.version }} ↗</UiPill></a>
           <UiPill v-else-if="item.noRelease" tone="warn" :title="'Never released: ' + item.noRelease">Private: {{ item.noRelease }}</UiPill>
-          <UiPill v-else tone="idle">Unreleased</UiPill>
+          <UiPill v-else-if="item.kind !== 'decomps'" tone="idle">Unreleased</UiPill>
 
           <!-- downloads are the release's, so they read beside it: the number, and the
                per-version split in the tip rather than strung across the card -->
@@ -107,7 +107,7 @@ const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(
            to match. RomCard draws the buttons (the same ones the Media drawer uses for
            a copy); `flat` keeps it frameless inside this header. -->
         <RomCard
-          flat group="Build" build play open :stop="running"
+          flat group="Build" build :play="item.kind !== 'decomps'" open :stop="running"
           :send-targets="sendTargets" :send-busy="sendBusy ?? null"
           :busy="busy" :send-locked="sendLocked" :building="building"
           :build-title="buildTitle"

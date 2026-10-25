@@ -504,8 +504,10 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
 
       <main class="hb__detail">
         <div v-if="!selected" class="hb__state" />
-        <!-- a decomp or disassembly: nothing to build or set, only where it is and its levels -->
-        <template v-else-if="selected.kind === 'decomps'">
+        <template v-else>
+          <!-- a decomp that cannot build (no disc target) shows only where it is; one that can gets the
+               same Build / Send header as a mod, then its levels below -->
+          <template v-if="selected.kind === 'decomps' && !selected.actions.length">
           <header class="hb__dhead">
             <img v-if="ICONS[selected.node]" :src="ICONS[selected.node]" class="hb__dhead-ic" :alt="selected.nodeName" />
             <div class="hb__dhead-text">
@@ -521,11 +523,8 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
             </div>
             <UiButton variant="secondary" title="Open the folder" @click="openDir">Open folder</UiButton>
           </header>
-          <p v-if="openError" class="hb__state--bad">{{ openError }}</p>
-          <HomebrewDecomp :item="selected" />
-        </template>
-        <template v-else>
-          <HomebrewHead
+          </template>
+          <HomebrewHead v-else
             :item="selected" :icon="ICONS[selected.node]"
             :origin-icon="selected.origin ? ICONS[selected.origin] : null"
             :cover-url="coverUrl(selected)" :media-link="mediaLink(selected)"
@@ -558,7 +557,8 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
               <UiButton variant="secondary" :disabled="!dirty" :loading="saving" loading-text="Saving" @click="save">Save</UiButton>
             </div>
           </section>
-          <p v-else class="hb__hint">No parameters (add a .env.sample next to build.sh to get a form here).</p>
+          <p v-else-if="selected.kind !== 'decomps'" class="hb__hint">No parameters (add a .env.sample next to build.sh to get a form here).</p>
+          <HomebrewDecomp v-if="selected.kind === 'decomps'" :item="selected" />
         </template>
       </main>
     </div>

@@ -9,7 +9,7 @@ import { computed, ref, watch } from 'vue'
 import { getDecomp, type HomebrewDecomp, type HomebrewItem } from '../../api/homebrew'
 import UiButton from '../ui/UiButton.vue'
 import UiState from '../ui/UiState.vue'
-import { mainMetric } from './decompMetric'
+import { headline, mainMetric } from './decompMetric'
 
 const props = defineProps<{ item: HomebrewItem }>()
 
@@ -47,13 +47,19 @@ function parseProgress(text: string): Section[] | null {
     if (!line.trim()) continue
     const indent = line.length - line.trimStart().length
     if (indent === 0) {
+      const h = headline(line)                          // progress.py 2.0: the headline numbers open the report
+      if (h) {
+        if (!sections.length || sections[0].title !== 'Summary') sections.unshift({ title: 'Summary', detail: '', rows: [] })
+        sections[0].rows.push({ level: 0, ...h })
+        continue
+      }
       const [title, ...rest] = line.split(/\s{2,}/)
       sections.push({ title, detail: rest.join('  '), rows: [] })
       continue
     }
     const cur = sections[sections.length - 1]
     if (!cur) return null                              // a row before any heading: not the layout we know
-    const m = /^(.+?)(?:\s{2,}(\d+(?:\.\d+)?%|-))?(?:\s{2,}(.*))?$/.exec(line.trim())
+    const m = /^(.+?)(?:\s{2,}(\d+(?:\.\d+)?%|-|\d+))?(?:\s{2,}(.*))?$/.exec(line.trim())     // a share, a dash or a plain count
     if (!m) return null
     cur.rows.push({ level: Math.max(0, Math.floor((indent - 2) / 2)), label: m[1], pct: m[2] ?? '', detail: m[3] ?? '' })
   }
