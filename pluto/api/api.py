@@ -5424,10 +5424,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if kind == "gdemu":
             card.update(files=lambda: sorted(state["have"]), read=read, patch=patch, put_bytes=put_bytes)
 
-            def refuse(rel):
-                # deleting a slot would leave a gap and a stale openMenu list: not built
-                raise catalogue_send.NotAvailable("deleting from a GDEMU card is not built yet: use GDMENUCardManager")
-            card["remove"] = refuse
+            def remove_slot(rel):
+                # a slot goes whole, and the slots after it move down so GDEMU still sees them in a row, with openMenu's
+                # list rebuilt: Repair's steps (send.gdemu_repair), holding the card's lock
+                m = re.match(r"^(\d\d)(/|$)", rel)
+                if not m or int(m.group(1)) == int(catalogue_send.GDEMU_MENU):
+                    raise catalogue_send.NotAvailable("%s is not a game slot on the GDEMU card" % rel)
+                catalogue_send.gdemu_repair(card, lambda line: print("  [GDEMU] " + line), drop=[int(m.group(1))])
+            card["remove"] = remove_slot
 
             # Repair's own words (send.gdemu_repair): a whole slot folder, by number only.
             def clear(slot):
@@ -5659,7 +5663,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(404, {"error": "no such copy in the catalogue"}); return
         cfg = (self.__class__.node_roster or {}).get(node) or {}
         kind = catalogue_send.strategy_for(cfg, node)
-        if kind not in ("batocera", "sd"):
+        if kind not in ("batocera", "sd", "gdemu"):
             self._send(400, {"error": "%s can't delete games from here (no writable ROM folder)" % (cfg.get("NODE_NAME") or node)}); return
         card_label = (copy.get("card") or "").strip()
         # what to remove under the node's ROM base: the card label comes off the stored path,

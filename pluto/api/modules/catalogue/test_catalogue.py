@@ -1493,6 +1493,26 @@ def test_gdemu_repair_clears_half_written_slots_and_closes_the_gaps():
     assert send.gdemu_repair_plan(["01/disc.gdi", "02/disc.gdi"]) == {"clear": [], "moves": []}
 
 
+def test_gdemu_same_copy_is_told_by_its_name_never_by_its_serial():
+    """A mod carries the original's product number, so the serial cannot tell copies apart: the text name does, or Pluto's
+    reading of it (base game, mod name, author), so a new version of a mod replaces the old one."""
+    same = send.gdemu_same_copy
+    assert same("Crazy Taxi (Europe) [Decomp by cpc]", "crazy taxi (europe) [decomp by cpc]")
+    assert same("Crazy Taxi (Europe) [Walking Tour by cpc v2]", "Crazy Taxi (Europe) [Walking Tour by cpc v1]")
+    assert not same("Crazy Taxi (Europe) [Decomp by cpc]", "Crazy Taxi (Europe) [Walking Tour by cpc]")
+    assert not same("Crazy Taxi (Europe) [Decomp by cpc]", "Crazy Taxi (Europe)")              # the original is another copy
+    assert not same("Crazy Taxi (Europe)", "Crazy Taxi (USA)")                                 # originals: exact text only
+    assert not same("Virtua Tennis (USA)", "")
+
+
+def test_gdemu_repair_drops_the_slots_it_is_given_and_closes_the_gaps():
+    """A delete (or a send that replaced a copy) drops whole slots; the rest move down, 01 never goes."""
+    files = ["01/disc.gdi", "02/disc.gdi", "03/disc.gdi", "04/disc.gdi", "05/disc.gdi"]
+    assert send.gdemu_repair_plan(files, drop=[3]) == {"clear": [3], "moves": [(4, 3), (5, 4)]}
+    assert send.gdemu_repair_plan(files, drop=[3, 4]) == {"clear": [3, 4], "moves": [(5, 3)]}
+    assert send.gdemu_repair_plan(files, drop=[1]) == {"clear": [], "moves": []}
+
+
 def test_gdemu_openmenu_ini_round_trips_card_managers_layout():
     text = ("[OPENMENU]\nnum_items=2\n\n[ITEMS]\n"
             "01.name=openMenu\n01.disc=1/1\n01.vga=1\n01.region=JUE\n01.version=V0.1.0\n01.date=20210609\n01.product=NEODC_1\n\n"

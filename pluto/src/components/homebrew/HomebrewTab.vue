@@ -150,8 +150,9 @@ const sections = computed(() => {
 // ── favourites ───────────────────────────────────────────────────────────────
 // Starred items (what you are working on) are pinned on top of the list, across consoles,
 // and stay in their console below too. Stored with the game favourites, as Media does.
+// Sorted by console, then by name.
 const favourites = computed(() => visible.value.filter(i => i.favourite)
-  .sort((a, b) => a.title.localeCompare(b.title)))
+  .sort((a, b) => a.nodeName.localeCompare(b.nodeName) || a.title.localeCompare(b.title)))
 async function toggleFavourite(it: HomebrewItem) {
   it.favourite = !it.favourite
   try { await setFavourite(it.id, it.favourite) } catch { it.favourite = !it.favourite }

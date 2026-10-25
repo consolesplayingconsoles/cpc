@@ -596,6 +596,11 @@ def _gdemu_locked(p, ctx, card, lines, emit):
         loc = menu_ini_location(gdi01, lambda f, o, n: card["read"](GDEMU_MENU + "/" + f, o, n))
         items = parse_openmenu_ini(card["read"](GDEMU_MENU + "/" + loc["file"], loc["offset"], loc["length"])
                                    .decode("latin-1"))
+        # each slot's text name (name.txt, else openMenu's entry): what tells two copies of one game apart
+        have = set(card["files"]())
+        slot_names = {s: (card["read"]("%02d/name.txt" % s, 0, 512).decode("utf-8", "replace").strip()
+                          if "%02d/name.txt" % s in have else (items.get(s) or {}).get("name", "")) for s in slots}
+        dupes = []
         new = {}
         for c in p["copies"]:
             src = ctx["locate"](c["source"])
@@ -606,9 +611,16 @@ def _gdemu_locked(p, ctx, card, lines, emit):
             if ext not in (".gdi", ".cdi"):
                 p["skipped"].append({"game": c["name"], "why": "GDEMU takes .gdi and .cdi, not %s" % ext})
                 continue
-            slot = max(slots) + 1
-            if slot > GDEMU_MAX_SLOT:
-                raise NotAvailable("the card is full (%d slots)" % GDEMU_MAX_SLOT)
+            same = [s for s in slots if s != int(GDEMU_MENU) and gdemu_same_copy(c["name"], slot_names.get(s, ""))]
+            if same:
+                slot = same[-1]                       # the newest of them keeps its number; the others go after the copy
+                dupes.extend(s for s in same[:-1] if s not in dupes)
+                emit("slot %02d already holds %s: replacing it" % (slot, slot_names[slot]))
+                card["clear"](slot)
+            else:
+                slot = max(slots) + 1
+                if slot > GDEMU_MAX_SLOT:
+                    raise NotAvailable("the card is full (%d slots)" % GDEMU_MAX_SLOT)
             d = "%02d/" % slot
             emit("copying %s into slot %02d" % (c["name"], slot))
             if ext == ".gdi":
@@ -628,7 +640,9 @@ def _gdemu_locked(p, ctx, card, lines, emit):
             card["put_bytes"](c["name"].encode("utf-8"), d + "name.txt")
             card["put_bytes"](fields["serial"].encode("ascii"), d + "serial.txt")
             new[slot] = dict(fields, name=c["name"])
-            slots.append(slot)
+            slot_names[slot] = c["name"]
+            if slot not in slots:
+                slots.append(slot)
             copied += 1
             lines.append("copied %s into slot %02d" % (c["name"], slot))
         if new:
@@ -656,8 +670,20 @@ def _gdemu_locked(p, ctx, card, lines, emit):
     finally:
         for line in card["finish"]():
             emit(line)
+    if dupes:                                         # older slots of a copy just sent: deleted, the rest renumbered, the list rebuilt
+        emit("deleting %d older cop%s of what was sent: slot%s %s" % (len(dupes), "y" if len(dupes) == 1 else "ies",
+                                                                     "" if len(dupes) == 1 else "s", ", ".join("%02d" % s for s in dupes)))
+        for line in _gdemu_drop(card, dupes):
+            emit(line)
     emit("copied %d game%s" % (copied, "" if copied == 1 else "s"))
     return {"status": "done", "count": copied, "lines": lines}
+
+
+def _gdemu_drop(card, slots):
+    """Delete slots and close the gaps, with the card already held (the send's lock): Repair's steps on its own words."""
+    out = []
+    _repair_locked(card, out.append, slots)
+    return out
 
 
 def gdemu_busy():
@@ -665,10 +691,28 @@ def gdemu_busy():
     return _GDEMU_LOCK.locked()
 
 
-def gdemu_repair_plan(files):
+def gdemu_same_copy(a, b):
+    """Whether two GDEMU slot names (name.txt) are the same copy. The disc serial cannot say: a mod or a translation carries
+    the original game's product number. The same text is the same copy; so is the same base title with the same variant
+    (mod or translation name, author) whatever its version tag, so a v2 replaces its v1."""
+    if not a or not b:
+        return False
+    if a.strip().lower() == b.strip().lower():
+        return True
+    pa, pb = names.parse(a.strip() + ".gdi"), names.parse(b.strip() + ".gdi")
+    va, vb = pa.get("variants") or [], pb.get("variants") or []
+    if not va or not vb:
+        return False                                  # an original game is matched by its exact text only
+    key = lambda p, v: (names.key(p.get("title") or ""), [((x.get("name") or "").strip().lower(),
+                                                            (x.get("author") or "").strip().lower()) for x in v])
+    return key(pa, va) == key(pb, vb)
+
+
+def gdemu_repair_plan(files, drop=()):
     """What Repair does to a GDEMU card, from its file list ("NN/name" paths): slot folders
     holding no disc.* (a send that died before writing its descriptor) are cleared, and the
     rest renumbered down so the slots run 01, 02, ... with no gap. 01 (openMenu) never moves.
+    drop: slots to delete as well (duplicates a send found, a slot the operator deleted); 01 is never dropped.
     -> {"clear": [slot, ...], "moves": [(old, new), ...]} in the order to apply them."""
     slots, complete = set(), set()
     for f in files:
@@ -677,26 +721,31 @@ def gdemu_repair_plan(files):
             slots.add(int(m.group(1)))
             if re.match(r"^disc\.\w+$", m.group(2)):
                 complete.add(int(m.group(1)))
-    clear = sorted(s for s in slots if s not in complete and s != int(GDEMU_MENU))
+    clear = sorted(s for s in slots if (s not in complete or s in set(drop)) and s != int(GDEMU_MENU))
     keep = sorted(s for s in slots if s not in clear)
     moves = [(old, new) for new, old in enumerate(keep, start=1) if old != new]
     return {"clear": clear, "moves": moves}
 
 
-def gdemu_repair(card, emit):
-    """Repair a GDEMU card: delete what a Mac left on it, clear half-written slots, close the
+def gdemu_repair(card, emit, drop=()):
+    """Repair a GDEMU card: delete what a Mac left on it, clear half-written slots (and the slots in drop), close the
     gaps, and rebuild openMenu's list from the slots that remain (each slot's own disc header).
     card adds clean_mac(), clear(slot) and move(old, new) to the send's words."""
     with _GDEMU_LOCK:
+        return _repair_locked(card, emit, drop)
+
+
+def _repair_locked(card, emit, drop=()):
+    if True:
         card["mount"]()
         try:
             junk = card["clean_mac"]()
             if junk:
                 emit("deleted %d macOS file%s: %s" % (len(junk), "" if len(junk) == 1 else "s", ", ".join(junk)))
                 card["mount"]()
-            plan = gdemu_repair_plan(card["files"]())
+            plan = gdemu_repair_plan(card["files"](), drop)
             for s in plan["clear"]:
-                emit("slot %02d has no disc.gdi or disc.cdi: deleting it" % s)
+                emit(("slot %02d: deleting it" if s in set(drop) else "slot %02d has no disc.gdi or disc.cdi: deleting it") % s)
                 card["clear"](s)
             for old, new in plan["moves"]:
                 emit("slot %02d -> %02d" % (old, new))
