@@ -638,6 +638,42 @@ def test_a_gdemu_card_is_read_by_slot_from_its_text_files():
     shutil.rmtree(root)
 
 
+def test_a_gdemu_slot_that_now_holds_another_disc_is_another_copy():
+    """A GDEMU card is numbered slots (GDEMU/NN/disc.gdi): the path says the slot, never the game. When slots are deleted or renumbered,
+    a path that held one disc holds another, and the sync used to call it "present" and keep the old name, so the Media tab named slots
+    for games that were no longer there (and a send could not tell what it already had). A copy is told apart by its disc id and its
+    mod (variant) name; one that only moved to another slot is the same copy and keeps its first-seen date."""
+    def card(slots):
+        out = []
+        for n, (name, gid) in slots.items():
+            out.append({"path": "GDEMU/%02d/disc.gdi" % n, "name": name + ".gdi", "header": {"id": gid, "title": name.split(" [")[0], "regions": []}})
+        return out
+    first = {2: ("Densha De Go 2", "T1102M"), 3: ("Tokyo Bus Guide", "T35402M"), 4: ("Crazy Taxi (Europe) [Sandbox by CPC]", "MK-51035"),
+             5: ("Virtua Tennis 2 (Europe)", "MK-5118650"), 6: ("Crazy Taxi (Europe) [Walking Tour by cpc]", "MK-51035"),
+             7: ("Crazy Taxi (Europe) [Decomp by cpc]", "MK-51035")}
+    doc = store.empty("dreamcast")
+    store.merge(doc, "dc", card(first), "2026-10-20T10:00:00Z", scope="GDEMU/")
+    # the Sandbox slot is deleted and the slots after it move down: 4 = Virtua Tennis 2, 5 = Walking Tour, 6 = Decomp
+    second = {2: first[2], 3: first[3], 4: first[5], 5: first[6], 6: first[7]}
+    counts, _, _ = store.merge(doc, "dc", card(second), "2026-10-25T10:00:00Z", scope="GDEMU/")
+    present = {f["path"]: f for g in doc["games"].values() for f in g["files"] if f["node"] == "dc" and f["status"] == "present"}
+    named = {p: (next(g["title"] for g in doc["games"].values() if f in g["files"]), [v["name"] for v in f["variants"]])
+             for p, f in present.items()}
+    assert named["GDEMU/04/disc.gdi"] == ("Virtua Tennis 2", []), named["GDEMU/04/disc.gdi"]
+    assert named["GDEMU/05/disc.gdi"] == ("Crazy Taxi", ["Walking Tour"]), named["GDEMU/05/disc.gdi"]
+    assert named["GDEMU/06/disc.gdi"] == ("Crazy Taxi", ["Decomp"]), named["GDEMU/06/disc.gdi"]
+    assert "GDEMU/07/disc.gdi" not in present                                    # the last slot is gone
+    sandbox = [f for g in doc["games"].values() for f in g["files"] if [v["name"] for v in f["variants"]] == ["Sandbox"]]
+    assert [f["status"] for f in sandbox] == ["deleted"], sandbox                 # deleted for good, not renamed into another game
+    # a copy that only changed slot keeps one record and its first-seen date
+    walking = [f for g in doc["games"].values() for f in g["files"] if [v["name"] for v in f["variants"]] == ["Walking Tour"]]
+    assert len(walking) == 1 and walking[0]["path"] == "GDEMU/05/disc.gdi" and walking[0]["firstSeen"] == "2026-10-20T10:00:00Z", walking
+    assert counts["moved"] >= 2, counts
+    # and the same card scanned again changes nothing
+    again, _, _ = store.merge(doc, "dc", card(second), "2026-10-25T11:00:00Z", scope="GDEMU/")
+    assert (again["added"], again["deleted"], again["moved"]) == (0, 0, 0), again
+
+
 def test_a_file_in_a_cards_tools_folder_is_filed_as_a_tool_unless_you_said_otherwise():
     root = tempfile.mkdtemp()
     doc = store.empty("megadrive")

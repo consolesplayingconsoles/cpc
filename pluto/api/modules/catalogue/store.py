@@ -157,6 +157,22 @@ def _drop_shared_ids(scan, strip=None):
     return out
 
 
+def _slot_path(path):
+    """Whether a path names a numbered slot rather than a game (GDEMU/NN/disc.gdi): its file name says nothing."""
+    base, stem = os.path.dirname(path), os.path.splitext(os.path.basename(path))[0].lower()
+    return bool(base) and stem in {"disc"}
+
+
+def _same_slot_copy(record, item, parsed):
+    """Whether the disc now at a slot's path is the copy recorded there: the same disc id (when both have one) and the same mod
+    names. The game title is not compared: a game is filed under a key that need not spell its name.text the same way."""
+    gid = (item.get("header") or {}).get("id")
+    if gid and record.get("id") and gid != record["id"]:
+        return False
+    names_of = lambda variants: sorted(((v.get("kind") or ""), (v.get("name") or "").strip().lower()) for v in variants or [])
+    return names_of(record.get("variants")) == names_of(parsed["variants"])
+
+
 def merge(doc, node, scan, now, scope=None, strip=None):
     """Fold one node's complete scan into doc (in place). -> (counts, warnings, renames).
 
@@ -183,7 +199,9 @@ def merge(doc, node, scan, now, scope=None, strip=None):
     for gk, g in doc["games"].items():
         for f in g["files"]:
             if f["node"] == node and (not scope or f["path"].startswith(scope)):
-                have[f["path"]] = f
+                cur = have.get(f["path"])
+                if cur is None or (cur["status"] == "deleted" and f["status"] != "deleted"):
+                    have[f["path"]] = f              # a slot's path can have a deleted copy AND the one there now: the present one counts
 
     # Originals first, so a base game names its own entry before a mod that shares its
     # header can create one under the mod's filename title. Among originals, No-Intro style
@@ -198,6 +216,13 @@ def merge(doc, node, scan, now, scope=None, strip=None):
     def order(i):
         p = parse_item(i)
         return (bool(p["variants"]), not names.has_region_tag(p["tags"]), i["path"])
+    # A path that names a SLOT, not a game (GDEMU/NN/disc.gdi), can hold another disc than it did: the copy there is told by its disc id
+    # and its mod name. One that differs is gone from that path (and may have moved to another slot), and the disc there now is new.
+    stale = {}
+    for item in scan:
+        f0 = have.get(item["path"])
+        if f0 is not None and _slot_path(item["path"]) and not _same_slot_copy(f0, item, parse_item(item)):
+            stale[item["path"]] = have.pop(item["path"])
     seen = set()
     for item in sorted(scan, key=order):
         path, header = item["path"], item.get("header")
@@ -293,8 +318,8 @@ def merge(doc, node, scan, now, scope=None, strip=None):
     for gk, rec in added_now:
         fresh.setdefault((gk, signature(rec)), []).append(rec)
 
-    for path, f in have.items():
-        if path in seen or f["status"] != "present":
+    for path, f in list(have.items()) + list(stale.items()):
+        if (path in seen and stale.get(path) is not f) or f["status"] != "present":
             continue
         gone_from = next((gk for gk, g in doc["games"].items() if f in g["files"]), None)
         cand = fresh.get((gone_from, signature(f))) if gone_from else None
