@@ -1,18 +1,24 @@
 [submodule "nodes/local/megadrive/homebrew"]
 	path = nodes/local/megadrive/homebrew
 	url = https://github.com/consolesplayingconsoles/megadrive-homebrew.git
+	ignore = all
 [submodule "nodes/local/dc/homebrew"]
 	path = nodes/local/dc/homebrew
 	url = https://github.com/consolesplayingconsoles/dreamcast-homebrew.git
+	ignore = all
 [submodule "nodes/local/sms/homebrew"]
 	path = nodes/local/sms/homebrew
 	url = https://github.com/consolesplayingconsoles/master-system-homebrew.git
+	ignore = all
 [submodule "nodes/local/gba/homebrew"]
 	path = nodes/local/gba/homebrew
 	url = https://github.com/consolesplayingconsoles/game-boy-advance-homebrew.git
+	ignore = all
 [submodule "nodes/local/saturn/homebrew"]
 	path = nodes/local/saturn/homebrew
 	url = https://github.com/consolesplayingconsoles/saturn-homebrew.git
+	ignore = all
 [submodule "nodes/local/vflash/homebrew"]
 	path = nodes/local/vflash/homebrew
 	url = https://github.com/consolesplayingconsoles/vflash-homebrew.git
+	ignore = all
