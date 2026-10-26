@@ -7,7 +7,6 @@
 //   <RomCard play open :send-targets="t" @play="…" @open="…" @send="id => …">…body…</RomCard>
 import SendButtons from './SendButtons.vue'
 import UiButtonGroup from './ui/UiButtonGroup.vue'
-import UiButton from './ui/UiButton.vue'
 import UiSpinner from './ui/UiSpinner.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 
@@ -20,7 +19,8 @@ withDefaults(defineProps<{
   quit?: boolean
   open?: boolean
   remove?: boolean
-  stop?: boolean           // show Stop (while something runs)
+  stop?: boolean           // show the stop square (always, once offered)
+  stopActive?: boolean     // something runs: the stop square is enabled, else greyed
   sendTargets?: { id: string; name: string }[]
   sendBusy?: string | null
   busy?: boolean           // something runs: disable the actions that would start another
@@ -52,6 +52,9 @@ defineEmits<{ build: []; play: []; quit: []; open: []; send: [node: string]; rem
         <UiIconButton v-if="play" variant="ghost" :title="playTitle" @click="$emit('play')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a.8.8 0 0 0 1.2.7l10.4-6.5a.8.8 0 0 0 0-1.4L9.2 4.8A.8.8 0 0 0 8 5.5z"/></svg>
         </UiIconButton>
+        <UiIconButton v-if="stop" variant="ghost" :disabled="!stopActive" :title="stopActive ? 'Stop what is running' : 'Nothing is running'" @click="$emit('stop')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+        </UiIconButton>
         <UiIconButton v-if="quit" variant="ghost" :title="quitTitle" @click="$emit('quit')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
         </UiIconButton>
@@ -60,7 +63,6 @@ defineEmits<{ build: []; play: []; quit: []; open: []; send: [node: string]; rem
         </UiIconButton>
         </UiButtonGroup>
         <SendButtons :targets="sendTargets" :disabled="sendLocked ?? busy" :busy="sendBusy" @send="id => $emit('send', id)" />
-        <UiButton v-if="stop" variant="secondary" @click="$emit('stop')">Stop</UiButton>
         <UiIconButton v-if="remove" variant="ghost" class="rom-card__right" :title="removeTitle" @click="$emit('remove')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
         </UiIconButton>

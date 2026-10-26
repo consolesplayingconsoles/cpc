@@ -107,7 +107,7 @@ const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(
            to match. RomCard draws the buttons (the same ones the Media drawer uses for
            a copy); `flat` keeps it frameless inside this header. -->
         <RomCard
-          flat group="Build" build :play="item.kind !== 'decomps'" open :stop="running"
+          flat group="Build" build :play="item.kind !== 'decomps'" open stop :stop-active="running"
           :send-targets="sendTargets" :send-busy="sendBusy ?? null"
           :busy="busy" :send-locked="sendLocked" :building="building"
           :build-title="buildTitle"
