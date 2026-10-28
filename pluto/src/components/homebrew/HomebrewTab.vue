@@ -150,9 +150,10 @@ const sections = computed(() => {
 // ── favourites ───────────────────────────────────────────────────────────────
 // Starred items (what you are working on) are pinned on top of the list, across consoles,
 // and stay in their console below too. Stored with the game favourites, as Media does.
-// Sorted by console, then by name.
+// Sorted by console, then by the name the row shows ("Game: Mod"), so a game's mods sit together.
+const favName = (it: HomebrewItem) => (it.game?.title ? it.game.title + ': ' + it.title : it.title)
 const favourites = computed(() => visible.value.filter(i => i.favourite)
-  .sort((a, b) => a.nodeName.localeCompare(b.nodeName) || a.title.localeCompare(b.title)))
+  .sort((a, b) => a.nodeName.localeCompare(b.nodeName) || favName(a).localeCompare(favName(b))))
 async function toggleFavourite(it: HomebrewItem) {
   it.favourite = !it.favourite
   try { await setFavourite(it.id, it.favourite) } catch { it.favourite = !it.favourite }
@@ -441,7 +442,7 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
             <!-- no group heading up here, so the row says what the mod patches itself. The
                  console is the icon (named in its title), spelled out only without one. -->
             <span class="hb__row-title">
-              {{ it.game?.title ? it.game.title + ': ' + it.title : it.title }}{{ ICONS[it.node] ? '' : ' (' + it.nodeName + ')' }}
+              {{ favName(it) }}{{ ICONS[it.node] ? '' : ' (' + it.nodeName + ')' }}
             </span>
             <template v-if="it.kind === 'decomps'">
               <UiPill v-if="metrics[it.id]" :style="progressStyle(metrics[it.id].pct)" :title="'Main metric: ' + metrics[it.id].label">{{ metrics[it.id].pct }}</UiPill>
