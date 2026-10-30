@@ -416,6 +416,13 @@ paths:
         - { name: path, in: query, required: true, schema: { type: string }, description: "repo-relative folder, e.g. nodes/local/dc/homebrew/mods/crazy-taxi/crazy-taxi-decomp" }
         - { name: refresh, in: query, required: false, schema: { type: string, enum: ['1'] }, description: run progress.py again instead of the cached printout }
       responses: { '200': { description: "{ name, path, commit, progress: tools/progress.py's printout as it is (fixed-width text; null when the folder has none, e.g. a disassembly), updated: epoch seconds of that run (or null), error: null or why progress.py failed }, cached until the folder's commit changes or a day passes" }, '404': { description: not a folder under nodes/local/<node>/homebrew/ } }
+  /homebrew/badge:
+    get:
+      tags: [homebrew]
+      summary: A decomp's progress badge (its badges/progress.svg, written by tools/progress.py at each commit)
+      parameters:
+        - { name: path, in: query, required: true, schema: { type: string }, description: "repo-relative decomp folder, e.g. nodes/local/dc/homebrew/mods/crazy-taxi/crazy-taxi-decomp" }
+      responses: { '200': { description: the SVG image }, '404': { description: not a homebrew folder, or it has no badge } }
   /homebrew/start:
     post:
       tags: [homebrew]

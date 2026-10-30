@@ -258,8 +258,16 @@ def _unreleasable(folder):
     return _nodash(why.strip()) if why and why.strip() else None
 
 
+def _plain(text):
+    """Markdown inline syntax out of a README line: [label](url) -> label, **bold**/`code` -> bare."""
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    return re.sub(r"\*\*|__|`", "", text).strip()
+
+
 def _readme(folder):
-    """The first paragraph of README.md as a description, or None. The README is docs."""
+    """The first paragraph of README.md as a description, or None. The README is docs; an image-only
+    line (a badge) is not text, and the markdown in the prose is shown as plain words."""
     path = os.path.join(folder, "README.md")
     if not os.path.isfile(path):
         return None
@@ -270,7 +278,10 @@ def _readme(folder):
             if para:
                 break
             continue
-        if s.startswith(("#", "```", "|", "-", "*", ">")) and not para:
+        if s.startswith(("#", "```", "|", "-", "* ", ">")) and not para:
+            continue
+        s = _plain(s)
+        if not s:
             continue
         para.append(s)
     text = _nodash(" ".join(para))
@@ -323,6 +334,19 @@ def _git_head(folder):
     except OSError:
         pass
     return None
+
+
+def badge_file(repo_root, path):
+    """The progress badge (badges/progress.svg) of a decomp, by its repo-relative folder, as a file path.
+    ValueError when the folder is not under nodes/local/<node>/homebrew/ or has no badge."""
+    homebrew_root = os.path.realpath(os.path.join(repo_root, "nodes", "local"))
+    folder = os.path.realpath(os.path.join(repo_root, path or ""))
+    if not path or not folder.startswith(homebrew_root + os.sep) or "/homebrew/" not in folder:
+        raise ValueError("no homebrew folder %s" % path)
+    badge = os.path.join(folder, "badges", "progress.svg")
+    if not os.path.isfile(badge):
+        raise ValueError("no badge in %s" % path)
+    return badge
 
 
 def decomp_levels(repo_root, path, refresh=False):

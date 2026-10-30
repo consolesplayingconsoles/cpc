@@ -2445,7 +2445,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", "/catalogue/{system}"),
         ("GET", "/catalogue/{system}/cover/{game}"),
         ("GET", "/docs"), ("GET", "/docs/{spec}.yaml"),
-        ("GET", "/homebrew"), ("GET", "/homebrew/stream"), ("PUT", "/homebrew/params"), ("POST", "/homebrew/stop"), ("POST", "/homebrew/forget"), ("POST", "/homebrew/open"), ("POST", "/homebrew/start"), ("POST", "/homebrew/favourite"), ("POST", "/homebrew/releases/refresh"), ("GET", "/homebrew/decomp"),
+        ("GET", "/homebrew"), ("GET", "/homebrew/stream"), ("PUT", "/homebrew/params"), ("POST", "/homebrew/stop"), ("POST", "/homebrew/forget"), ("POST", "/homebrew/open"), ("POST", "/homebrew/start"), ("POST", "/homebrew/favourite"), ("POST", "/homebrew/releases/refresh"), ("GET", "/homebrew/decomp"), ("GET", "/homebrew/badge"),
         ("POST", "/messages"), ("POST", "/dreame/login"), ("POST", "/dreame/logout"),
         ("POST", "/control/signal"), ("POST", "/control/capture"),
         ("POST", "/control/listen"), ("POST", "/roomba-ai/audio"),
@@ -2507,6 +2507,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif parsed.path == "/homebrew":
             self._send(200, {"items": self._homebrew_items()})
+        elif parsed.path == "/homebrew/badge":
+            # a decomp's progress badge (badges/progress.svg): an image, for the item's header
+            try:
+                with open(homebrew.badge_file(self._repo_root(), (urllib.parse.parse_qs(parsed.query).get("path") or [""])[0]), "rb") as f:
+                    data = f.read()
+            except ValueError as e:
+                self._send(404, {"error": str(e)})
+            else:
+                self.send_response(200)
+                self.send_header("Content-Type", "image/svg+xml")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-cache")
+                self._cors_headers()
+                self.end_headers()
+                self.wfile.write(data)
+
         elif parsed.path == "/homebrew/decomp":
             # one decomp's levels: its repo-relative folder (the item's sibling, named in config.json)
             qs = urllib.parse.parse_qs(parsed.query)

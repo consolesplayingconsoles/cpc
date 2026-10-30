@@ -7,12 +7,14 @@
 // subject on the page. They are the same RomCard as the Media drawer's copies -- passed
 // `flat` so it draws no frame of its own inside this one -- so there is one definition of
 // those buttons and the catalogue is untouched.
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import type { HomebrewItem } from '../../api/homebrew'
+import { badgeUrl, type HomebrewItem } from '../../api/homebrew'
 import RomCard from '../RomCard.vue'
 import UiPill from '../ui/UiPill.vue'
 import UiInfoTip from '../ui/UiInfoTip.vue'
+
+const noBadge = reactive(new Set<string>())
 
 const props = defineProps<{
   item: HomebrewItem
@@ -121,7 +123,11 @@ const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(
 
         <p class="hbh__built">{{ built ? 'Built ' + built : 'Not built yet' }}</p>
 
-        <p v-if="item.description" class="hbh__desc">{{ item.description }}</p>
+        <!-- a decomp's progress badge, the picture its README opens with (404 = it has none: no picture) -->
+        <img v-if="item.kind === 'decomps' && !noBadge.has(item.id)" :src="badgeUrl(item.path)" class="hbh__badge"
+             alt="Decomp progress" @error="noBadge.add(item.id)" />
+
+        <p v-if="item.description && item.kind !== 'decomps'" class="hbh__desc">{{ item.description }}</p>
 
       </div>
     </div>
@@ -170,4 +176,5 @@ const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(
 /* the count is data, so the number is mono and the word around it stays quiet */
 .hbh__dl { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-faint); }
 .hbh__dl b { font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; color: var(--text-muted); }
+.hbh__badge { display: block; max-width: 100%; height: auto; margin: var(--sp-3) 0 0; border-radius: var(--r); }
 </style>

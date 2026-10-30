@@ -116,6 +116,9 @@ export async function getDecomp(path: string, refresh = false): Promise<Homebrew
   return json<HomebrewDecomp>(await fetch(`${BASE}/decomp?path=${enc(path)}${refresh ? '&refresh=1' : ''}`))
 }
 
+// A decomp's progress badge, as an image URL (404 when the folder has none)
+export const badgeUrl = (path: string) => `${BASE}/badge?path=${enc(path)}`
+
 // Ask GitHub for the releases (and their download counts) again instead of the cached copy
 export async function refreshReleases(): Promise<HomebrewItem[]> {
   return (await json<{ items: HomebrewItem[] }>(await fetch(`${BASE}/releases/refresh`, { method: 'POST' }))).items
