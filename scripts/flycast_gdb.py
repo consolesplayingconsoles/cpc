@@ -36,8 +36,11 @@ class R:
     def stop(s):
         s.k.sendall(b'\x03'); return s.recv(5)
     def regs(s):
-        g=s.cmd('g'); 
-        if not g: return None
+        g=s.cmd('g')
+        for _ in range(3):                              # a stop reply (S02/T02...) can land after the g request: not registers
+            if g and len(g)>=16*8 and all(c in '0123456789abcdefABCDEFx' for c in g): break
+            g=s.recv(5) if g and g[:1] in 'ST' else s.cmd('g')
+        if not g or len(g)<16*8: return None
         w=[g[i:i+8] for i in range(0,len(g),8)]
         le=lambda x: int(''.join(reversed([x[i:i+2] for i in range(0,8,2)])),16) if x and 'x' not in x else None
         v=[le(x) for x in w]
@@ -103,4 +106,30 @@ def main():
     elif a[0]=='mem':
         print(r.cmd('m%s,%s'%(a[1],a[2])))
         r.send('c')
+    elif a[0]=='watch':   # watch <seconds> <out.json> <hex address>: a write watchpoint (Z2) on one word; log each write (pc, pr, the word
+        dur,out,ad=float(a[1]),a[2],int(a[3],16); rows=[]     # after it), continue; stop at the first nonzero word (the start-up clear writes 0)
+        z=r.cmd('Z2,%X,4'%ad); print('Z2 %08X: %r'%(ad,z))
+        if z!='OK':                                    # no watchpoints in this Flycast: poll instead, stopping every few ms; the pc logged
+            prev=None; t0=time.time()                  # is where the CPU was when the change was seen, shortly after the write
+            while time.time()-t0<dur:
+                r.send('c'); time.sleep(0.003); r.stop()
+                h=r.cmd('m%X,4'%ad); v=int(''.join(reversed([h[i:i+2] for i in range(0,8,2)])),16) if h and not h.startswith('E') else None
+                if v!=prev:
+                    g=r.regs(); rows.append({'t':round(time.time()-t0,3),'value':v,**(g or {})})
+                    print('%.3f s: value %s, pc %08X pr %08X'%(time.time()-t0,'%08X'%v if v is not None else '?',g['pc'] if g else 0,g['pr'] if g else 0))
+                    prev=v
+                    if v and v!=0xFFFFFFFF and len(rows)>2: break
+            json.dump(rows,open(out,'w')); print('changes logged',len(rows)); r.send('c'); return
+        t0=time.time(); r.send('c')
+        while time.time()-t0<dur:
+            st=r.recv(1)
+            if st and st[:1] in 'ST':
+                g=r.regs(); h=r.cmd('m%X,4'%ad)
+                v=int(''.join(reversed([h[i:i+2] for i in range(0,8,2)])),16) if h and not h.startswith('E') else None
+                if g: rows.append({'t':round(time.time()-t0,2),'value':v,**g}); print('%.2f s: pc %08X pr %08X value %s'%(time.time()-t0,g['pc'],g['pr'],'%08X'%v if v is not None else '?'))
+                if v: break
+                r.send('c')
+            elif st:
+                print('packet %r at %.1f s'%(st[:40],time.time()-t0)); r.send('c')
+        r.cmd('z2,%X,4'%ad); json.dump(rows,open(out,'w')); print('writes logged',len(rows)); r.send('c')
 main()
