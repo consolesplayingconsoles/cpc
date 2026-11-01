@@ -9,6 +9,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useRuns } from '../../composables/useRuns'
 import { useRunDurations } from '../../composables/useRunDurations'
 import UiButton from '../ui/UiButton.vue'
+import RomCard from '../RomCard.vue'
 import HomebrewHead from './HomebrewHead.vue'
 import HomebrewDecomp from './HomebrewDecomp.vue'
 import { mainMetric, progressStyle, type Metric } from './decompMetric'
@@ -121,6 +122,7 @@ watch([kind, all], () => {
 }, { immediate: true })
 
 const coverUrl = (it: HomebrewItem) => it.game?.listed ? catalogueApi.coverUrl(it.game.system, it.game.key) : null
+const coverFailed = ref<string | null>(null)   // a cover that fails to load falls back to the console icon
 const mediaLink = (it: HomebrewItem) => it.game?.listed ? `/media/${it.game.system}/${it.game.key}` : null
 
 // A port's category is the PAIR it converts, in order: a Pico game made to run on a Mega
@@ -511,7 +513,10 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
                same Build / Send header as a mod, then its levels below -->
           <template v-if="selected.kind === 'decomps' && !selected.actions.length">
           <header class="hb__dhead">
-            <img v-if="ICONS[selected.node]" :src="ICONS[selected.node]" class="hb__dhead-ic" :alt="selected.nodeName" />
+            <RouterLink v-if="mediaLink(selected) && coverUrl(selected) && coverFailed !== coverUrl(selected)" :to="mediaLink(selected)!" class="hb__dhead-cover" :title="'Open ' + selected.game?.title + ' in Media'">
+              <img :src="coverUrl(selected)!" class="hb__dhead-cover-art" alt="" @error="coverFailed = coverUrl(selected)" />
+            </RouterLink>
+            <img v-else-if="ICONS[selected.node]" :src="ICONS[selected.node]" class="hb__dhead-ic" :alt="selected.nodeName" />
             <div class="hb__dhead-text">
               <h3 class="hb__dhead-title">{{ selected.title }}</h3>
               <div class="hb__dhead-meta">
@@ -523,7 +528,7 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
                 <code class="hb__path">{{ selected.path }}</code>
               </div>
             </div>
-            <UiButton variant="secondary" title="Open the folder" @click="openDir">Open folder</UiButton>
+            <RomCard flat open open-title="Open the project folder" @open="openDir" />
           </header>
           </template>
           <HomebrewHead v-else
@@ -619,6 +624,8 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
 /* a decomp's header: the console mark, its name, where it is; the levels card follows */
 .hb__dhead { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); }
 .hb__dhead-ic { width: 32px; height: 32px; object-fit: contain; flex: none; }
+.hb__dhead-cover { display: block; flex: none; width: 120px; line-height: 0; overflow: hidden; border-radius: var(--r); box-shadow: var(--shadow); }
+.hb__dhead-cover-art { display: block; width: 100%; height: auto; }
 .hb__dhead-text { flex: 1; min-width: 0; }
 .hb__dhead-title { margin: 0; font-size: 16px; font-weight: 600; }
 .hb__dhead-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2); margin-top: 2px; font-size: 12.5px; color: var(--text-muted); }
