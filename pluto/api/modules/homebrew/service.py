@@ -13,7 +13,8 @@ files (this machine's values): a mod gets its game's (mods/<game>/.env, shared b
 that game, e.g. the base ROM path) plus its own (<mod>/.env); a mod's own key wins over a game
 key of the same name. An item's constant config (the same on every machine) is its committed
 config.json: {"name": its display name, "noRelease": why it can never be published,
-"decomp": the decomp or disassembly folder it is built on, always its sibling}.
+"decomp": the decomp or disassembly folder it is built on, always its sibling}. The item's own .env may add
+MOD_NAME_SUFFIX, put after the name (a mod built once per place: "OSM Trafalgar Square").
 
 A port is the one kind whose game and whose output live on different systems: a Sega Pico
 game converted to run on a Mega Drive is still that Pico game (its title, its cover, its
@@ -245,7 +246,12 @@ def _mod_name(folder):
     named after its folder ("sonic-infinite-jump").
     """
     name = _config(folder).get("name")
-    return _nodash(name.strip()) if name and name.strip() else None
+    if not name or not name.strip():
+        return None
+    # MOD_NAME_SUFFIX in the item's own .env (this machine's value) is added after the name: a mod built once per place (OSM) is
+    # "OSM Trafalgar Square", so each place's build is a file of its own (the name is also the ROM's file name, lab_filename).
+    suffix = (_parse_env(os.path.join(folder, ".env")).get("MOD_NAME_SUFFIX") or "").strip()
+    return _nodash(("%s %s" % (name.strip(), suffix)) if suffix else name.strip())
 
 
 def _unreleasable(folder):
