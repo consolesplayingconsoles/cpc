@@ -132,4 +132,4 @@ def main():
             elif st:
                 print('packet %r at %.1f s'%(st[:40],time.time()-t0)); r.send('c')
         r.cmd('z2,%X,4'%ad); json.dump(rows,open(out,'w')); print('writes logged',len(rows)); r.send('c')
-main()
+if __name__=='__main__': main()

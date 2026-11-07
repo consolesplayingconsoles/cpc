@@ -743,7 +743,11 @@ def _repair_locked(card, emit, drop=()):
             if junk:
                 emit("deleted %d macOS file%s: %s" % (len(junk), "" if len(junk) == 1 else "s", ", ".join(junk)))
                 card["mount"]()
-            plan = gdemu_repair_plan(card["files"](), drop)
+            files = card["files"]()
+            gone = [s for s in drop if not any(f.startswith("%02d/" % s) for f in files)]
+            if gone:
+                raise NotAvailable("no slot %s on the card" % ", ".join("%02d" % s for s in gone))
+            plan = gdemu_repair_plan(files, drop)
             for s in plan["clear"]:
                 emit(("slot %02d: deleting it" if s in set(drop) else "slot %02d has no disc.gdi or disc.cdi: deleting it") % s)
                 card["clear"](s)

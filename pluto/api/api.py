@@ -3177,6 +3177,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(502, {"ok": False, "lines": lines, "error": str(exc)}); return
             print("  [NATIVE:%s] repair-sd: %s" % (node_id, " | ".join(lines)))
             self._send(200, {"ok": True, "lines": lines}); return
+        if action == "delete-slot":
+            # GDEMU only: delete one slot by number; the repair (gaps closed, openMenu's list rebuilt) follows
+            cfg = (self.__class__.node_roster or {}).get(node_id) or {}
+            if catalogue_send.strategy_for(cfg, node_id) != "gdemu":
+                self._send(200, {"ok": False,
+                                 "error": "native '%s' for %s is not implemented yet" % (action, node_id)}); return
+            body = self._read_json_body()
+            if body is None:
+                return
+            try:
+                slot = int(body.get("slot"))
+            except (TypeError, ValueError):
+                self._send(400, {"ok": False, "error": "slot must be a number"}); return
+            if slot < 1 or slot > 99 or slot == int(catalogue_send.GDEMU_MENU):
+                self._send(400, {"ok": False, "error": "slot %s is not a game slot (01 is openMenu)" % slot}); return
+            if catalogue_send.gdemu_busy():
+                self._send(200, {"ok": False, "lines": ["a send to the GDEMU card is running: "
+                                                        "click Delete again when it is done"],
+                                 "error": "a send to the GDEMU card is running"}); return
+            lines = []
+            try:
+                card = self._send_dest("gdemu", node_id, cfg, "dreamcast", ctx_emit=lines.append)
+                catalogue_send.gdemu_repair(card, lines.append, drop=[slot])
+            except Exception as exc:
+                lines.append("ERROR " + str(exc))
+                print("  [NATIVE:%s] delete-slot: %s" % (node_id, " | ".join(lines)))
+                self._send(502, {"ok": False, "lines": lines, "error": str(exc)}); return
+            print("  [NATIVE:%s] delete-slot: %s" % (node_id, " | ".join(lines)))
+            self._send(200, {"ok": True, "lines": lines}); return
         if action == "unmount-sd":
             cfg = (self.__class__.node_roster or {}).get(node_id) or {}
             labels = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()]

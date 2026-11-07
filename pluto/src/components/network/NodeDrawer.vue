@@ -114,6 +114,7 @@ const isWii = computed(() => props.id === 'wii')
 const isBatocera = computed(() => props.id === 'batocera')
 const nativeBusy = ref('')
 const nativeNote = ref('')
+const slotNo = ref('')            // the GDEMU slot the Delete button removes
 watch(() => props.id, () => { nativeNote.value = '' })
 
 // The terminal tab's name: what was done, and to which console (or card).
@@ -122,6 +123,7 @@ function nativeTitle(action: string): string {
   if (action === 'unmount-sd') return `Unmount ${props.node.sd ?? props.node.name} SD`
   if (action === 'list-sd')    return `List ${props.node.sd ?? props.node.name} SD`
   if (action === 'repair-sd')  return `Repair ${props.node.sd ?? props.node.name} SD`
+  if (action === 'delete-slot') return `Delete slot ${slotNo.value} on ${props.node.sd ?? props.node.name} SD`
   if (action === 'eject-hdd')  return `Eject ${props.node.name} drive`
   if (action === 'quit-game')  return 'Quit game' + on
   if (action === 'restart-es') return 'Restart EmulationStation' + on
@@ -129,7 +131,7 @@ function nativeTitle(action: string): string {
   if (action === 'games')      return 'Game Library' + on
   return action + on
 }
-function nativeAction(action: string) {
+function nativeAction(action: string, body?: object) {
   const title = nativeTitle(action)
   nativeNote.value = ''
   nativeBusy.value = action
@@ -137,7 +139,9 @@ function nativeAction(action: string) {
   // The run goes to the terminal, which says what actually happened in the API's own words
   // ("SAROO unmounted: safe to pull", "WARN SAROO is busy, still mounted", "was not mounted").
   emit('native-run', { action, title, lines: ['running ' + action + ' on ' + props.id], ok: null, startedAt })
-  fetch(`${API_BASE}/native/${props.id}/${action}`, { method: 'POST' })
+  fetch(`${API_BASE}/native/${props.id}/${action}`, body
+    ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    : { method: 'POST' })
     .then(r => r.json())
     .then(j => {
       const lines: string[] = Array.isArray(j?.lines) ? j.lines : []
@@ -387,6 +391,16 @@ function postCommand(text: string) {
           <span>Repair SD card ({{ node.sd }})</span>
           <span v-if="nativeBusy === 'repair-sd'" class="nd__act-note">Repairing…</span>
         </UiActionRow>
+        <form class="nd__slot" @submit.prevent="slotNo && nativeAction('delete-slot', { slot: Number(slotNo) })">
+          <label class="nd__slot-lbl" for="nd-slot">
+            <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>
+            <span>Delete slot</span>
+          </label>
+          <div class="nd__slot-row">
+            <input id="nd-slot" v-model="slotNo" class="nd__slot-in" type="text" inputmode="numeric" maxlength="2" pattern="[0-9]*" placeholder="Slot number" :disabled="!!nativeBusy" />
+            <UiButton variant="secondary" type="submit" :disabled="!!nativeBusy || !slotNo" :loading="nativeBusy === 'delete-slot'">Delete</UiButton>
+          </div>
+        </form>
         <UiActionRow :disabled="!!nativeBusy" @click="nativeAction('unmount-sd')">
           <svg class="nd__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M12 17V9M9 12l3-3 3 3"/></svg>
           <span>Unmount SD card ({{ node.sd }})</span>
@@ -498,6 +512,11 @@ function postCommand(text: string) {
 .nd__deploy-meta { margin: 0; text-align: center; font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
 .nd__sec { margin-top: 18px; }
 .nd__lbl { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--text-faint); margin: 0 0 10px; }
+.nd__slot { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; padding: 9px 12px; font-family: var(--font-sans); font-size: 14px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.nd__slot-lbl { display: flex; align-items: center; gap: 10px; }
+.nd__slot-row { display: flex; align-items: center; gap: var(--sp-2); }
+.nd__slot-in { flex: 1; min-width: 0; box-sizing: border-box; padding: 6px 8px; font-family: var(--font-mono); font-size: 12.5px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-sm); }
+.nd__slot-in:focus { outline: none; border-color: var(--accent); }
 .nd__hint { margin: 2px 0 0; font-size: 12px; color: var(--text-faint); }
 /* the action-row frame is now UiActionRow; these are the row CONTENTS */
 .nd__ic { width: 18px; height: 18px; color: var(--accent); flex: 0 0 auto; }
