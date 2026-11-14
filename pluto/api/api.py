@@ -884,6 +884,23 @@ def _sync_vmu_run(roster, emit=None):
 
 
 def _sd_backup(node_id, roster, consoles_cfg, emit=None, only=None):
+    """Back up the node's card(s) to Dropbox, one job at a time per card: it waits for a send
+    (or another backup) using the same card, so it can never unmount a card under it."""
+    cfg = (roster or {}).get(node_id) or {}
+    labels = sorted(l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip())
+    locks = [catalogue.card_lock(l) for l in labels]
+    if emit and any(l.busy for l in locks):
+        emit("another job is using this card: waiting for it to finish")
+    for l in locks:
+        l.acquire()
+    try:
+        return _sd_backup_run(node_id, roster, consoles_cfg, emit, only)
+    finally:
+        for l in reversed(locks):
+            l.release()
+
+
+def _sd_backup_run(node_id, roster, consoles_cfg, emit=None, only=None):
     """BACKUP a console's SD/flash card -> Dropbox. Upload only, like every other backup.
 
     The card is physically in the Pi hub, not in the console: everything is (or will be)
@@ -3098,9 +3115,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # data may be unflushed AND the exFAT dirty flag still up -- Linux and macOS ignore that
     # flag, SAROO's own reader does not and the cart stops booting. So: sync, umount, then PROVE
     # it is gone and read the volume flags back (offset 106; bit 1 = dirty). od, not xxd: the Pi
-    # hub has no xxd.
+    # hub has no xxd. A label is looked up with blkid -L (a space in it, "WII GAMES", is escaped in
+    # /dev/disk/by-label) and its mountpoint drops what is not a letter, digit, - or _, as the scan's does.
     SD_UMOUNT = (
-        'for l in "$@"; do d=$(readlink -f /dev/disk/by-label/$l 2>/dev/null); '
+        'for l in "$@"; do d=$(sudo blkid -L "$l" 2>/dev/null); k=$(printf %s "$l" | tr -cd "A-Za-z0-9_-"); '
         '[ -b "$d" ] || { echo "$l is not in the hub"; continue; }; '
         'if ! grep -q "^$d " /proc/self/mounts; then echo "$l was not mounted"; continue; fi; '
         'sync; if ! sudo umount "$d" 2>/dev/null; then sleep 2; sudo umount "$d" 2>/dev/null; fi; '
@@ -3116,7 +3134,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # Re-arm the trigger. systemd leaves an automount unit "failed (Result: unmounted)"
         # once its filesystem goes away under it, and the path then stops mounting on demand:
         # the card became unbrowsable until someone restarted the unit by hand.
-        'u=$(systemd-escape -p --suffix=automount "/mnt/cpc-sd/$l" 2>/dev/null); '
+        'u=$(systemd-escape -p --suffix=automount "/mnt/cpc-sd/$k" 2>/dev/null); '
         '[ -n "$u" ] && sudo systemctl restart "$u" 2>/dev/null; '
         'systemctl is-active "$u" >/dev/null 2>&1 || echo "WARN $l will not automount again: $u is $(systemctl is-active "$u" 2>/dev/null)"; '
         'done')
@@ -3125,7 +3143,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # folder with their sizes. Read-only (the automount mounts it on first access). A
     # two-digit folder with no disc.* is a GDEMU slot a failed send left half-written.
     SD_LIST = (
-        'for l in "$@"; do m=/mnt/cpc-sd/$l; '
+        'for l in "$@"; do m=/mnt/cpc-sd/$(printf %s "$l" | tr -cd "A-Za-z0-9_-"); '
         'if ! ls "$m" >/dev/null 2>&1 || ! mountpoint -q "$m"; then echo "WARN $l is not in the hub"; continue; fi; '
         'echo "$l: $(df -h "$m" | awk "NR==2{print \\$3\\" used of \\"\\$2}")"; '
         'for e in "$m"/*; do [ -e "$e" ] || continue; b=${e##*/}; '
@@ -3148,6 +3166,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             labels = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()]
             if not labels:
                 self._send(400, {"ok": False, "error": "%s has no SD card (SD_LABEL)" % node_id}); return
+            if catalogue.card_busy(labels):
+                self._send(200, {"ok": False, "lines": ["a job is using this card: click List again when it is done"],
+                                 "error": "a job is using this card"}); return
             rc, out = self._node_ssh("pi", ["sh", "-c", self.SD_LIST, "list"] + labels,
                                      timeout=60, connect_timeout=5)
             if rc != 0:
@@ -3211,6 +3232,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             labels = [l.strip() for l in (cfg.get("SD_LABEL") or "").split(",") if l.strip()]
             if not labels:
                 self._send(400, {"ok": False, "error": "%s has no SD card (SD_LABEL)" % node_id}); return
+            if catalogue.card_busy(labels):
+                self._send(200, {"ok": False, "lines": ["a job is using this card: click Unmount again when it is done"],
+                                 "error": "a job is using this card"}); return
             rc, out = self._node_ssh("pi", ["sh", "-c", self.SD_UMOUNT, "unmount"] + labels,
                                      timeout=60, connect_timeout=5)
             if rc != 0:
@@ -5139,6 +5163,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                "command": lambda args: self._admin_command(target, args),
                "run": (lambda args: self._ps2_hub_run(target, args, emit)) if kind == "hdd" and self._ps2_hub(target) else None,
                "rom_ext": lambda src: self._send_rom_ext(system, src), "unpack": kind == "sd",
+               "layout": (target_cfg.get("SD_LAYOUT") or "").strip().lower() if kind == "sd" else "",
                "card": self._send_dest(kind, target, target_cfg, system, ctx_emit=emit) if kind in ("local", "batocera", "sd", "ftp", "gdemu") else None,
                # gdemu reads a disc's IP.BIN at the source for openMenu's list
                "read_src": self._send_read_src, "find_ipbin": self._send_find_ipbin,
@@ -5154,6 +5179,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             for sk in plan["skipped"]:
                 emit("skipped %s: %s" % (sk["game"], sk["why"]))
         result.update(strategy=kind, skipped=plan["skipped"])
+        # A game skipped for any reason but "already there" was NOT sent: that is a failed send,
+        # not a green one. (Skips were already reported line by line above.)
+        failed = [sk for sk in plan["skipped"] if not str(sk.get("why") or "").lower().startswith("already")]
+        if failed:
+            raise catalogue_send.NotAvailable("%d game%s not sent (%d sent): %s" % (
+                len(failed), "" if len(failed) == 1 else "s", result.get("count") or 0,
+                "; ".join("%s: %s" % (sk["game"], sk["why"]) for sk in failed)))
         return result
 
     def _sd_pick_label(self, host, labels, want=None):
@@ -5166,7 +5198,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """
         if not labels:
             raise catalogue_send.NotAvailable("this node has no card (SD_LABEL is empty)")
-        rc, out = _ssh_sh(host, 'for l in "$@"; do [ -e "/dev/disk/by-label/$l" ] && echo "$l"; done',
+        # udev writes a space in a label as \x20 in /dev/disk/by-label ("WII GAMES" -> "WII\x20GAMES")
+        rc, out = _ssh_sh(host, r"""for l in "$@"; do e=$(printf %s "$l" | sed 's/ /\\x20/g'); [ -e "/dev/disk/by-label/$e" ] && echo "$l"; done""",
                          "pick", *labels)
         here = [l for l in out.split() if l in labels] if rc == 0 else []
         if not here:
@@ -5210,9 +5243,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if r.returncode != 0 or os.path.getsize(local) == 0:
                     raise catalogue_send.SourceUnavailable("could not read %s from %s: %s" % (
                         os.path.basename(m.group(2)), m.group(1), r.stderr.decode("utf-8", "replace").strip()[-200:] or "empty file"))
-            if unpack and local.lower().endswith(".zip"):
+            if unpack and local.lower().endswith(".7z"):
+                # one ROM inside (send.py skips a multi-file archive): unpack it, take that file
+                x = os.path.join(tmp, "x7z")
+                if not self._archive_extract(local, x):
+                    raise catalogue_send.NotAvailable("could not unpack %s" % os.path.basename(local))
+                files = [os.path.join(d, n) for d, _, ns in os.walk(x) for n in ns]
+                files = [f for f in files if os.path.relpath(f, x) in self._real_files([os.path.relpath(f, x)])]
+                if len(files) != 1:
+                    raise catalogue_send.NotAvailable("%s holds %d files that could be the game, not one"
+                                                      % (os.path.basename(local), len(files)))
+                local = os.path.join(tmp, "rom")
+                shutil.move(files[0], local)
+                shutil.rmtree(x, ignore_errors=True)
+            elif unpack and local.lower().endswith(".zip"):
                 with zipfile.ZipFile(local) as z:
-                    member = next(i for i in z.namelist() if not i.endswith("/"))
+                    real = self._real_files([i for i in z.namelist() if not i.endswith("/")])
+                    if len(real) != 1:
+                        raise catalogue_send.NotAvailable("%s holds %d files that could be the game, not one"
+                                                          % (os.path.basename(local), len(real)))
+                    member = real[0]
                     rom = os.path.join(tmp, "rom")
                     with z.open(member) as zi, open(rom, "wb") as f:
                         shutil.copyfileobj(zi, f)
@@ -5318,7 +5368,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     # on autofs and the card then comes up read-only from fstab (the safe
                     # default) -- the copy died on "Read-only file system". After remounting,
                     # PROVE the folder is writable instead of trusting it.
-                    rc, out = ssh_sh(host, 'D=/dev/disk/by-label/$1; [ -e "$D" ] || { echo "no card labelled $1 in the hub"; exit 2; }; '
+                    rc, out = ssh_sh(host, r"""D=/dev/disk/by-label/$(printf %s "$1" | sed 's/ /\\x20/g'); [ -e "$D" ] || { echo "no card labelled $1 in the hub"; exit 2; }; """
                                            'ls "$2" >/dev/null 2>&1; '
                                            'if mountpoint -q "$2"; then sudo mount -o remount,rw "$2" >/dev/null 2>&1; echo reused; '
                                            'else sudo mkdir -p "$2" && sudo mount "$D" "$2" && echo mounted; fi; '
@@ -5341,9 +5391,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     lines = [lines[0]] + lines[2:]
                 state["have"] = set(lines[1:])
 
-            def put(src, name):
+            def put(src, name, convert=None):
                 with tempfile.TemporaryDirectory() as tmp:
                     local = fetch(src, tmp, kind == "sd")
+                    if convert == "rvz":
+                        local = self._rvz_to_iso(local, tmp, name, ctx_emit)
                     size = os.path.getsize(local)
                     free = state.get("free")
                     # A card with barely any room left scatters a big file across the free space,
@@ -5463,7 +5515,96 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if rc != 0:
                     raise catalogue_send.NotAvailable("could not delete %s on %s: %s" % (rel, node, out.strip()[-200:]))
 
-        card = {"mount": mount, "exists": lambda name: name in state["have"], "put": put, "finish": finish}
+        def put_rvz(src, name):
+            put(src, name, convert="rvz")
+
+        def put_wbfs(src, name, from_rvz=False, replace=False):
+            """An ISO written as WBFS on a Wii drive: staged on the hub's own disk, then `wit copy`
+            writes <name> on the card (data partition only, split only if over 4 GB).
+            The staged ISO is always removed again."""
+            rc, out = ssh_sh(host, 'command -v wit >/dev/null 2>&1 && echo ok || echo missing')
+            if rc != 0 or "ok" not in out:
+                raise catalogue_send.NotAvailable(
+                    "wit (ISO to WBFS) is not installed on the hub, so %s was not written" % name)
+            stage = "/var/tmp/cpc-wbfs"
+            with tempfile.TemporaryDirectory() as tmp:
+                local = fetch(src, tmp, kind == "sd")
+                if from_rvz:
+                    local = self._rvz_to_iso(local, tmp, name, ctx_emit)
+                if catalogue_send.ID_TOKEN in name:
+                    with open(local, "rb") as f:
+                        gid = catalogue_send.disc_id(lambda _s, o, n: f.read(n), local)
+                    if not gid:
+                        raise catalogue_send.NotAvailable("%s has no game ID in its disc header, so it was not written"
+                                                          % name.split(" [")[0])
+                    name = name.replace(catalogue_send.ID_TOKEN, gid)
+                # Already on the card? By the game's ID, not the folder's spelling: the same disc under
+                # another title (or put there by hand) is still the same game and must not be sent twice.
+                same_id = ("%s.wbfs" % name.rsplit("/", 1)[-1].rsplit(".", 1)[0]).lower()
+                if (name in state["have"] or any(h.rsplit("/", 1)[-1].lower() == same_id for h in state["have"])) \
+                        and not replace:
+                    return False
+                size = os.path.getsize(local)
+                free = state.get("free")
+                if free is not None and size > free - self.CARD_HEADROOM:
+                    raise catalogue_send.NotAvailable(
+                        "%s needs up to %s but the card has only %s free: delete some games from it first"
+                        % (name, _mb(size), _mb(free)))
+                rc, out = ssh_sh(host, 'mkdir -p "$1" && df -k --output=avail "$1" | tail -1 | tr -d " "', stage)
+                if rc != 0 or not out.strip().isdigit() or int(out.strip()) * 1024 < size + self.CARD_HEADROOM:
+                    raise catalogue_send.NotAvailable("the hub has no room to stage %s (%s)" % (name, _mb(size)))
+                say = ctx_emit if ctx_emit else None
+                if say:
+                    say("  %s: copying %s to the hub" % (name.split(" [")[0], _mb(size)))
+                try:
+                    rc, out = _ssh_sh_feed(host, REMOTE_PUT % ("", "", "", ""), stage + "/in.iso", str(size),
+                                           path=local, progress=lambda sent: None)
+                    if rc != 0:
+                        raise catalogue_send.NotAvailable("could not stage %s on the hub: %s" % (name, out.strip()[-200:]))
+                    mount()         # staging took minutes: make sure the card is mounted read-write right now
+                    if say:
+                        say("  %s: writing it to the card as WBFS" % name.split(" [")[0])
+                    rc, out = ssh_sh(host,
+                                     'out=$(%s wit copy "$1" --DEST "$2" --wbfs --psel data --auto-split 2>&1); rc=$?; '
+                                     'if [ $rc -ne 0 ]; then echo "$out" | tail -3; '
+                                     '%s rm -f "$2" "${2%%.wbfs}.wbf1" "${2%%.wbfs}.wbf2"; %s rmdir "$(dirname "$2")" 2>/dev/null; exit 1; fi'
+                                     % (sudo, sudo, sudo), stage + "/in.iso", base + "/" + name)
+                finally:
+                    ssh_sh(host, 'rm -f "$1" "$1.part"', stage + "/in.iso")
+            if rc != 0:
+                raise catalogue_send.NotAvailable("wit could not write %s: %s" % (name, out.strip()[-200:]))
+            state["have"].add(name)
+            if state.get("free") is not None:
+                state["free"] -= size
+            return name
+
+        card = {"mount": mount, "exists": lambda name: name in state["have"], "put": put, "finish": finish,
+                "put_wbfs": put_wbfs}
+        if kind in ("sd", "gdemu"):
+            if kind == "sd":
+                card["put_rvz"] = put_rvz
+            # ONE job at a time per card (the same rule GDEMU has): a send's finish unmounts the card, so
+            # overlapping jobs made the first to finish pull it out from under the other, and wit then
+            # found no card ("Can't create directory ... No such file").
+            lock = catalogue.card_lock(label)
+            raw_mount, raw_finish = card["mount"], card["finish"]
+
+            def mount_locked():
+                if lock.busy and ctx_emit:
+                    ctx_emit("another job is using the %s card: waiting for it to finish" % label)
+                lock.acquire()
+                try:
+                    raw_mount()
+                except BaseException:
+                    lock.release()
+                    raise
+
+            def finish_locked():
+                try:
+                    return raw_finish()
+                finally:
+                    lock.release()
+            card["mount"], card["finish"] = mount_locked, finish_locked
         if kind != "local":
             card["remove"] = remove
         if kind == "gdemu":
@@ -5522,9 +5663,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return []
             r = subprocess.run([exe, "l", "-ba", "-slt", path], stdout=subprocess.PIPE,
                                stderr=subprocess.DEVNULL, timeout=300)
-            return [l[7:].strip() for l in r.stdout.decode("utf-8", "replace").splitlines()
-                    if l.startswith("Path = ")]
+            return Handler._slt_files(r.stdout.decode("utf-8", "replace"))
         return []
+
+    @staticmethod
+    def _slt_files(text):
+        """File names (not folders) from `7z l -slt` output: a block per entry, a folder is "Folder = +" or Attributes starting with D."""
+        out, path, folder = [], None, False
+        for line in text.splitlines() + [""]:
+            if line.startswith("Path = "):
+                path, folder = line[7:].strip(), False
+            elif line.startswith("Folder = "):
+                folder = folder or line.endswith("+")
+            elif line.startswith("Attributes = "):
+                folder = folder or line[13:].strip().startswith("D")      # 7z marks a folder "D"
+            elif not line.strip() and path is not None:
+                if not folder:
+                    out.append(path)
+                path = None
+        return out
 
     @staticmethod
     def _archive_extract(path, dest):
@@ -5544,6 +5701,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
                            stderr=subprocess.DEVNULL, timeout=3600)
         return r.returncode == 0
 
+    @staticmethod
+    def _rvz_to_iso(local, tmp, name, emit=None):
+        """An .rvz (Dolphin's compressed disc image) as a plain ISO beside it, with nodtool, which
+        also checks the result against the Redump hashes. -> the ISO's path."""
+        import shutil
+        exe = shutil.which("nodtool")
+        if not exe:
+            raise catalogue_send.NotAvailable("nodtool is not installed here, so %s (an .rvz) can't be converted"
+                                              % name.split(" [")[0])
+        out = os.path.join(tmp, "disc.iso")
+        if emit:
+            emit("  %s: converting the .rvz to an ISO" % name.split(" [")[0].split("/")[0])
+        r = subprocess.run([exe, "convert", local, out], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=3600)
+        if r.returncode != 0 or not os.path.isfile(out) or os.path.getsize(out) == 0:
+            if os.path.exists(out):
+                os.remove(out)
+            raise catalogue_send.NotAvailable("nodtool could not convert %s: %s" % (
+                name.split(" [")[0], r.stdout.decode("utf-8", "replace").strip()[-200:]))
+        if os.path.dirname(os.path.abspath(local)) == os.path.abspath(tmp):
+            os.remove(local)                # our own fetched copy: no longer needed, room for the ISO
+        return out                          # (a lab file is never touched: only what is in tmp goes)
+
     def _send_rom_ext(self, system, src):
         """What the copy will BE on the target: the ROM's own extension, and for an archive the
         extension of what is inside it -- a .cue in there means a disc, so the send writes the
@@ -5552,16 +5731,51 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ext = os.path.splitext(path)[1]
         if ext.lower() in self.ARCHIVES and not src.get("inner"):
             local = self._lab_rom(system, src["path"]) if src.get("node") == "lab" else None
-            names = self._archive_list(local) if local else []
+            names = self._archive_list(local) if local else (
+                self._remote_archive_list(system, src["path"]) if src.get("node") == "batocera" else [])
             inner = next((n for n in names if os.path.splitext(n)[1].lower() in self.DESCRIPTORS), None)
             if inner:
                 return os.path.splitext(inner)[1]
-            if len(names) == 1:
-                return os.path.splitext(names[0])[1]
+            real = self._real_files(names)
+            if len(real) == 1:
+                return os.path.splitext(real[0])[1]
         return ext
 
     ARCHIVES = (".zip", ".7z")
     DESCRIPTORS = (".cue", ".gdi")
+    # what an uploader leaves beside the game in an archive: not part of it, never sent
+    ARCHIVE_JUNK = (".url", ".txt", ".nfo", ".diz", ".jpg", ".jpeg", ".png", ".gif", ".sfv", ".md5",
+                    ".sha1", ".crc", ".html", ".htm", ".lnk", ".ini", ".db", ".dat", ".xml")
+
+    @classmethod
+    def _real_files(cls, names):
+        """The archive's members that can be the game: its files without the uploader's extras."""
+        return [n for n in names if os.path.splitext(n)[1].lower() not in cls.ARCHIVE_JUNK
+                and not os.path.basename(n).startswith(".")]
+
+    def _remote_archive_list(self, system, path):
+        """Names inside an archive on the Batocera box (its own 7z reads .zip and .7z), [] when
+        it cannot be listed: the archive itself stays on the box, only the listing travels."""
+        rom = "/userdata/roms/%s/%s" % (system, os.path.normpath(path))
+        # the box's `7z` cannot find its plugin; `7zr` (the stock .7z reader) works
+        rc, out = self._node_ssh("batocera", ["7zr", "l", "-ba", "-slt", rom], timeout=300, connect_timeout=6)
+        return self._slt_files(out) if rc == 0 else []
+
+    def _fetch_remote(self, src, workdir):
+        """node:/path -> a local copy in workdir (the archive 7z has to read from a file)."""
+        import shlex
+        m = re.match(r"^([A-Za-z0-9_.-]+):(/.*)$", src)
+        if not m:
+            return src
+        local = os.path.join(workdir, "r%d%s" % (abs(hash(src)), os.path.splitext(src)[1]))
+        if not os.path.exists(local):
+            with open(local, "wb") as f:
+                r = subprocess.run(["ssh", "-o", "ConnectTimeout=6", m.group(1), "cat " + shlex.quote(m.group(2))],
+                                   stdout=f, stderr=subprocess.PIPE, timeout=1800)
+            if r.returncode != 0:
+                os.remove(local)
+                raise catalogue_send.SourceUnavailable("could not read %s from %s" % (os.path.basename(m.group(2)), m.group(1)))
+        return local
 
     def _disc_in_archive(self, path, workdir):
         """Unpack an archive holding a disc and return its descriptor (.cue/.gdi) path.
@@ -5587,7 +5801,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         archive holding the disc, which is unpacked into workdir first."""
         import shlex
         if workdir and src.lower().endswith(self.ARCHIVES):
-            src = self._disc_in_archive(src, workdir)
+            src = self._disc_in_archive(self._fetch_remote(src, workdir), workdir)
             ext = os.path.splitext(src)[1]
         m = re.match(r"^([A-Za-z0-9_.-]+):(/.*)$", src)
         if m:

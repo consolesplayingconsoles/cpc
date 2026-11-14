@@ -34,6 +34,7 @@ import os
 import re
 import unicodedata
 
+_ID_FOLDER = re.compile(r"^(.*\S)\s*\[([A-Z0-9]{6})\]$")
 _GENERIC_STEMS = {"disc", "disk", "game", "rom", "track01", "track1"}
 _DOUBLE_EXT = re.compile(r"\.nkit$", re.I)     # Game.nkit.iso / Game.nkit.gcz
 _TAG     = re.compile(r"\(([^()]*)\)|\[([^\[\]]*)\]")
@@ -111,6 +112,10 @@ def parse(filename):
     # GDEMU-style dumps are "<Game folder>/disc.gdi": a generic file name says nothing, the folder does.
     if stem.lower() in _GENERIC_STEMS and os.path.dirname(filename):
         stem = os.path.basename(os.path.dirname(filename))
+    # a Wii WBFS dump is "<Title> [RMGP01]/RMGP01.wbfs": the file is named by its game ID, the folder holds the title
+    folder = _ID_FOLDER.match(os.path.basename(os.path.dirname(filename)))
+    if folder and stem == folder.group(2):
+        stem = folder.group(1)
     tags, variants, version = [], [], None
     for m in _TAG.finditer(stem):
         paren, bracket = m.group(1), m.group(2)

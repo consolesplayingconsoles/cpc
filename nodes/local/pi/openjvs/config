@@ -12,7 +12,7 @@ EMULATE sega-type-1
 # SENSE_LINE_TYPE 0 - USB to RS485 with no sense line
 # SENSE_LINE_TYPE 1 - USB to RS485 with sense line
 # SENSE_LINE_TYPE 2 - Raspberry Pi OpenJVS Hat
-SENSE_LINE_TYPE 1
+SENSE_LINE_TYPE 2
 SENSE_LINE_PIN 595
 
 # Setup the debug mode for outputting debug information

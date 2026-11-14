@@ -321,6 +321,58 @@ def disc_tracks(descriptor_text, ext):
     return names
 
 
+NINTENDO_GC_IMAGES = (".iso", ".gcm", ".ciso", ".cso")
+
+
+def disc_id(read, src):
+    """The 6-character game ID in a GameCube/Wii disc image's header (bytes 0-5), or None.
+    read(src, offset, length) is the same reader the gdemu send uses (a local path or node:/path)."""
+    try:
+        raw = read(src, 0, 6)
+    except Exception:
+        return None
+    text = raw.decode("ascii", "replace") if isinstance(raw, (bytes, bytearray)) else str(raw or "")
+    return text if re.match(r"^[A-Z0-9]{6}$", text) else None
+
+
+ID_TOKEN = "@ID@"        # a Wii name whose game ID is only known once the image is converted
+
+
+def nintendo_copy(system, c, ext, src=None, read=None):
+    """SD_LAYOUT=nintendo, a Wii/GameCube drive: -> (copy, ext, why-skipped or None).
+
+    GameCube (Nintendont): games/<name>/game.iso, one folder per game; a CISO image keeps the
+    name the drive's own ones wear, game.cso, and a .gcm is just an .iso renamed. The folder
+    name is free, so it is the canonical game name, which is what the scan reads the title from.
+    An .rvz (Dolphin's compressed image, which no loader reads) is converted to an ISO on the way.
+    Wii (WBFS): wbfs/<Title> [ID6]/<ID6>.wbfs, the disc's 6-character ID in the folder and the file
+    name. A plain .iso has its ID read from the header now; an .rvz or an unpacked archive only has
+    one once converted, so its name carries ID_TOKEN until then (the strategy fills it in).
+    Anything else the loaders cannot read is skipped with the reason."""
+    e = ext.lower()
+    if system == "gamecube":
+        if e in OPAQUE_ARCHIVES:
+            return c, ext, "%s can't be unpacked to a single image here (more than one file, or not on the lab)" % ext
+        if e == ".rvz":
+            return dict(c, name=c["name"] + "/game", convert="rvz"), ".iso", None
+        if e not in NINTENDO_GC_IMAGES:
+            return c, ext, "%s is not an image Nintendont reads: it has to be converted to .iso first" % ext
+        return dict(c, name=c["name"] + "/game"), (".cso" if e in (".ciso", ".cso") else ".iso"), None
+    if system == "wii":
+        title = _safe_name(c.get("title") or c["name"])
+        if e == ".rvz" or (e == ".iso" and (src or "").lower().endswith((".zip", ".7z"))):
+            return dict(c, name="%s [%s]/%s" % (title, ID_TOKEN, ID_TOKEN), convert="wbfs",
+                        from_rvz=(e == ".rvz")), ".wbfs", None
+        if e != ".iso":
+            return c, ext, "%s has to be converted to .iso first" % ext
+        gid = disc_id(read, src) if (read and src) else None
+        if not gid:
+            return c, ext, "no game ID in the disc header (not a Wii disc)"
+        # wbfs/<Title> [ID6]/<ID6>.wbfs: the ID in the folder and the file name is what the loader reads
+        return dict(c, name="%s [%s]/%s" % (title, gid, gid), convert="wbfs"), ".wbfs", None
+    return c, ext, "this drive only takes Wii and GameCube games"
+
+
 def _files(p, ctx):
     """File-per-game targets (local, batocera, sd, ftp): copy each source to <dest>/<name><ext>,
     or <dest>/<sub>/<name><ext> when ctx["kind_dirs"] gives the game's kind a folder.
@@ -334,6 +386,11 @@ def _files(p, ctx):
         ext = ctx["rom_ext"](c["source"]) if ctx.get("unpack") else "." + c["source"]["path"].rsplit(".", 1)[-1]
         if ctx.get("system") in ARCADE:
             c = dict(c, name=c["source"]["path"].rsplit("/", 1)[-1].rsplit(".", 1)[0])
+        if ctx.get("layout") == "nintendo":
+            c, ext, why = nintendo_copy(ctx.get("system"), c, ext, src, ctx.get("read_src"))
+            if why:
+                p["skipped"].append({"game": c["name"], "why": why})
+                continue
         # a kind with its own folder on the target (a card's Tools/, Mods/<game>/, A-C/)
         sub = kind_dirs.get(c.get("kind") or "game")
         if sub:
@@ -394,8 +451,21 @@ def _copy_one(c, src, ext, card, ctx, p, lines):
     if card["exists"](name) and not c.get("replace"):
         p["skipped"].append({"game": c["name"], "why": "already there as " + name})
         return 0
-    (ctx.get("emit") or lines.append)("%s %s" % (verb, name))
-    card["put"](src, name)
+    shown = name.split(" [" + ID_TOKEN)[0] if ID_TOKEN in name else name   # the ID is not known yet: the title alone
+    (ctx.get("emit") or lines.append)("%s %s" % (verb, shown))
+    if c.get("convert") == "wbfs":
+        # an ISO (or an .rvz, converted first) written as WBFS, split at 4 GB, on the target;
+        # False = the card already holds that game, which only the converted image's ID tells
+        wrote = card["put_wbfs"](src, name, c.get("from_rvz"), c.get("replace"))
+        if wrote is False:
+            p["skipped"].append({"game": c["name"], "why": "already on the card"})
+            return 0
+        if isinstance(wrote, str):
+            name = wrote                        # the real name, ID filled in
+    elif c.get("convert") == "rvz":
+        card["put_rvz"](src, name)          # an .rvz converted to the ISO the loader reads
+    else:
+        card["put"](src, name)
     lines.append("%s %s" % (done, name))
     return 1
 

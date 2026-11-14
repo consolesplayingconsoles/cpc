@@ -193,13 +193,14 @@ def scan_dir(sysdir, fmt=None, skip=None):
 def skip_rules(consoles_config):
     """What a scan leaves out, from config/consoles.json: every savePatterns/statePatterns
     entry (an extension or an exact file name), the saveFormats.stateContains substrings
-    (batocera's .state1, .state2, ...) and scanSkipDirs (whole directories: a pre-loaded
+    (batocera's .state1, .state2, ...), scanSkipNames (exact file names) and scanSkipDirs (whole directories: a pre-loaded
     card's duplicate region folders)."""
     exts, names_ = set(), set()
     for group in ("savePatterns", "statePatterns"):
         for pats in (consoles_config.get(group) or {}).values():
             for p in pats:
                 (exts if p.startswith(".") else names_).add(p.lower())
+    names_.update(n.lower() for n in consoles_config.get("scanSkipNames") or [])
     contains = [c.lower() for c in ((consoles_config.get("saveFormats") or {}).get("stateContains") or [])]
     return {"exts": sorted(exts), "names": sorted(names_), "contains": contains,
             "dirs": sorted(consoles_config.get("scanSkipDirs") or [])}

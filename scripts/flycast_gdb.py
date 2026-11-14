@@ -3,6 +3,12 @@
 
     python3 scripts/flycast_gdb.py sample <seconds> <every> <out.json>   stop, read the registers, continue, repeatedly
     python3 scripts/flycast_gdb.py mem <hex address> <length>           read memory (the CPU stops for it)
+    python3 scripts/flycast_gdb.py dump <hex address> <hex length> <out>     save that much memory to a file (video memory too:
+                                                                        A5000000, 8 MB = 800000), then let the game run
+    python3 scripts/flycast_gdb.py hook <seconds> <hex address>[=name] ...   count the calls of each address by caller (pr) and r4 (when small),
+                                                                        stepping over each hit so every call is seen; all breakpoints
+                                                                        removed and checked at the end. Movable builds: only from about
+                                                                        12 s after launch (before that the loader rewrites the code)
     python3 scripts/flycast_gdb.py snap <seconds> <lo> <hi> <out>       run until the pc is in [lo, hi), halt, write <out>.json (every
                                                                         register) and <out>.ram (16 MB of RAM from 8C000000)
     python3 scripts/flycast_gdb.py bp <seconds> <out.json> [--after <s>] <hex address> ...   stop at each address, log the registers,
@@ -35,6 +41,29 @@ class R:
     def cmd(s,p,timeout=10): s.send(p); return s.recv(timeout)
     def stop(s):
         s.k.sendall(b'\x03'); return s.recv(5)
+    # software breakpoints that are always taken back out: Flycast patches the instruction (38D3 -> 08C3 seen), and a `z0` that does
+    # not restore it leaves the patch in RAM; the game then runs into it with no debugger and drops into the BIOS (Zombie Revenge,
+    # 2026-11-13: the per-frame wait still held 08C3 after the script that set it had ended). Call these with the CPU stopped.
+    def read16(s,a):
+        h=s.cmd('m%X,2'%a)
+        return int(h[2:4]+h[0:2],16) if h and len(h)>=4 and not h.startswith('E') else None
+    def write16(s,a,v):
+        return s.cmd('M%X,2:%02x%02x'%(a,v&0xFF,(v>>8)&0xFF))
+    def bp_add(s,a):
+        bps=s.__dict__.setdefault('bps',{})
+        if a not in bps: bps[a]=s.read16(a)
+        return s.cmd('Z0,%X,2'%a)
+    def bp_del(s,a):
+        """Take the breakpoint at a out and check the original instruction is back; rewrite it when it is not. True when it is."""
+        orig=s.__dict__.setdefault('bps',{}).pop(a,None)
+        s.cmd('z0,%X,2'%a)
+        if orig is None: return True
+        if s.read16(a)!=orig: s.write16(a,orig)
+        ok=s.read16(a)==orig
+        if not ok: print('[ERROR] the instruction at %08X is still patched (%s, original %04X): the game will stop there with no debugger'%(a,s.read16(a),orig))
+        return ok
+    def bp_clear(s):
+        return all([s.bp_del(a) for a in list(s.__dict__.get('bps',{}))])
     def regs(s):
         g=s.cmd('g')
         for _ in range(3):                              # a stop reply (S02/T02...) can land after the g request: not registers
@@ -72,7 +101,7 @@ def main():
                 g=r.regs()
                 if g and game[0]<=(g['pc']&0x1FFFFFFF)<game[1]: print('in the game at %.1f s: pc %08X'%(time.time()-t1,g['pc'])); break
                 r.send('c'); time.sleep(0.25); r.stop()
-        for ad in addrs: print('Z0 %08X:'%ad, r.cmd('Z0,%X,2'%ad))
+        for ad in addrs: print('Z0 %08X:'%ad, r.bp_add(ad))
         t0=time.time(); r.send('c')
         while time.time()-t0<dur:
             st=r.recv(1)
@@ -80,13 +109,13 @@ def main():
                 g=r.regs()
                 if g:
                     rows.append({'t':round(time.time()-t0,2),**g})
-                    if g['pc'] in addrs: r.cmd('z0,%X,2'%g['pc']); addrs.remove(g['pc'])     # once each: continuing over a breakpoint in place hits it again at once, forever
+                    if g['pc'] in addrs: r.bp_del(g['pc']); addrs.remove(g['pc'])     # once each: continuing over a breakpoint in place hits it again at once, forever
                 r.send('c')
             elif st:
                 print('packet %r at %.1f s'%(st[:40],time.time()-t0)); r.send('c')      # anything else: say so, and never leave the CPU stopped
         r.stop(); g=r.regs()
         if g: print('at the end: pc %08X pr %08X r15 %08X'%(g['pc'],g['pr'],g['r'][15]))
-        for ad in addrs: r.cmd('z0,%X,2'%ad)
+        r.bp_clear()
         json.dump(rows,open(out,'w')); print('breakpoint hits',len(rows),'never hit:',' '.join('%08X'%x for x in addrs)); r.send('c')
     elif a[0]=='snap':    # snap <seconds> <lo hex> <hi hex> <out prefix>: run until the pc is in [lo, hi), halt, save the registers and RAM
         dur,lo,hi,out=float(a[1]),int(a[2],16),int(a[3],16),a[4]; t0=time.time(); g=None
@@ -102,6 +131,36 @@ def main():
             ram+=bytes.fromhex(h) if h and not h.startswith('E') else b'\0'*0x800
         open(out+'.ram','wb').write(ram); json.dump({'t':round(time.time()-t0,2),'g':full,**g},open(out+'.json','w'))
         print('halted at %.2f s: pc %08X pr %08X r15 %08X; %d bytes of RAM'%(time.time()-t0,g['pc'],g['pr'],g['r'][15],len(ram)))
+        r.send('c')
+    elif a[0]=='hook':    # hook <seconds> <hex address>[=name] ...: count the calls of each address, by caller (pr)
+        dur=float(a[1]); names={}
+        for x in a[2:]:
+            ad,_,n=x.partition('='); names[int(ad,16)]=n or ad
+        import collections
+        c=collections.Counter(); hits=0
+        r.stop()
+        for ad in names: print('Z0 %08X %s: %s'%(ad,names[ad],r.bp_add(ad)))
+        t0=time.time(); r.send('c')
+        try:
+            while time.time()-t0<dur:
+                st=r.recv(0.5)
+                if not st or st[:1] not in 'ST': continue
+                g=r.regs()
+                if g and g['pc'] in names:
+                    hits+=1; c[(names[g['pc']],g['pr'],g['r'][4] if g['r'][4]<0x10000 else None)]+=1      # r4 kept when it is a small number (a count)
+                    ad=g['pc']; r.bp_del(ad); r.cmd('s',5); r.bp_add(ad)       # step over the call's first instruction, then set it again
+                r.send('c')
+        finally:
+            r.stop(); ok=r.bp_clear(); r.send('c')
+        print('%d hits in %.1f s; breakpoints %s'%(hits,time.time()-t0,'all removed and checked' if ok else 'NOT ALL REMOVED'))
+        for (n,pr,r4),k in c.most_common(60): print('  %5dx %-24s from %08X  r4 %s'%(k,n,pr,r4 if r4 is not None else 'address'))
+    elif a[0]=='dump':    # dump <hex address> <hex length> <out>: memory to a file, the CPU stopped while it is read
+        ad,n,out=int(a[1],16),int(a[2],16),a[3]; data=bytearray(); t0=time.time()
+        r.stop()
+        for k in range(0,n,0x800):
+            h=r.cmd('m%X,%X'%(ad+k,min(0x800,n-k)),30)
+            data+=bytes.fromhex(h) if h and not h.startswith('E') else b'\0'*min(0x800,n-k)
+        open(out,'wb').write(data); print('%d bytes from %08X in %.0f s'%(len(data),ad,time.time()-t0))
         r.send('c')
     elif a[0]=='mem':
         print(r.cmd('m%s,%s'%(a[1],a[2])))

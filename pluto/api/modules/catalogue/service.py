@@ -24,6 +24,7 @@ Pure stdlib, 3.6-safe, ASCII only.
 import json
 import os
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 try:
@@ -385,7 +386,7 @@ def sd_script():
     return scan.remote_library() + '''
 import os as _o, subprocess as _sp
 _label, _dir, _fmt, _skip = sys.argv[1], sys.argv[2], json.loads(sys.argv[3] or "null"), json.loads(sys.argv[4])
-_dev = "/dev/disk/by-label/" + _label
+_dev = "/dev/disk/by-label/" + _label.replace(" ", chr(92) + "x20")   # udev escapes a space in a label
 _mnt = "/mnt/cpc-sd/" + "".join(c for c in _label if c.isalnum() or c in "-_")
 if not _o.path.exists(_dev):
     print("no card labelled %s in the hub" % _label); sys.exit(2)
@@ -414,12 +415,58 @@ def sd_routes(consoles_config, systems_of):
     return route
 
 
+class CardLock(object):
+    """The one job allowed on a card at a time, from its mount to its unmount. Re-entrant, because
+    a send's own rescan (in its finish) runs in the thread that holds it. `busy` says whether any
+    job holds it, for the callers that answer at once instead of waiting (the drawer's buttons)."""
+
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._n = 0
+
+    def acquire(self):
+        self._lock.acquire()
+        self._n += 1
+
+    def release(self):
+        self._n -= 1
+        self._lock.release()
+
+    @property
+    def busy(self):
+        return self._n > 0
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+
+
+_CARD_LOCKS = {}
+_CARD_LOCKS_GUARD = threading.Lock()
+
+
+def card_lock(label):
+    """The CardLock of one card, by its volume label. A send, a saves backup, a scan and the
+    drawer's unmount all take it, so none can unmount a card another is using."""
+    with _CARD_LOCKS_GUARD:
+        return _CARD_LOCKS.setdefault(label, CardLock())
+
+
+def card_busy(labels):
+    """True while a job holds any of these cards."""
+    return any(card_lock(l).busy for l in labels)
+
+
 def _scan_sd(run_ssh, hub_node, labels, roms_dir, fmt, skip):
     """One node's SD cards via the Pi hub -> {label: [files]}; a card that isn't in the
     hub is simply absent (its games stay as they were)."""
     out = {}
     for label in labels:
-        rc, text = run_ssh(hub_node, ["python3", "-", label, roms_dir, json.dumps(fmt) if fmt else "", json.dumps(skip)], stdin=sd_script())
+        with card_lock(label):          # waits for a send or a backup using this card
+            rc, text = run_ssh(hub_node, ["python3", "-", label, roms_dir, json.dumps(fmt) if fmt else "", json.dumps(skip)], stdin=sd_script())
         try:
             out[label] = scan.parse_output(text)
         except ValueError:

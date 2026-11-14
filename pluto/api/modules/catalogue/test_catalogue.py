@@ -85,6 +85,16 @@ def test_generic_file_name_uses_the_folder():
     assert p["title"] == "SGGG - Segagaga" and p["version"] == "1.022"
 
 
+def test_wbfs_file_named_by_its_game_id_uses_the_folder_title():
+    p = names.parse("wbfs/Super Mario Galaxy [RMGP01]/RMGP01.wbfs")
+    assert p["title"] == "Super Mario Galaxy" and p["variants"] == []
+
+
+def test_scan_skip_names_leave_a_loaders_config_out():
+    skip = scan.skip_rules({"scanSkipNames": ["nincfg.bin"]})
+    assert scan._skipped("nincfg.bin", skip) and not scan._skipped("game.iso", skip)
+
+
 def test_nkit_double_extension():
     assert names.parse("Super Mario Sunshine (USA).nkit.iso")["title"] == "Super Mario Sunshine"
 
@@ -1469,6 +1479,38 @@ def test_send_writes_a_mod_into_its_game_folder_under_its_own_name():
                     "kind_dirs": {"mod": "Mods", "game": "<range>"}})
     assert put == ["Mods/Sonic The Hedgehog [Infinite Jump by cpc v1.0].bin", "0-D/Aladdin (Europe).md"], put
 
+
+
+def test_nintendo_drive_gets_one_folder_per_gamecube_game_and_skips_what_it_cannot_read():
+    put = []
+    card = {"mount": lambda: None, "exists": lambda n: False,
+            "put": lambda src, name: put.append(name), "finish": lambda: []}
+    def copy(name, path, kind="game"):
+        return {"game": name, "name": name, "kind": kind, "title": name, "source": {"node": "batocera", "path": path}}
+    rvz = []
+    card["put_rvz"] = lambda src, name: rvz.append(name)
+    p = {"copies": [copy("Donkey Konga 3", "a.iso"), copy("Shadow the Hedgehog", "b.ciso"),
+                    copy("Luigi", "c.rvz"), copy("Mario", "d.gcm"), copy("Zelda", "e.7z")], "skipped": []}
+    send._files(p, {"target": "wii", "system": "gamecube", "card": card, "layout": "nintendo",
+                    "locate": lambda src: "/x/" + src["path"], "emit": None, "unpack": True,
+                    "rom_ext": lambda src: "." + src["path"].rsplit(".", 1)[-1], "kind_dirs": {}})
+    assert put == ["Donkey Konga 3/game.iso", "Shadow the Hedgehog/game.cso", "Mario/game.iso"], put
+    assert rvz == ["Luigi/game.iso"], rvz            # an .rvz is converted on the way to the same layout
+    assert [s["game"] for s in p["skipped"]] == ["Zelda"], p["skipped"]
+    # Wii: an ISO is written as wbfs/<Title> [ID6]/<ID6>.wbfs, the ID read from the disc header
+    put[:] = []
+    wbfs = []
+    card["put_wbfs"] = lambda src, name, rvz, replace: wbfs.append(name)
+    w = {"copies": [copy("Super Mario Galaxy", "e.iso"), copy("Not A Disc", "f.iso"), copy("Packed", "g.rvz"),
+                    copy("Odd", "h.wad")], "skipped": []}
+    ids = {"/x/e.iso": b"RMGP01", "/x/f.iso": b"\x00\x00\x00\x00\x00\x00"}
+    send._files(w, {"target": "wii", "system": "wii", "card": card, "layout": "nintendo",
+                    "locate": lambda src: "/x/" + src["path"], "emit": None, "unpack": True,
+                    "read_src": lambda src, off, n: ids.get(src, b""),
+                    "rom_ext": lambda src: "." + src["path"].rsplit(".", 1)[-1], "kind_dirs": {}})
+    # an .rvz only has its ID once converted, so its name carries the token for the strategy to fill in
+    assert wbfs == ["Super Mario Galaxy [RMGP01]/RMGP01.wbfs", "Packed [@ID@]/@ID@.wbfs"] and put == [], (wbfs, put)
+    assert sorted(s["game"] for s in w["skipped"]) == ["Not A Disc", "Odd"], w["skipped"]
 
 
 def test_a_default_header_serial_identifies_nothing():
