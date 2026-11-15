@@ -416,8 +416,9 @@ def sd_routes(consoles_config, systems_of):
 
 
 class CardLock(object):
-    """The one job allowed on a card at a time, from its mount to its unmount. Re-entrant, because
-    a send's own rescan (in its finish) runs in the thread that holds it. `busy` says whether any
+    """The one job allowed on a card at a time, from its mount to its unmount. A send lets it go
+    after its unmount and before its rescan: the rescan scans in worker threads, which take it
+    like any scan (re-entrancy only helps the thread that holds it). `busy` says whether any
     job holds it, for the callers that answer at once instead of waiting (the drawer's buttons)."""
 
     def __init__(self):

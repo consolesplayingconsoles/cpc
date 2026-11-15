@@ -5445,9 +5445,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                 "and the console may not read it" % (name, n.group(1)))
                 state["have"].add(name)
 
-            def finish():
+            def unmount():
                 if kind == "batocera":
-                    return rescan("batocera")
+                    return []
                 # ALWAYS unmount, whoever mounted it. Linux's exfat driver raises the volume's
                 # dirty flag when it mounts read-write and clears it on UNMOUNT -- a
                 # `remount,ro` flushes the data and leaves the flag up. Linux and macOS ignore
@@ -5455,10 +5455,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # booting off a card that read fine everywhere else. autofs mounts it again
                 # (read-only, per fstab) the next time anything touches the path.
                 rc, out = ssh_sh(host, self.SD_UMOUNT, "unmount", label)
-                lines = [l for l in out.splitlines() if l.strip()] if rc == 0 else \
-                        ["WARN could not unmount the card, so it may be left marked dirty: %s"
-                         % out.strip()[-200:]]
-                return lines + rescan(node, sd_nodes=self._catalogue_sd_nodes())
+                return [l for l in out.splitlines() if l.strip()] if rc == 0 else \
+                       ["WARN could not unmount the card, so it may be left marked dirty: %s"
+                        % out.strip()[-200:]]
+
+            def rescan_after():
+                if kind == "batocera":
+                    return rescan("batocera")
+                return rescan(node, sd_nodes=self._catalogue_sd_nodes())
+
+            def finish():
+                return unmount() + rescan_after()
 
             def check(local, name):
                 """A GDEMU write must read back exactly: the hub's card reader has written junk
@@ -5587,7 +5594,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # overlapping jobs made the first to finish pull it out from under the other, and wit then
             # found no card ("Can't create directory ... No such file").
             lock = catalogue.card_lock(label)
-            raw_mount, raw_finish = card["mount"], card["finish"]
+            raw_mount = card["mount"]
 
             def mount_locked():
                 if lock.busy and ctx_emit:
@@ -5600,10 +5607,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     raise
 
             def finish_locked():
+                # the card is let go once it is unmounted, BEFORE the rescan: the rescan scans in
+                # a thread pool, and its worker waiting for this lock (held by the send's thread)
+                # hung every SD/GDEMU send at its end, holding the card for good
                 try:
-                    return raw_finish()
+                    lines = unmount()
                 finally:
                     lock.release()
+                return lines + rescan_after()
             card["mount"], card["finish"] = mount_locked, finish_locked
         if kind != "local":
             card["remove"] = remove
