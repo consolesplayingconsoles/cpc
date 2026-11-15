@@ -573,6 +573,12 @@ def _is_decomp(name):
     return name.endswith("-decomp") or "disasm" in name
 
 
+def _kickoff(folder):
+    """Whether a decomp is a kick-off one (the dc-decomp-kickoff skill's layout): its KICKOFF file, or the
+    template's `disc` target. It is listed whoever committed last."""
+    return os.path.isfile(os.path.join(folder, "KICKOFF")) or _decomp_buildable(folder)
+
+
 def _mine(repo_root, folder):
     """Whether a decomp is ours: its last commit's author is this checkout's git user. Others'
     decomps (sonicretro's disassemblies) measure progress their own way, so they are not tracked."""
@@ -638,7 +644,7 @@ def discover(repo_root):
             for mod in _dirs(os.path.join(hb, "mods", game)):
                 folder = os.path.join(hb, "mods", game, mod)
                 if _is_decomp(mod):
-                    if _mine(repo_root, folder):           # only our own: others' are not tracked
+                    if _kickoff(folder) or _mine(repo_root, folder):   # a kick-off decomp, or our own; others' disassemblies are not tracked
                         items.append(_decomp_item(repo_root, node, game, mod, folder))
                     continue
                 if mod == "vanilla":
