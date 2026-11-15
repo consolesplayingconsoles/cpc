@@ -9,7 +9,7 @@
     {
       "id": "pi",
       "label": "Raspberry Pi",
-      "sources": ["gamepad", "kinect", "nokia", "keyboard"],
+      "sources": ["gamepad", "kinect", "nokia", "wiimote", "keyboard"],
       "targets": ["hid", "megadrive", "naomi"]
     }
   ]

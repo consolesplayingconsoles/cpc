@@ -49,7 +49,7 @@ function pickHost(h: string) {
 // ── SOURCE — the event producer, scoped to the host (config-driven, shown in full). ──
 const SOURCE_LABELS: Record<string, string> = {
   claude: 'Claude', google: 'Google', capture: 'Capture', keyboard: 'Keyboard only',
-  gamepad: 'Gaming Controller', kinect: 'Kinect', nokia: 'Nokia Phone', dreame: 'Dreame Cloud',
+  gamepad: 'Gaming Controller', kinect: 'Kinect', nokia: 'Nokia Phone', wiimote: 'Wii Remote', dreame: 'Dreame Cloud',
 }
 const sourceList = computed(() =>
   (curHost.value?.sources || [])
@@ -240,6 +240,13 @@ function setError(msg: string) {
   if (msg) errTimer = window.setTimeout(() => { controlError.value = '' }, 5000)
 }
 
+// A picker's width comes from its longest label (rendered invisibly, see .rail-sel-size),
+// not from the browser's own select sizing: some engines pad the selected text and clip
+// the end of the widest label.
+function widest(labels: string[]): string {
+  return labels.reduce((a, b) => (b.length > a.length ? b : a), '')
+}
+
 // Lab dev escape hatch: open this source's mapping folder in your IDE to edit schemes.
 function openMappingDir() {
   fetch(`${API}/config/open`, {
@@ -254,28 +261,40 @@ function openMappingDir() {
     <div class="control-head">
       <div class="rail">
         <label class="rail-ctl"><span>Host</span>
-          <select :value="host" @change="pickHost(($event.target as HTMLSelectElement).value)">
-            <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.label }}</option>
-          </select>
+          <span class="rail-sel">
+            <select :value="host" @change="pickHost(($event.target as HTMLSelectElement).value)">
+              <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.label }}</option>
+            </select>
+            <span class="rail-sel-size" aria-hidden="true">{{ widest(hosts.map(h => h.label)) }}</span>
+          </span>
         </label>
         <span class="rail-arrow" aria-hidden="true">›</span>
         <label class="rail-ctl"><span>Source</span>
-          <select :value="source" @change="pick('source', ($event.target as HTMLSelectElement).value)">
-            <option v-for="s in sourceList" :key="s.id" :value="s.id">{{ s.label }}</option>
-          </select>
+          <span class="rail-sel">
+            <select :value="source" @change="pick('source', ($event.target as HTMLSelectElement).value)">
+              <option v-for="s in sourceList" :key="s.id" :value="s.id">{{ s.label }}</option>
+            </select>
+            <span class="rail-sel-size" aria-hidden="true">{{ widest(sourceList.map(s => s.label)) }}</span>
+          </span>
         </label>
         <span class="rail-arrow" aria-hidden="true">›</span>
         <label class="rail-ctl" :class="{ off: !source }"><span>Target</span>
-          <select :value="effTarget" :disabled="!source" @change="pick('target', ($event.target as HTMLSelectElement).value)">
-            <option v-for="t in targetOptions" :key="t.id" :value="t.id">{{ t.label }}</option>
-          </select>
+          <span class="rail-sel">
+            <select :value="effTarget" :disabled="!source" @change="pick('target', ($event.target as HTMLSelectElement).value)">
+              <option v-for="t in targetOptions" :key="t.id" :value="t.id">{{ t.label }}</option>
+            </select>
+            <span class="rail-sel-size" aria-hidden="true">{{ widest(targetOptions.map(t => t.label)) }}</span>
+          </span>
         </label>
         <span class="rail-arrow" aria-hidden="true">›</span>
         <label class="rail-ctl" :class="{ off: !source || !visibleMappings.length }"><span>Mapping</span>
-          <select :value="effMapping" :disabled="!source || !visibleMappings.length" @change="pick('mapping', ($event.target as HTMLSelectElement).value)">
-            <option v-if="!visibleMappings.length" value="">-</option>
-            <option v-for="m in visibleMappings" :key="m" :value="m">{{ m }}</option>
-          </select>
+          <span class="rail-sel">
+            <select :value="effMapping" :disabled="!source || !visibleMappings.length" @change="pick('mapping', ($event.target as HTMLSelectElement).value)">
+              <option v-if="!visibleMappings.length" value="">-</option>
+              <option v-for="m in visibleMappings" :key="m" :value="m">{{ m }}</option>
+            </select>
+            <span class="rail-sel-size" aria-hidden="true">{{ widest(visibleMappings) }}</span>
+          </span>
         </label>
         <button v-if="isLab && source" class="rail-icon" title="Open this source's mapping folder in your disk" @click="openMappingDir">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -314,7 +333,23 @@ function openMappingDir() {
 .rail-ctl { display: flex; align-items: center; gap: 7px; font-family: var(--font-sans); font-size: 12px; color: var(--text-muted); flex-wrap: nowrap; }
 .rail-ctl > span { font-weight: 600; letter-spacing: 0.02em; min-width: fit-content; }
 .rail-ctl.off { opacity: 0.5; }
-.rail-ctl select { font-family: var(--font-sans); font-size: 12.5px; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; cursor: pointer; }
+/* Each picker is sized by an invisible copy of its longest label stacked under the select,
+   plus 12px slack for engines that pad the selected text; the select just fills that width. */
+.rail-sel { display: inline-grid; }
+.rail-sel > * { grid-area: 1 / 1; }
+.rail-sel > select { width: 100%; min-width: 0; }
+.rail-sel-size { visibility: hidden; height: 0; overflow: hidden; white-space: nowrap; pointer-events: none; font-family: var(--font-sans); font-size: 12.5px; padding: 0 44px 0 12px; }
+/* The browser's own arrow sits against the edge, so it is replaced by the chevron UiSelect uses (12px in, both themes). */
+.rail-ctl select {
+  font-family: var(--font-sans); font-size: 12.5px; color: var(--text); background-color: var(--surface-2);
+  border: 1px solid var(--line); border-radius: 6px; padding: 5px 32px 5px 8px; cursor: pointer;
+  appearance: none; -webkit-appearance: none;
+  background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 12px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23565d6e' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+:global(:root[data-theme="dark"]) .rail-ctl select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23bcc3d0' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
 .rail-ctl select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .rail-arrow { color: var(--text-faint); font-size: 14px; flex-shrink: 0; }
 /* config icon sits right after Mapping — it opens that mapping's folder. */

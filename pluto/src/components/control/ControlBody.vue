@@ -6,6 +6,7 @@ import GoogleControl from './GoogleControl.vue'
 import CaptureControl from './CaptureControl.vue'
 import KinectControl from './KinectControl.vue'
 import NokiaControl from './NokiaControl.vue'
+import WiimoteControl from './WiimoteControl.vue'
 import GamepadControl from './GamepadControl.vue'
 import ControlLayout from './ControlLayout.vue'
 
@@ -52,6 +53,10 @@ defineEmits<{ 'drive-error': [string] }>()
     :target-dev="targetDev"
     @drive-error="$emit('drive-error', $event)" />
   <NokiaControl v-else-if="source === 'nokia'" :key="source"
+    :active="active" :nodes="nodes" :target="target" :mapping="mapping"
+    :target-dev="targetDev" :roomba-ip="roombaIp"
+    @drive-error="$emit('drive-error', $event)" />
+  <WiimoteControl v-else-if="source === 'wiimote'" :key="source"
     :active="active" :nodes="nodes" :target="target" :mapping="mapping"
     :target-dev="targetDev" :roomba-ip="roombaIp"
     @drive-error="$emit('drive-error', $event)" />

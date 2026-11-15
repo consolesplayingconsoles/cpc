@@ -1001,6 +1001,21 @@ def serve(cfg):
     else:
         print("  nokia disabled (no NOKIA_ENGINE_PORT in .env)")
 
+    # Wii Remote: pairing + status over Bluetooth (BlueZ + the kernel hid-wiimote
+    # driver). Owns the link only; reading the remote's IR/buttons is a later stage.
+    # On-demand via its HTTP endpoint; Pluto's WiimoteControl drives pair/stop.
+    wiimote_port = (cfg.get("WIIMOTE_ENGINE_PORT") or "").strip()
+    wiimote = None
+    if wiimote_port:
+        from bridges.wiimote import WiimoteBridge
+        wiimote = WiimoteBridge(int(wiimote_port), cfg)
+        if wiimote.start():
+            print("  wiimote engine up -- :%s" % wiimote_port)
+        else:
+            print("  wiimote engine disabled (bluetoothctl missing)")
+    else:
+        print("  wiimote disabled (no WIIMOTE_ENGINE_PORT in .env)")
+
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)   # quick restart, no TIME_WAIT stall
     srv.bind(("0.0.0.0", port))
