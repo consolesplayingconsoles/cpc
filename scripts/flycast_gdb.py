@@ -3,6 +3,7 @@
 
     python3 scripts/flycast_gdb.py sample <seconds> <every> <out.json>   stop, read the registers, continue, repeatedly
     python3 scripts/flycast_gdb.py mem <hex address> <length>           read memory (the CPU stops for it)
+    python3 scripts/flycast_gdb.py write <hex address> <hex bytes>      write those bytes (memory order), the CPU stopped for it
     python3 scripts/flycast_gdb.py dump <hex address> <hex length> <out>     save that much memory to a file (video memory too:
                                                                         A5000000, 8 MB = 800000), then let the game run
     python3 scripts/flycast_gdb.py hook <seconds> <hex address>[=name] ...   count the calls of each address by caller (pr) and r4 (when small),
@@ -90,6 +91,8 @@ def main():
     elif a[0]=='bp':      # bp <seconds> <out.json> <hex address> [...]: stop at each address (software breakpoints), log the registers, continue
         dur,out=float(a[1]),a[2]; rest=a[3:]; after=0.0; rows=[]
         game=None
+        halt=None
+        if rest[:1]==['--halt']: halt=rest[1]; rest=rest[2:]      # --halt <out prefix>: at the first hit save every register and the RAM (as snap does), leave the CPU stopped
         if rest[:1]==['--after']: after=float(rest[1]); rest=rest[2:]
         if rest[:1]==['--in']: game=(int(rest[1],16),int(rest[2],16)); rest=rest[3:]
         addrs=[int(x,16) for x in rest]
@@ -109,6 +112,13 @@ def main():
                 g=r.regs()
                 if g:
                     rows.append({'t':round(time.time()-t0,2),**g})
+                    if halt and g['pc'] in addrs:
+                        full=r.cmd('g'); ram=bytearray()
+                        for k in range(0,0x1000000,0x800):
+                            h=r.cmd('m%X,800'%(0x8C000000+k),30)
+                            ram+=bytes.fromhex(h) if h and not h.startswith('E') else b'\0'*0x800
+                        open(halt+'.ram','wb').write(ram); json.dump({'t':round(time.time()-t0,2),'g':full,**g},open(halt+'.json','w'))
+                        print('halted at %.2f s: pc %08X pr %08X r15 %08X'%(time.time()-t0,g['pc'],g['pr'],g['r'][15])); r.bp_clear(); return
                     if g['pc'] in addrs: r.bp_del(g['pc']); addrs.remove(g['pc'])     # once each: continuing over a breakpoint in place hits it again at once, forever
                 r.send('c')
             elif st:
@@ -164,6 +174,10 @@ def main():
         r.send('c')
     elif a[0]=='mem':
         print(r.cmd('m%s,%s'%(a[1],a[2])))
+        r.send('c')
+    elif a[0]=='write':   # write <hex address> <hex bytes>: the CPU stopped, the bytes written as given (memory order), then the game runs on
+        r.stop()                                   # further <address> <bytes> pairs go in the same stop
+        for k in range(1,len(a)-1,2): print(r.cmd('M%X,%X:%s'%(int(a[k],16),len(a[k+1])//2,a[k+1])))
         r.send('c')
     elif a[0]=='watch':   # watch <seconds> <out.json> <hex address>: a write watchpoint (Z2) on one word; log each write (pc, pr, the word
         dur,out,ad=float(a[1]),a[2],int(a[3],16); rows=[]     # after it), continue; stop at the first nonzero word (the start-up clear writes 0)
