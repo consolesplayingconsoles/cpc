@@ -574,8 +574,10 @@ def menu_ini_location(gdi_text, read_track):
     """Where OPENMENU.INI sits in a GDEMU menu image.
 
     gdi_text = 01's disc.gdi; read_track(file, offset, length) -> bytes from that track file.
-    -> {file, offset, length, room, record: (file, offset)} -- the INI's bytes, how many it may
-    grow to without touching the next file on the disc, and its directory record."""
+    -> {file, offset, length, room, record: (file, offset), last, end: (file, offset, lba)} -- the
+    INI's bytes, how many it may grow to without touching the next file on the disc, its directory
+    record, whether it is the last file on the disc (then it may grow where it is), and the first
+    sector after every file (where a list that outgrew its room goes: write_openmenu_ini)."""
     tracks = []
     for line in gdi_text.splitlines()[1:]:
         parts = line.split()
@@ -605,11 +607,45 @@ def menu_ini_location(gdi_text, read_track):
     if not ini:
         raise ValueError("01 has no OPENMENU.INI: is it openMenu?")
     _, lba, length, _, dlba, doff = ini[0]
-    after = [e[1] for e in entries if e[1] > lba] + [lba + (length + 2047) // 2048]
+    later = [e[1] for e in entries if e[1] > lba]
+    after = later + [lba + (length + 2047) // 2048]
     f, off = where(lba)
     rf, roff = where(dlba)
+    root_lba, root_len = int.from_bytes(root[2:6], "little"), int.from_bytes(root[10:14], "little")
+    end = max([root_lba + (root_len + 2047) // 2048] + [e[1] + (e[2] + 2047) // 2048 for e in entries])
+    ef, eoff = where(end)
     return {"file": f, "offset": off, "length": length, "room": (min(after) - lba) * 2048,
-            "record": (rf, roff + doff)}
+            "record": (rf, roff + doff), "last": not later, "end": (ef, eoff, end)}
+
+
+def write_openmenu_ini(card, loc, ini):
+    """Write openMenu's list (OPENMENU.INI's new bytes) into 01's image; loc = menu_ini_location's
+    answer. While it fits the room it has, in place. Past that it no longer needs another tool to
+    rebuild the menu: the last file on the disc grows where it is, and any other moves to the
+    first sector after every file (the track file gets longer), its directory record repointed
+    after the bytes are on the card. Read back from the card either way."""
+    name = GDEMU_MENU + "/" + loc["file"]
+    rf, roff = loc["record"]
+    size = len(ini).to_bytes(4, "little") + len(ini).to_bytes(4, "big")
+    if len(ini) <= loc["room"]:
+        # the INI's bytes (zero-filled to the old length), then its directory record's size
+        card["patch"](name, loc["offset"], ini + bytes(max(0, loc["length"] - len(ini))))
+        card["patch"](GDEMU_MENU + "/" + rf, roff + 10, size)
+        at = (name, loc["offset"])
+    else:
+        data = ini + bytes(-len(ini) % 2048)          # whole sectors
+        if loc["last"]:
+            at = (name, loc["offset"])
+            card["patch"](at[0], at[1], data)
+            card["patch"](GDEMU_MENU + "/" + rf, roff + 10, size)
+        else:
+            ef, eoff, lba = loc["end"]
+            at = (GDEMU_MENU + "/" + ef, eoff)
+            card["patch"](at[0], at[1], data)
+            card["patch"](GDEMU_MENU + "/" + rf, roff + 2,
+                          lba.to_bytes(4, "little") + lba.to_bytes(4, "big") + size)
+    if card["read"](at[0], at[1], len(ini)) != ini:
+        raise NotAvailable("openMenu's list did not read back as written: the card may be failing")
 
 
 def card_slot_fields(read, exists, slot):
@@ -726,16 +762,7 @@ def _gdemu_locked(p, ctx, card, lines, emit):
                     new[s] = card_slot_fields(card["read"], card["exists"], s)
                     emit("slot %02d was missing from openMenu's list: added from its disc header" % s)
             ini = openmenu_ini({s: new.get(s) or items[s] for s in slots}).encode("latin-1", "replace")
-            if len(ini) > loc["room"]:
-                raise NotAvailable("openMenu's list needs %d bytes but the menu disc has room for %d: "
-                                   "rebuild the menu with GDMENUCardManager" % (len(ini), loc["room"]))
-            # the INI's bytes (zero-filled to the old length), then its directory record's size
-            card["patch"](GDEMU_MENU + "/" + loc["file"], loc["offset"], ini + bytes(max(0, loc["length"] - len(ini))))
-            rf, roff = loc["record"]
-            card["patch"](GDEMU_MENU + "/" + rf, roff + 10, len(ini).to_bytes(4, "little") + len(ini).to_bytes(4, "big"))
-            back = card["read"](GDEMU_MENU + "/" + loc["file"], loc["offset"], len(ini))
-            if back != ini:
-                raise NotAvailable("openMenu's list did not read back as written: the card may be failing")
+            write_openmenu_ini(card, loc, ini)
             emit("openMenu list rebuilt: %d items" % len(slots))
     finally:
         for line in card["finish"]():
@@ -839,14 +866,7 @@ def _repair_locked(card, emit, drop=()):
             fields = {s: items[s] if s == int(GDEMU_MENU) and s in items else
                       card_slot_fields(card["read"], card["exists"], s) for s in slots}
             ini = openmenu_ini(fields).encode("latin-1", "replace")
-            if len(ini) > loc["room"]:
-                raise NotAvailable("openMenu's list needs %d bytes but the menu disc has room for %d: "
-                                   "rebuild the menu with GDMENUCardManager" % (len(ini), loc["room"]))
-            card["patch"](GDEMU_MENU + "/" + loc["file"], loc["offset"], ini + bytes(max(0, loc["length"] - len(ini))))
-            rf, roff = loc["record"]
-            card["patch"](GDEMU_MENU + "/" + rf, roff + 10, len(ini).to_bytes(4, "little") + len(ini).to_bytes(4, "big"))
-            if card["read"](GDEMU_MENU + "/" + loc["file"], loc["offset"], len(ini)) != ini:
-                raise NotAvailable("openMenu's list did not read back as written: the card may be failing")
+            write_openmenu_ini(card, loc, ini)
             for s in slots[1:]:
                 emit("%02d  %s" % (s, fields[s].get("name", "")))
             emit("openMenu list rebuilt: %d items" % len(slots))

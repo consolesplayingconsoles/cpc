@@ -1598,6 +1598,108 @@ def test_gdemu_openmenu_ini_round_trips_card_managers_layout():
     assert send.openmenu_ini(send.parse_openmenu_ini(text)) == text
 
 
+def _menu_card(files):
+    """A GDEMU card holding only slot 01, in memory: its track03.bin is a small ISO9660 image at
+    LBA 45000 (the PVD at +16, the root directory at +20, then each of `files` (name, bytes) in
+    order, a sector apart from the next). -> the card's words the list writer uses, and its files."""
+    hd, sect = 45000, lambda n: (n + 2047) // 2048
+    recs, lba, body = [], hd + 21, b""
+    for name, data in files:
+        ident = (name + ";1").encode("ascii")
+        rec = bytearray(33 + len(ident) + (33 + len(ident)) % 2)
+        rec[0] = len(rec)
+        rec[2:6], rec[6:10] = lba.to_bytes(4, "little"), lba.to_bytes(4, "big")
+        rec[10:14], rec[14:18] = len(data).to_bytes(4, "little"), len(data).to_bytes(4, "big")
+        rec[32] = len(ident)
+        rec[33:33 + len(ident)] = ident
+        recs.append(bytes(rec))
+        body += data + bytes(-len(data) % 2048)
+        lba += sect(len(data))
+    root = b"".join(recs)
+    pvd = bytearray(2048)
+    pvd[1:6] = b"CD001"
+    pvd[156 + 2:156 + 6] = (hd + 20).to_bytes(4, "little")
+    pvd[156 + 10:156 + 14] = len(root).to_bytes(4, "little")
+    track = bytearray(bytes(16 * 2048) + bytes(pvd) + bytes(3 * 2048) + root + bytes(2048 - len(root)) + body)
+    disk = {"01/disc.gdi": bytearray(b"3\n1 0 4 2352 track01.bin 0\n2 756 0 2352 track02.raw 0\n3 45000 4 2048 track03.bin 0\n"),
+            "01/track03.bin": track}
+
+    def patch(name, offset, data):
+        f = disk[name]
+        if offset + len(data) > len(f):
+            f.extend(bytes(offset + len(data) - len(f)))
+        f[offset:offset + len(data)] = data
+    card = {"read": lambda name, offset, length: bytes(disk[name][offset:offset + length]), "patch": patch}
+    return card, disk
+
+
+def _menu_loc(card, disk):
+    return send.menu_ini_location(disk["01/disc.gdi"].decode("ascii"), lambda f, o, n: card["read"]("01/" + f, o, n))
+
+
+def _menu_list(card, disk):
+    """The list openMenu would read: OPENMENU.INI by its directory record, as the disc says now."""
+    loc = _menu_loc(card, disk)
+    return card["read"]("01/" + loc["file"], loc["offset"], loc["length"])
+
+
+def test_gdemu_menu_list_that_fits_is_written_in_place():
+    card, disk = _menu_card([("OPENMENU.INI", b"old list\n"), ("1ST_READ.BIN", b"B" * 5000)])
+    loc = _menu_loc(card, disk)
+    assert (loc["room"], loc["last"]) == (2048, False), loc
+    size = len(disk["01/track03.bin"])
+    send.write_openmenu_ini(card, loc, b"n" * 2048)                      # exactly its room
+    assert _menu_list(card, disk) == b"n" * 2048
+    assert _menu_loc(card, disk)["offset"] == loc["offset"] and len(disk["01/track03.bin"]) == size
+    send.write_openmenu_ini(card, _menu_loc(card, disk), b"short\n")     # shorter: the old bytes are zeroed
+    assert _menu_list(card, disk) == b"short\n"
+    assert card["read"]("01/track03.bin", loc["offset"] + 6, 2042) == bytes(2042)
+
+
+def test_gdemu_menu_list_that_outgrew_its_room_moves_past_the_last_file():
+    """16 games made a 2131-byte list and the menu disc had one 2048-byte sector for it: the send used
+    to stop and point at GDMENUCardManager. The list moves to the first sector after every file,
+    the file after it is not touched, and the directory record follows."""
+    boot = bytes(range(256)) * 20
+    card, disk = _menu_card([("OPENMENU.INI", b"old list\n"), ("1ST_READ.BIN", boot)])
+    loc = _menu_loc(card, disk)
+    ini = b"x" * 2131
+    send.write_openmenu_ini(card, loc, ini)
+    now = _menu_loc(card, disk)
+    assert _menu_list(card, disk) == ini
+    assert now["offset"] == loc["end"][1] and now["length"] == 2131 and now["last"], now
+    assert len(disk["01/track03.bin"]) == now["offset"] + 4096           # whole sectors
+    rec = card["read"]("01/track03.bin", now["record"][1], 18)
+    assert rec[2:6] == loc["end"][2].to_bytes(4, "little") and rec[6:10] == loc["end"][2].to_bytes(4, "big")
+    assert rec[10:14] == (2131).to_bytes(4, "little") and rec[14:18] == (2131).to_bytes(4, "big")
+    assert card["read"]("01/track03.bin", 22 * 2048, len(boot)) == boot   # 1ST_READ.BIN as it was
+
+
+def test_gdemu_menu_list_that_is_the_last_file_grows_where_it_is():
+    """Once moved, the list is the last file: the next send that needs more room makes it longer in
+    place instead of leaving another copy behind it."""
+    card, disk = _menu_card([("1ST_READ.BIN", b"B" * 5000), ("OPENMENU.INI", b"old list\n")])
+    loc = _menu_loc(card, disk)
+    assert loc["last"] and loc["room"] == 2048, loc
+    ini = b"y" * 6000
+    send.write_openmenu_ini(card, loc, ini)
+    now = _menu_loc(card, disk)
+    assert _menu_list(card, disk) == ini and now["offset"] == loc["offset"] and now["room"] == 6144, now
+    assert card["read"]("01/track03.bin", 21 * 2048, 5000) == b"B" * 5000
+
+
+def test_gdemu_menu_list_that_reads_back_wrong_is_an_error():
+    card, disk = _menu_card([("OPENMENU.INI", b"old list\n"), ("1ST_READ.BIN", b"B" * 100)])
+    loc = _menu_loc(card, disk)
+    card["patch"] = lambda name, offset, data: None                      # a card that takes the write and keeps nothing
+    try:
+        send.write_openmenu_ini(card, loc, b"z" * 3000)
+    except send.NotAvailable as exc:
+        assert "did not read back" in str(exc)
+    else:
+        raise AssertionError("a list that did not reach the card must fail the send")
+
+
 def test_gdemu_gdi_renames_tracks_and_drops_quotes():
     gdi = '3\r\n1 0 4 2352 "My Game (Track 1).bin" 0\r\n2 600 0 2352 "My Game (Track 2).raw" 0\r\n3 45000 4 2352 "My Game (Track 3).bin" 0\r\n'
     text, rename = send.gdemu_gdi(gdi, send.disc_tracks(gdi, ".gdi"))

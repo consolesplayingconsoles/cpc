@@ -5369,6 +5369,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     # default) -- the copy died on "Read-only file system". After remounting,
                     # PROVE the folder is writable instead of trusting it.
                     rc, out = ssh_sh(host, r"""D=/dev/disk/by-label/$(printf %s "$1" | sed 's/ /\\x20/g'); [ -e "$D" ] || { echo "no card labelled $1 in the hub"; exit 2; }; """
+                                           # the label can outlive the card: a card pulled out while mounted leaves its
+                                           # device and mount behind, with the file names still listed from memory
+                                           'sudo blockdev --getsize64 "$D" >/dev/null 2>&1 '
+                                           '|| { echo "the card labelled $1 is no longer in the hub\'s reader"; exit 2; }; '
                                            'ls "$2" >/dev/null 2>&1; '
                                            'if mountpoint -q "$2"; then sudo mount -o remount,rw "$2" >/dev/null 2>&1; echo reused; '
                                            'else sudo mkdir -p "$2" && sudo mount "$D" "$2" && echo mounted; fi; '
@@ -5378,7 +5382,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                            'df -k --output=avail "$2" | tail -1 | tr -d " "; '
                                            # every copy already on the card, top level and inside the
                                            # kind/range folders, named the way a send names them
-                                           'cd "$3" && find . -maxdepth 3 -type f -printf "%P\n"',
+                                           'cd "$3" && find . -maxdepth 3 -type f -printf "%P\n" 2>/dev/null '
+                                           # a listing that fails says so: its last line used to be shown as the error,
+                                           # and that line was the last file name it had printed
+                                           '|| { echo "could not list the files on the $1 card: it may be failing or half out of the reader"; exit 5; }',
                                            label, mnt, base)
                 else:
                     rc, out = ssh_sh(host, 'mkdir -p "$1" && echo reused && ls -1 "$1"', base)
@@ -5498,8 +5505,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return base64.b64decode(out.strip())
 
             def patch(name, offset, data):
-                """Overwrite bytes in place in a file on the card (never extends it), then read them
-                back from the card itself."""
+                """Overwrite bytes in place in a file on the card, then read them back from the card
+                itself. An offset at the file's end makes it longer (openMenu's list moved past the
+                menu disc's last file: send.write_openmenu_ini)."""
                 with tempfile.TemporaryFile() as tf:
                     tf.write(data)
                     tf.seek(0)

@@ -145,7 +145,8 @@ function nativeAction(action: string, body?: object) {
     .then(r => r.json())
     .then(j => {
       const lines: string[] = Array.isArray(j?.lines) ? j.lines : []
-      if (j?.error) lines.push('ERROR ' + j.error)
+      // the API already puts its "ERROR ..." line in `lines` for some actions: once is enough
+      if (j?.error && !lines.includes('ERROR ' + j.error)) lines.push('ERROR ' + j.error)
       if (!lines.length) lines.push(j?.ok ? 'done' : 'failed')
       nativeNote.value = j?.error || (j?.ok ? '' : 'failed')
       emit('native-run', { action, title, lines, ok: !!j?.ok, startedAt })
@@ -190,7 +191,8 @@ function serviceOp(svc: Svc, op: 'start' | 'stop' | 'restart') {
     .then(r => r.json())
     .then(j => {
       const lines: string[] = Array.isArray(j?.lines) ? j.lines : []
-      if (j?.error) lines.push('ERROR ' + j.error)
+      // the API already puts its "ERROR ..." line in `lines` for some actions: once is enough
+      if (j?.error && !lines.includes('ERROR ' + j.error)) lines.push('ERROR ' + j.error)
       if (j?.state) svc.state = j.state
       emit('native-run', { action: op + '-' + svc.id, title, lines, ok: !!j?.ok, startedAt })
     })
