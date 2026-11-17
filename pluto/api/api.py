@@ -4364,7 +4364,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # alike); a catalogue match is not required. A CATALOGUE only enriches Media.
             it["favourite"] = it["id"] in favs              # starred: pinned on top of the list
             system = it.get("system")
-            if system:
+            if it.get("recomp"):                            # a program for this computer: nothing to send to a console
+                it["sendTargets"] = []
+            elif system:
                 if system not in by_system:
                     by_system[system] = self._homebrew_targets(system)
                 it["sendTargets"] = by_system[system]
@@ -4413,6 +4415,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         item = homebrew.find(self._repo_root(), item_id)
         if not item:
             self._send(404, {"error": "no such homebrew item"}); return
+        if item.get("recomp"):
+            self._send(*self._launch_recomp(item)); return
         out = homebrew.last_output(item["id"])
         if not out:
             self._send(400, {"error": "nothing built yet: run Build first"}); return
@@ -4420,6 +4424,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not system:
             self._send(400, {"error": "no system for this item, so its emulator is unknown"}); return
         self._send(*self._launch_desktop(system, out["path"], (item.get("game") or {}).get("key") or ""))
+
+    def _launch_recomp(self, item):
+        """Play a recomp: its run.sh, in its folder, detached (the port opens its own window). The
+        disc image and the program come from the repository's own gitignored .env, so nothing is
+        passed in from here. (status, body)."""
+        folder = os.path.join(self._repo_root(), item["path"])
+        if not os.path.isfile(os.path.join(folder, "run.sh")):
+            return 400, {"error": "no run.sh in %s" % item["path"]}
+        if not os.path.isfile(os.path.join(folder, ".env")):
+            return 400, {"error": "no .env in %s: copy .env.sample to .env and set DISC" % item["path"]}
+        log = os.path.join(self.__class__.base_dir, "logs", "recomp-%s.log" % item["name"])
+        os.makedirs(os.path.dirname(log), exist_ok=True)
+        with open(log, "ab") as out:
+            subprocess.Popen(["bash", "run.sh"], cwd=folder, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                             start_new_session=True)
+        return 200, {"started": item["id"], "log": log}
 
     def _homebrew_script(self, item, action, emit):
         """Run build.sh / deploy.sh, streaming output. ##STEP: -> step, ##OUTPUT: -> recorded.

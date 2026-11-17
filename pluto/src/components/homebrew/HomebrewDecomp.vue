@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// A decomp's (or disassembly's) progress, in the Decomp / Disasm tab: what the project's
+// A decomp's (or disassembly's) progress, in the Disasm / Decomp / Recomp tab: what the project's
 // tools/progress.py prints. The item names itself as its decomp, and GET /homebrew/decomp
 // answers with that printout, cached by the API until the decomp's commit changes. The printout has one layout across projects (a heading per section,
 // then rows of label, percentage or "-", detail), so it is drawn as a table with a bar on each

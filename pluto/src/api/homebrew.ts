@@ -95,6 +95,8 @@ export interface HomebrewItem {
   favourite: boolean                // starred: pinned on top of the list (catalogue/favourites.json)
   decomp: string | null             // config.json's decomp: the folder name of what it is built on (its sibling)
   hasProgress?: boolean             // a decomp item only: its folder has tools/progress.py
+  flavour?: 'decomp' | 'disasm' | 'recomp'   // a Disasm / Decomp / Recomp tab item: which of the three it is
+  recomp?: boolean                  // a recomp (a program for this computer): Build makes it, Play runs it, nothing is sent
 }
 
 async function json<T>(res: Response): Promise<T> {

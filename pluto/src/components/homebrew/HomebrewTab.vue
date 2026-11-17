@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The Homebrew tab: projects the /homebrew API discovers under nodes/local/<node>/homebrew,
-// split into Mods / Ports / Games / Tools sub-tabs, plus Decomp / Disasm: our own decomps and
+// split into Mods / Ports / Games / Tools sub-tabs, plus Disasm / Decomp / Recomp: our own decomps and
 // disassemblies next to a game's mods, mod or no mod, with how far along each is. Sub-tab and item ride the URL
 // (/homebrew/mods/<node>/<game>/<mod>, /homebrew/games/<node>/<name>) so a reload keeps
 // them. No polling: the list loads when the tab is first shown and on Refresh.
@@ -35,7 +35,7 @@ const KINDS: { kind: HomebrewKind; label: string }[] = [
   { kind: 'ports', label: 'Ports' },
   { kind: 'games', label: 'Games' },
   { kind: 'tools', label: 'Tools' },
-  { kind: 'decomps', label: 'Decomp / Disasm' },
+  { kind: 'decomps', label: 'Disasm / Decomp / Recomp' },
 ]
 const kind = computed<HomebrewKind>(() => {
   const k = route.name === 'homebrew' ? route.params.kind : undefined
@@ -250,6 +250,11 @@ async function save(): Promise<boolean> {
 // are timed apart, since a send adds the copy to the console.
 const { durations: lastRuns, remember: rememberRun } = useRunDurations('cpc.homebrew.lastMs')
 const runKey = (itemId: string, node?: string | null) => itemId + ':' + (node || 'build')
+const FLAVOUR_TITLE: Record<string, string> = {
+  decomp: 'Decomp: C that rebuilds the game',
+  disasm: 'Disassembly: assembly that rebuilds the game',
+  recomp: 'Recomp: the game translated into a program for this computer',
+}
 
 const { openRun } = useRuns()
 // What may run side by side. The API refuses the SAME item twice and nothing else, so the page
@@ -384,7 +389,7 @@ const EMPTY: Record<HomebrewKind, string> = {
   games: 'No games found. A game is a folder with build.sh at nodes/local/<node>/homebrew/games/<game>/.',
   tools: 'No tools found. A tool is a folder with build.sh at nodes/local/<node>/homebrew/tools/<tool>/.',
   ports: 'No ports found. A port is a folder with build.sh at nodes/local/<node>/homebrew/ports/<game>/<port>/, converting a game from another system to this one.',
-  decomps: 'No decomps found. A decomp or disassembly is a folder named <game>-decomp or ...disasm at nodes/local/<node>/homebrew/mods/<game>/ whose last commit is yours; its tools/progress.py gives its levels.',
+  decomps: 'No disasms, decomps or recomps found. A disassembly, decomp or recomp is a folder named ...disasm, <game>-decomp or <game>-recomp at nodes/local/<node>/homebrew/mods/<game>/ whose last commit is yours; its tools/progress.py gives its levels.',
 }
 
 // Up in Favourites there is no group heading, so a port's row carries the conversion there.
@@ -490,6 +495,9 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
               <span class="hb__row-title">{{ it.kind === 'ports' && it.game ? it.game.title + ': ' + it.title : it.title }}</span>
               <!-- a decomp has no release: it only says when there is no progress report to show -->
               <template v-if="it.kind === 'decomps'">
+                <!-- which of the three it is: a decomp (C that rebuilds the game), a disassembly (assembly that does) or a
+                     recomp (the game's code translated into a program for this computer) -->
+                <UiPill :tone="it.flavour === 'recomp' ? 'accent' : 'idle'" :title="FLAVOUR_TITLE[it.flavour ?? 'decomp']">{{ it.flavour ?? 'decomp' }}</UiPill>
                 <UiPill v-if="metrics[it.id]" :style="progressStyle(metrics[it.id].pct)" :title="'Main metric: ' + metrics[it.id].label">{{ metrics[it.id].pct }}</UiPill>
                 <UiPill v-else-if="!it.hasProgress" tone="idle" title="No tools/progress.py">No report</UiPill>
               </template>

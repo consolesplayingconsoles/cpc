@@ -569,8 +569,9 @@ def _item(repo_root, node, kind, group, name, folder):
 
 
 def _is_decomp(name):
-    """A decomp or disassembly folder next to a game's mods: <game>-decomp, s1disasm, dbzbr-disasm."""
-    return name.endswith("-decomp") or "disasm" in name
+    """A decomp, disassembly or recomp folder next to a game's mods: <game>-decomp, s1disasm, dbzbr-disasm,
+    <game>-recomp (a static recompilation: a game repository of the satrecomp / cps2recomp kind)."""
+    return name.endswith("-decomp") or name.endswith("-recomp") or "disasm" in name
 
 
 def _kickoff(folder):
@@ -592,15 +593,28 @@ def _mine(repo_root, folder):
     return bool(me) and git("log", "-1", "--format=%ae", cwd=folder) == me
 
 
+def _is_recomp(name):
+    return name.endswith("-recomp")
+
+
+def _recomp_buildable(folder):
+    """Whether a recomp can build and run: its own build.sh (what Build runs) and run.sh (what Play runs)."""
+    return os.path.isfile(os.path.join(folder, "build.sh")) and os.path.isfile(os.path.join(folder, "run.sh"))
+
+
 def _decomp_item(repo_root, node, game, name, folder):
-    """A decomp or disassembly as an item of its own (the Decomp / Disasm sub-tab), mod or no mod:
+    """A disassembly, decomp or recomp as an item of its own (the Disasm / Decomp / Recomp sub-tab), mod or no mod:
     its levels, and a Build (then Send) when it can make a disc (_decomp_buildable): the game built
     from the decomp's C, put into a copy of the player's own disc. Nothing to release. It names itself
     as its decomp, so the detail asks /homebrew/decomp for its own folder."""
     it = _item(repo_root, node, "decomps", game, name, folder)
-    buildable = _decomp_buildable(folder)
-    it.update(actions=["build"] if buildable else [], release=None, noRelease=None,
-              decomp=name, hasProgress=os.path.isfile(os.path.join(folder, "tools", "progress.py")))
+    recomp = _is_recomp(name)
+    buildable = _recomp_buildable(folder) if recomp else _decomp_buildable(folder)
+    # (a recomp's actions are the scripts it has, as for any other item: its build.sh)
+    it.update(actions=it["actions"] if recomp else ["build"] if buildable else [], release=None, noRelease=None,
+              flavour="recomp" if recomp else "disasm" if "disasm" in name else "decomp",
+              decomp=name, hasProgress=os.path.isfile(os.path.join(folder, "tools", "progress.py")),
+              recomp=recomp)
     if not buildable:
         it.update(params=[], paramsPaths=[], output=None)
     return it
@@ -712,14 +726,14 @@ def _write_env(env_path, values):
 def start(repo_root, item, action):
     """Start an action; returns the Popen (stdout = merged output) or raises RuntimeError."""
     if action not in item["actions"]:
-        raise RuntimeError("no %s for %s" % ("build (no disc target in its Makefile)" if item["kind"] == "decomps" else action + ".sh", item["id"]))
+        raise RuntimeError("no %s for %s" % (("build (a recomp needs build.sh and run.sh)" if item.get("recomp") else "build (no disc target in its Makefile)") if item["kind"] == "decomps" else action + ".sh", item["id"]))
     folder = os.path.join(repo_root, item["path"])
     env = os.environ.copy()
     env["PATH"] = "/usr/local/bin:/opt/homebrew/bin:" + env.get("PATH", "")   # docker/colima when launched outside a login shell
     env["PYTHONUNBUFFERED"] = "1"
     if is_running(item["id"]):
         raise RuntimeError("%s is already running" % item["id"])
-    if item["kind"] == "decomps":                     # no build.sh of its own: the disc build above
+    if item["kind"] == "decomps" and not item.get("recomp"):   # no build.sh of its own: the disc build above
         cmd = ["bash", "-c", _DECOMP_BUILD % {"env": os.path.join(item["path"], ".env")}]
     else:
         pid = _orphan(folder, action)
