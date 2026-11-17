@@ -214,7 +214,15 @@ payload_client() {
 # payload writes (the Pi always deploys client + hub together, so no env write here).
 payload_hub() {
   echo "##STEP:sync"
-  tar --no-xattrs --no-fflags --no-mac-metadata -cf - pluto-pico-hub \
+  # The Pico firmware's SOURCE does not ship (firmware/gp2040-ce is a ~150 MB submodule, and the build
+  # scripts, READMEs and addon sources beside it are not needed to run): the Pi operates with the built
+  # firmware.uf2 + flash.sh under firmware/<mode>/. Everything else in the hub ships as it always did.
+  tar --no-xattrs --no-fflags --no-mac-metadata \
+      --exclude='pluto-pico-hub/firmware/gp2040-ce' --exclude='pluto-pico-hub/firmware/gp2040-build.sh' \
+      --exclude='*.md' --exclude='pluto-pico-hub/firmware/*/build.sh' \
+      --exclude='pluto-pico-hub/firmware/*/fsdata.c' --exclude='pluto-pico-hub/firmware/*/uartinput.*' \
+      --exclude='pluto-pico-hub/firmware/*/.gitignore' \
+      -cf - pluto-pico-hub \
       | $SSH "tar -xf - -C ${REMOTE_ROOT}"
   $SSH "chmod +x ${REMOTE_ROOT}/pluto-pico-hub/run.sh ${REMOTE_ROOT}/pluto-pico-hub/hub.py"
   echo "sync ok"

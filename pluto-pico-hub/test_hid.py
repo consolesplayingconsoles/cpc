@@ -123,6 +123,54 @@ class TestFrame(unittest.TestCase):
 
 # ── HidBridge state machine ─────────────────────────────────────────────────────
 
+class TestModeFrames(unittest.TestCase):
+    def setUp(self):
+        self.link = _StubLink("/dev/null", 115200)
+        self.bridge = HidBridge.__new__(HidBridge)
+        self.bridge.link = self.link
+        self.bridge.repeat = 1
+        self.bridge.device = "/dev/null"
+        self.bridge.baud = 115200
+        self.bridge.dpad = self.bridge.buttons = 0
+        self.bridge.lx = self.bridge.ly = self.bridge.rx = self.bridge.ry = _STICK_MID
+        self.bridge._open = True
+
+    def test_mouse_frame_bytes(self):
+        self.bridge.set_mode("mouse")           # mode 20 = 0x14: xor = FF ^ 04 ^ 14 = EF
+        self.assertEqual(self.link.sent[-1], bytes((0xAA, 0x55, 0xFF, 0x04, 0x14, 0x80, 0x80, 0x80, 0x80, 0xEF)))
+
+    def test_ps3_frame_bytes(self):
+        self.bridge.set_mode("ps3")             # mode 2: xor = FF ^ 04 ^ 02 = F9
+        self.assertEqual(self.link.sent[-1], bytes((0xAA, 0x55, 0xFF, 0x04, 0x02, 0x80, 0x80, 0x80, 0x80, 0xF9)))
+
+    def test_xinput_is_mode_zero(self):
+        self.bridge.set_mode("xinput")          # xor = FF ^ 04 ^ 00 = FB
+        self.assertEqual(self.link.sent[-1], bytes((0xAA, 0x55, 0xFF, 0x04, 0x00, 0x80, 0x80, 0x80, 0x80, 0xFB)))
+
+    def test_every_mode_number_fits_one_byte_and_none_repeat(self):
+        from hid import MODE_VALUES
+        self.assertEqual(len(set(MODE_VALUES.values())), len(MODE_VALUES))
+        self.assertTrue(all(0 <= v <= 255 for v in MODE_VALUES.values()))
+
+    def test_sent_twice(self):
+        self.bridge.set_mode("mouse")
+        self.assertEqual(len(self.link.sent), 2)
+
+    def test_unknown_mode_sends_nothing(self):
+        self.bridge.set_mode("nonsense")
+        self.bridge.set_mode(None)
+        self.assertEqual(self.link.sent, [])
+
+    def test_op_applies_the_mode(self):
+        self.bridge.apply([{"op": "mode", "mode": "mouse"}])
+        self.assertEqual(self.link.sent[-1][2:5], bytes((0xFF, 0x04, 0x14)))
+
+    def test_closed_bridge_sends_nothing(self):
+        self.bridge._open = False
+        self.bridge.set_mode("mouse")
+        self.assertEqual(self.link.sent, [])
+
+
 class TestHidBridgeState(unittest.TestCase):
 
     def setUp(self):

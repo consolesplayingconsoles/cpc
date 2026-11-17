@@ -52,9 +52,9 @@ paths:
               properties:
                 action:
                   type: string
-                  enum: [hold, press, axis, keepalive, pause, stop, play]
+                  enum: [hold, press, axis, mode, keepalive, pause, stop, play]
                   description: >
-                    hold = live press/release; press = one-off pulse; axis = analog
+                    hold = live press/release; press = one-off pulse; mode = switch a Pico's input mode (ps3 | xinput | switch | mouse | ...); axis = analog
                     stick; keepalive = held-sink heartbeat; pause/stop = release;
                     play = paced replay of a dreame route.
                 target:

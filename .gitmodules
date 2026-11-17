@@ -22,3 +22,7 @@
 	path = nodes/local/vflash/homebrew
 	url = https://github.com/consolesplayingconsoles/vflash-homebrew.git
 	ignore = all
+[submodule "pluto-pico-hub/firmware/gp2040-ce"]
+	path = pluto-pico-hub/firmware/gp2040-ce
+	url = https://github.com/consolesplayingconsoles/GP2040-CE.git
+	ignore = all

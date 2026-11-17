@@ -133,7 +133,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.nk { display: flex; flex-direction: column; gap: 16px; width: 100%; height: 100%; padding: 18px; overflow: auto; background: var(--surface); }
+.nk { display: flex; flex-direction: column; gap: 16px; width: 100%; height: 100%; padding: 18px; overflow: auto; }
 .nk-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .nk-id { display: flex; flex-direction: column; gap: 3px; }
 .nk-name { font-family: var(--font-sans); font-size: 15px; font-weight: 650; color: var(--text); }

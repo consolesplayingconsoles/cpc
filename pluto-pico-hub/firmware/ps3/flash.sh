@@ -15,16 +15,17 @@ BAUD="${UART_BAUD:-115200}"
 
 echo "reset-to-BOOTSEL over $DEV (works if our firmware is already running)..."
 stty -F "$DEV" "$BAUD" cs8 -cstopb -parenb -crtscts clocal raw -echo -hupcl || true
-# control frame: dpad=0xFF, btnL=0x01 -> reset_usb_boot
-for _ in 1 2 3 4 5; do printf '\xAA\x55\xFF\x01\x00\xFE' > "$DEV"; sleep 0.3; done
+# control frame: dpad=0xFF, btnL=0x01 -> reset_usb_boot. The 10-byte frame (sticks 0x80,
+# xor 0xFE), the same as bridges/hid.py reboot_to_bootsel; the old 6-byte one no longer
+# passes the firmware's checksum now that the frame carries the sticks.
+for _ in 1 2 3 4 5; do printf '\xAA\x55\xFF\x01\x00\x80\x80\x80\x80\xFE' > "$DEV"; sleep 0.3; done
 sleep 3
 
 if lsusb | grep -qi 2e8a; then
   echo "BOOTSEL reached -> flashing $UF2"
   picotool load -x "$UF2"
-  echo "done. Power-cycle the DC + adapter before testing."
+  echo "done."
 else
-  echo "[NOTE] not in BOOTSEL (first flash, or the Pico isn't running our firmware)."
-  echo "       Hold the Pico's BOOTSEL button, replug, then:  picotool load -x $UF2"
+  echo "no BOOTSEL device (2e8a) on this host's USB after the reset frame"
   exit 2
 fi

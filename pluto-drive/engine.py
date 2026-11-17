@@ -17,6 +17,9 @@ lazily imports pynput (Mac-lab only), so this imports fine on constrained nodes.
 import threading
 import time
 
+# the input modes a CPC Pico can be switched between (the hub maps each name to the firmware's mode number)
+PICO_MODES = ("xinput", "switch", "ps3", "keyboard", "ps4", "xbone", "mdmini", "neogeo", "pcemini", "egret",
+              "astro", "psclassic", "xboxog", "ps5", "generic", "switchpro", "p5general", "mouse")
 DRIVE_TIMEOUT = 6.0   # stop the drive if the client hasn't checked in for this long
 
 
@@ -235,6 +238,22 @@ class DriveEngine:
             return 200, {"ok": False, "error": "axis: %s" % exc}
         return 200, {"ok": True, "axis": name}
 
+    def _do_mode(self, body):
+        """Switch a Pico's input mode (ps3 or mouse). The op rides the live sink to the Pi hub,
+        which sends the board the control frame that stores it. Sinks that aren't a Pico ignore it."""
+        mode = body.get("mode")
+        if mode not in PICO_MODES:
+            return 200, {"ok": False, "error": "unknown mode: %s" % mode}
+        try:
+            sink = self._live_ensure(body.get("target"), {}, dev=body.get("dev"))
+        except ValueError as exc:
+            return 200, {"ok": False, "error": str(exc)}
+        try:
+            sink.apply([{"op": "mode", "mode": mode}])
+        except Exception as exc:
+            return 200, {"ok": False, "error": "mode: %s" % exc}
+        return 200, {"ok": True, "mode": mode}
+
     def _do_press(self, body):
         try:
             mapping = self._mapping(body)
@@ -323,6 +342,8 @@ class DriveEngine:
             return self._do_hold(body)
         if action == "axis":
             return self._do_axis(body)
+        if action == "mode":
+            return self._do_mode(body)
         if action == "play":
             return self._do_play(body)
         return 400, {"error": "unknown action"}

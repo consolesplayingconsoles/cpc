@@ -5,6 +5,7 @@ import RoombaTelemetry from './RoombaTelemetry.vue'
 import RoombaCamera from './RoombaCamera.vue'
 import KindleOutput from './KindleOutput.vue'
 import NaomiControl from './NaomiControl.vue'
+import PicoModeControl from './PicoModeControl.vue'
 import RoombaAiControl from './RoombaAiControl.vue'
 
 type Cell = 'nw' | 'ne' | 'sw' | 'se'
@@ -37,6 +38,8 @@ const shouldShowKindle = computed(() => props.targetId === 'kindle')
 // The NAOMI's cabinet events (coin, test, service) are the target's, not a source's, so
 // they ride the same target-owned slot and stay there whichever source is driving.
 const shouldShowNaomi = computed(() => props.targetId === 'naomi')
+// A GP2040-CE Pico (the 'pi' sink over a UART dev) owns SW too: its mode (gamepad or mouse) is the target's setting.
+const shouldShowPicoMode = computed(() => props.target === 'pi' && !!props.targetDev)
 defineEmits<{ 'drive-error': [msg: string] }>()
 
 const slots = useSlots()
@@ -101,7 +104,7 @@ watch(() => props.active, (on) => { if (!on) maxCell.value = null })
 
 const has = (n: string) => {
   if (n === 'se') return true  // SE is always hardcoded
-  if (n === 'sw') return shouldShowTelemetry.value || shouldShowKindle.value || shouldShowNaomi.value  // SW = the target-owned panel
+  if (n === 'sw') return shouldShowTelemetry.value || shouldShowKindle.value || shouldShowNaomi.value || shouldShowPicoMode.value  // SW = the target-owned panel
   if (n === 'ne') return !!slots['ne'] || shouldShowCamera.value  // NE: source slot or the camera
   return !!slots[n]
 }
@@ -159,7 +162,7 @@ function cellStyle(cell: 'nw' | 'ne' | 'sw' | 'se') {
         </button>
         <slot name="ne"><RoombaCamera v-if="shouldShowCamera" :node="targetDev" :active="active" /></slot>
       </div>
-      <div v-if="shouldShowTelemetry || shouldShowKindle || shouldShowNaomi" class="quad" :class="{ 'quad--headed': headed.sw }" :style="isNarrow ? undefined : cellStyle('sw')">
+      <div v-if="shouldShowTelemetry || shouldShowKindle || shouldShowNaomi || shouldShowPicoMode" class="quad" :class="{ 'quad--headed': headed.sw }" :style="isNarrow ? undefined : cellStyle('sw')">
         <button v-if="canMax('sw')" class="quad-max" :class="{ on: maxCell === 'sw' }"
           @click="toggleMax('sw')"
           :title="maxCell === 'sw' ? 'Exit fullscreen (Esc)' : 'Fullscreen'"
@@ -174,6 +177,8 @@ function cellStyle(cell: 'nw' | 'ne' | 'sw' | 'se') {
           <div class="sw-split__ai"><RoombaAiControl :active="active" :talking="listening" :camera-node="targetDev" /></div>
         </div>
         <NaomiControl v-else-if="shouldShowNaomi" :active="active" :target="target" :source="mapSource" :mapping="mapping"
+          @drive-error="$emit('drive-error', $event)" />
+        <PicoModeControl v-else-if="shouldShowPicoMode" :active="active" :target="target" :target-dev="targetDev"
           @drive-error="$emit('drive-error', $event)" />
         <KindleOutput v-else :active="active" />
       </div>

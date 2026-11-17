@@ -17,7 +17,8 @@ Wire frame (must match the UartInput addon):
       lx ly: LEFT stick  (8-bit, 0x80 = center); rx ry: RIGHT stick
       xor  : dpad ^ btnL ^ btnH ^ lx ^ ly ^ rx ^ ry   (firmware rejects a bad checksum)
 A control frame (dpad=0xFF, btnL=0x01) asks the firmware to reboot to BOOTSEL, so
-the hub can reflash over the same wire with no physical button.
+the hub can reflash over the same wire with no physical button. btnL=0x04 stores the input
+mode numbered in btnH on the board (it reboots into a different one): see set_mode.
 
 Button STATE is held here (like controller.py's Sink) so the same op stream drives
 either target. Pure stdlib, 3.6-safe, ASCII -- runs on the Pi unchanged.
@@ -43,6 +44,14 @@ BUTTON_BITS = {"A": 0, "B": 1, "X": 2, "Y": 3, "L": 4, "R": 5, "Z": 7,
                "SELECT": 8, "START": 9}
 DPAD_BITS = {"D_UP": 0, "D_DOWN": 1, "D_LEFT": 2, "D_RIGHT": 3,
              "UP": 0, "DOWN": 1, "LEFT": 2, "RIGHT": 3}
+# Input modes a CPC Pico can be switched to: name -> the firmware's InputMode number (GP2040-CE's
+# enums.proto; "mouse" is ours). The control frame is dpad=0xFF, btnL=0x04, btnH=<number>.
+MODE_VALUES = {
+    "xinput": 0, "switch": 1, "ps3": 2, "keyboard": 3, "ps4": 4, "xbone": 5, "mdmini": 6,
+    "neogeo": 7, "pcemini": 8, "egret": 9, "astro": 10, "psclassic": 11, "xboxog": 12,
+    "ps5": 13, "generic": 14, "switchpro": 15, "p5general": 16, "mouse": 20,
+}
+SET_MODE_CMD = 0x04
 _STICK_MID = 0x80                          # 8-bit stick center (0x80 << 8 ~ GAMEPAD_JOYSTICK_MID)
 
 
@@ -146,6 +155,8 @@ class HidBridge(object):
                 self.axis(op.get("name"), op.get("x", 0.5), op.get("y", 0.5))
             elif k == "release_all":
                 self.release_all()
+            elif k == "mode":
+                self.set_mode(op.get("mode"))
 
     def pulse(self, btn, ms=80):
         self._set(btn, True)
@@ -196,6 +207,16 @@ class HidBridge(object):
                             self.lx & 0xFF, self.ly & 0xFF, self.rx & 0xFF, self.ry & 0xFF)
         for _ in range(self.repeat):
             self.link.send(frame)
+
+    def set_mode(self, mode):
+        """Switch the Pico's input mode (see MODE_VALUES) over the wire. The board stores it and, when
+        it is a different mode, reboots into it. The frame is sent twice in case the first is
+        caught mid-frame; a repeat on a board that already switched is harmless."""
+        value = MODE_VALUES.get(mode)
+        if value is None or not self._open:
+            return
+        for _ in range(2):
+            self.link.send(self._frame(0xFF, SET_MODE_CMD, value))
 
     def reboot_to_bootsel(self):
         """Reset the Pico to BOOTSEL over the wire (for remote reflash)."""

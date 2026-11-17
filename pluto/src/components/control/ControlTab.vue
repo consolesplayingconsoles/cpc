@@ -75,7 +75,10 @@ const roombaNodes = computed(() =>
 
 function picoLabel(p: { iface?: string; role?: string; alias?: string; chipid: string }): string {
   const iface = (p.iface || '').trim()
-  if (iface && /hid/i.test(p.role || ''))          // "ps3" + Remote HID -> "PS3 HID Pico"
+  // One firmware, two modes (gamepad / mouse) switched at runtime from the target quadrant: it is
+  // one target, "GP2040-CE", whichever mode its binding names.
+  if ((iface === 'ps3' || iface === 'mouse') && /hid/i.test(p.role || '')) return 'GP2040-CE'
+  if (iface && /hid/i.test(p.role || ''))          // any other mode: "xinput" + Remote HID -> "Xinput HID Pico"
     return iface.charAt(0).toUpperCase() + iface.slice(1) + ' HID Pico'
   return p.alias || p.chipid
 }

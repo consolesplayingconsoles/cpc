@@ -15,32 +15,30 @@ upgrader. The Dreamcast is simply the first thing we proved it on.
 The Pi-side sender that feeds the UART is `pluto-pico-hub/bridges/hid.py`.
 
 ## Files (committed)
-- `uartinput.h` / `uartinput.cpp` — the GP2040 addon. Reads the frame
-  `AA 55 <dpad> <btnL> <btnH> <xor>` on `uart0` (GP0 TX / GP1 RX) and writes it
-  into the gamepad state each loop. Frame `dpad=0xFF, btnL=0x01` = reboot to
+- `uartinput.h` / `uartinput.cpp` — the GP2040 addon, now carried by the GP2040-CE fork
+  (`../gp2040-ce`), which is what the build uses. These copies are superseded: delete them
+  once the fork's commit is pushed. It reads the frame
+  `AA 55 <dpad> <btnL> <btnH> <lx> <ly> <rx> <ry> <xor>` on `uart0` (GP0 TX / GP1 RX) and writes
+  it into the gamepad state each loop. Frame `dpad=0xFF, btnL=0x01` = reboot to
   BOOTSEL (remote reflash, no physical button).
 - `fsdata.c` — a stub so the build can skip the web-config UI (`SKIP_WEBBUILD`)
   without a link error.
 - `build.sh` / `flash.sh` — build `firmware.uf2` (gitignored), and flash it over
   the UART.
 
-## One-time GP2040-CE wiring
-`build.sh` syncs our files and compiles, but does **not** patch GP2040 for you.
-Once, in `$GP2040_DIR` (default `~/GP2040-CE`):
+## Build
+There is no hand-wired checkout any more: the firmware is the **GP2040-CE fork**
+(`consolesplayingconsoles/GP2040-CE`) checked out as the `../gp2040-ce` submodule. It carries
+our `UartInput` addon, the mouse driver, and the input mode fixed **per build**
+(`-DCPC_INPUT_MODE`): `ps3` and `mouse` are two modes of the same firmware.
 
-1. Clone GP2040-CE and the Pico SDK (ref **2.2.0**) at `$PICO_SDK_PATH` (default
-   `~/pico-sdk`). apt: `cmake gcc-arm-none-eabi libnewlib-arm-none-eabi
-   libstdc++-arm-none-eabi-newlib build-essential`.
-2. `src/gp2040.cpp`: add `#include "addons/uartinput.h"` with the other addon
-   includes, and `addons.LoadAddon(new UartInput());` with the other input addons.
-3. `CMakeLists.txt`: add `src/addons/uartinput.cpp` to the GP2040-CE sources.
-4. `src/gp2040.cpp`: the mode **is** the role. Where it reads
-   `InputMode inputMode = bootAction.inputMode;`, use
-   `InputMode inputMode = InputMode::INPUT_MODE_PS3;` (`ps3` = present as a PS3 pad;
-   an `xinput` role would be the same addon, different mode). *Cleanup TODO: make
-   it a config default, not a source edit.*
+1. apt: `cmake gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib build-essential`
+2. The Pico SDK (ref **2.2.0**) at `$PICO_SDK_PATH` (default `~/pico-sdk`).
+3. `git submodule update --init pluto-pico-hub/firmware/gp2040-ce`, then
+   `git -C pluto-pico-hub/firmware/gp2040-ce submodule update --init` (its TinyUSB fork and
+   Pico-PIO-USB).
 
-Then `./build.sh` → `firmware.uf2`.
+Then `./build.sh` → `firmware.uf2` (it calls `../gp2040-build.sh INPUT_MODE_PS3`).
 
 ## Flashing
 The Pico runs GP2040 (no MicroPython REPL), so it flashes via BOOTSEL + `picotool`,
