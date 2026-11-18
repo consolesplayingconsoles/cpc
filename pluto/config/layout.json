@@ -2,7 +2,7 @@
   "_comment": "Network-diagram geometry -- hand-edited, like connections.json. The gateway is the origin everything hangs off (assumed 0,0; its spot on the canvas is set in NetworkDiagram.vue). The cloud hub sits directly below it (same x) at `cloudDy`. Every other node is an [dx, dy] pixel offset from its anchor: fromGateway (the LAN) or fromCloud (the cloud cluster). Add a node here + an icon in useIcons + (optionally) an edge in connections.json.",
   "cloudDy": 340,
   "fromGateway": {
-    "pluto": [
+    "eeepc": [
       70,
       -200
     ],

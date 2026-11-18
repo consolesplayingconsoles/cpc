@@ -98,6 +98,7 @@ export const ICONS: Record<string, string> = {
   "3ds": imgSys_3ds,
   c64: imgSys_c64,
   dos: imgSys_dos,
+  eeepc: imgSys_dos,   // the Eee PC node wears the DOS PC icon
   fds: imgSys_fds,
   gb: imgSys_gb,
   mame: imgSys_mame,

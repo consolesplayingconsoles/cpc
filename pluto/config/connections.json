@@ -1,6 +1,6 @@
 [
   {
-    "from": "pluto",
+    "from": "eeepc",
     "to": "gateway",
     "label": "USB Eth"
   },
