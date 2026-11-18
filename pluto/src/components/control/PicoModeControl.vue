@@ -58,7 +58,6 @@ async function setMode(id: string) {
     if (j && j.ok === false) throw new Error(j.error || 'mode failed')
     current.value = id
     try { localStorage.setItem(KEY(), id) } catch { /* convenience only */ }
-    note.value = 'sent'
     emit('drive-error', '')
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'failed'

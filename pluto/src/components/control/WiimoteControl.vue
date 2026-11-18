@@ -5,8 +5,8 @@
 //   SESSION  Start reads the remote's buttons and IR dots and forwards them to the Pi's
 //            drive service: buttons as the mapping file says, the AIM (the 4 IR dots
 //            worked out into a screen position) as an analog axis. Like the Nokia
-//            source: ControlLayout quadrants, status in NW, engine over HTTP, a ping
-//            keeps the session alive, leaving the source ends it.
+//            source: ControlLayout quadrants, status in NW, engine over HTTP, leaving
+//            the source ends the session.
 //   CALIBRATE  aim at the picture's 4 corners and press B at each (the LEDs sit on the
 //            bezel, outside the picture), saved on the Pi.
 import { ref, computed, onMounted, onUnmounted } from 'vue'
@@ -35,7 +35,7 @@ interface Status {
   calibrated?: boolean; cal_step?: number | null; cal_message?: string; drive_ok?: boolean
   aim_mode?: string; sensitivity?: number; invert_x?: boolean; invert_y?: boolean
 }
-type Action = 'pair' | 'stop' | 'disconnect' | 'session_start' | 'session_stop' | 'ping' | 'calibrate' | 'calibrate_reset' | 'aim_options'
+type Action = 'pair' | 'stop' | 'disconnect' | 'session_start' | 'session_stop' | 'calibrate' | 'calibrate_reset' | 'aim_options'
 
 const pairing = ref(false)
 const message = ref('')
@@ -54,7 +54,6 @@ const invertY = ref(false)
 const busy = ref(false)
 const cancelling = ref(false)   // Cancel was pressed; the Pi is still winding the scan down
 let poll: ReturnType<typeof setInterval> | null = null
-let ping: ReturnType<typeof setInterval> | null = null
 
 const connected = computed(() => remotes.value.length > 0)
 const calibrating = computed(() => calStep.value !== null)
@@ -80,7 +79,6 @@ function apply(s: Status | null) {
   sensitivity.value = s.sensitivity ?? 1
   invertX.value = !!s.invert_x
   invertY.value = !!s.invert_y
-  syncPing()
 }
 
 async function engine(action?: Action, extra: Record<string, unknown> = {}): Promise<Status | null> {
@@ -103,12 +101,6 @@ async function engine(action?: Action, extra: Record<string, unknown> = {}): Pro
 }
 
 async function refresh() { apply(await engine()) }
-
-// A session needs a ping inside the Pi's watchdog window, or it ends itself.
-function syncPing() {
-  if (session.value && !ping) ping = setInterval(() => engine('ping'), 20000)
-  if (!session.value && ping) { clearInterval(ping); ping = null }
-}
 
 async function onPair() {
   busy.value = true
@@ -158,7 +150,6 @@ onMounted(() => {
 })
 onUnmounted(() => {
   if (poll) { clearInterval(poll); poll = null }
-  if (ping) { clearInterval(ping); ping = null }
   if (pairing.value) engine('stop')           // leaving the source ends a running scan
   if (session.value) engine('session_stop')   // ... and the session
 })

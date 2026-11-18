@@ -13,8 +13,8 @@ camera's dots). Two jobs live here:
      button means), the AIM as an `axis` (the 4 IR dots worked out into a screen
      position, see wiimote_aim.py). The mapping + sink routing live in pluto-drive.
 
-On-demand + self-reaping, mirroring the Kinect/Nokia bridges: Pluto's WiimoteControl
-talks to the HTTP endpoint; a watchdog ends a session that stops pinging. Runs inside
+On-demand, mirroring the Kinect/Nokia bridges: Pluto's WiimoteControl talks to the HTTP
+endpoint; a session ends on Stop/Disconnect or when the remote goes away. Runs inside
 the hub process (root, under cpc-hub.service) so it can drive bluetoothctl and read
 /dev/input/event*.
 
@@ -28,7 +28,6 @@ the hub process (root, under cpc-hub.service) so it can drive bluetoothctl and r
   POST /engine {action:"aim_options", sensitivity, invert_x, invert_y, edge_reload}
                                                    live, no restart, saved on the Pi
   POST /engine {action:"session_stop"}
-  POST /engine {action:"ping"}                        keeps a session alive
   POST /engine {action:"calibrate"}                   aim at the picture's 4 corners, B at each
   POST /engine {action:"calibrate_reset"}             forget the calibration
 
@@ -55,7 +54,6 @@ SCAN_S = 40              # how long a pairing scan runs (the remote stays discov
 RETRY_S = 3              # do not retry connecting to the same address more often than this
 CONNECT_TIMEOUT_S = 12
 
-WATCHDOG_S = 45          # reap a session that stops pinging (tab closed / asleep)
 DRIVE_URL = "http://127.0.0.1:7702/control/drive"   # the node's local drive service
 CAL_FILE = "/var/lib/cpc-hub/wiimote_calibration.json"
 OPT_FILE = "/var/lib/cpc-hub/wiimote_options.json"      # speed / invert / edge reload, kept across hub restarts
@@ -156,7 +154,6 @@ class WiimoteBridge:
         self._sess = {}              # {mapping, target, dev, aim_axis} of the active session
         self._reader = None
         self._stop = threading.Event()
-        self._last_ping = 0.0
         self._dots = 0               # valid IR dots in the latest frame
         self._raw = None             # latest raw (u, v) aim, only with all 4 dots in view
         self._raw_t = 0.0            # when _raw was last updated
@@ -182,7 +179,6 @@ class WiimoteBridge:
             return False
         srv = HTTPServer(("0.0.0.0", self.port), self._make_handler())
         threading.Thread(target=srv.serve_forever, daemon=True).start()
-        threading.Thread(target=self._watchdog, daemon=True).start()
         threading.Thread(target=self._keepalive_loop, daemon=True).start()
         return True
 
@@ -381,7 +377,6 @@ class WiimoteBridge:
         self._aim = None
         self._cal = None
         self._cal_message = ""
-        self._last_ping = time.time()
         self._reader = threading.Thread(target=self._read_loop, args=(paths,), daemon=True)
         self._reader.start()
         print("  [wiimote] session start (mapping=%s target=%s dev=%s axis=%s)" % (
@@ -520,13 +515,6 @@ class WiimoteBridge:
             if self._running():
                 self._drive({"action": "keepalive"})
 
-    def _watchdog(self):
-        while True:
-            time.sleep(5)
-            if self._running() and time.time() - self._last_ping > WATCHDOG_S:
-                print("  [wiimote] watchdog reap (no ping)")
-                self._stop_session()
-
     # -- status ---------------------------------------------------------------
     def status(self):
         with self._lock:
@@ -593,8 +581,6 @@ class WiimoteBridge:
                         bridge._set_opts(body)
                     elif action == "session_stop":
                         bridge._stop_session()
-                    elif action == "ping":
-                        bridge._last_ping = time.time()
                     elif action == "calibrate":
                         bridge._calibrate_start()
                     elif action == "calibrate_reset":

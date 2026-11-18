@@ -56,6 +56,7 @@ class _Bridge(wm.WiimoteBridge):
     def __init__(self):
         self._tmp = tempfile.mkdtemp()
         wm.CAL_FILE = os.path.join(self._tmp, "cal.json")
+        wm.OPT_FILE = os.path.join(self._tmp, "opts.json")      # never the real /var/lib/cpc-hub
         wm.WiimoteBridge.__init__(self, 0, {})
         self.posts = []
         self._sess = {"mapping": "dreamcast", "target": "pi", "dev": "/dev/ttyAMA0", "aim_axis": "MAIN"}
@@ -147,7 +148,7 @@ class CalibrationTests(unittest.TestCase):
         self.assertEqual(b._cal_message, "Calibrated")
         b.posts = []
         b._aim_frame(_ir(_outline(corners[0])), 0.0)
-        post = b.posts[0]
+        post = [p for p in b.posts if p.get("action") == "axis"][0]     # the corner is an edge: a reload press rides along
         self.assertAlmostEqual(post["x"], 0.0, delta=0.05)     # picture's left edge
         self.assertAlmostEqual(post["y"], 1.0, delta=0.05)     # picture's top = y up
 
@@ -235,7 +236,7 @@ class RelativeAimTests(unittest.TestCase):
         b._set_opts({"sensitivity": 999})
         self.assertEqual(b._opts["sensitivity"], 10.0)
         b._set_opts({"sensitivity": 0})
-        self.assertEqual(b._opts["sensitivity"], 0.05)
+        self.assertEqual(b._opts["sensitivity"], 0.1)
 
 
 if __name__ == "__main__":
