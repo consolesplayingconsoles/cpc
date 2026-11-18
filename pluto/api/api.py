@@ -5624,13 +5624,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             lock = catalogue.card_lock(label)
             raw_mount = card["mount"]
 
+            held = {"v": False}     # this card object's own hold: Repair mounts again to re-list the files, which must not take the lock twice
+
             def mount_locked():
+                if held["v"]:
+                    raw_mount()
+                    return
                 if lock.busy and ctx_emit:
                     ctx_emit("another job is using the %s card: waiting for it to finish" % label)
                 lock.acquire()
+                held["v"] = True
                 try:
                     raw_mount()
                 except BaseException:
+                    held["v"] = False
                     lock.release()
                     raise
 
@@ -5641,7 +5648,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 try:
                     lines = unmount()
                 finally:
-                    lock.release()
+                    if held["v"]:
+                        held["v"] = False
+                        lock.release()
                 return lines + rescan_after()
             card["mount"], card["finish"] = mount_locked, finish_locked
         if kind != "local":
