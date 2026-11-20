@@ -95,7 +95,8 @@ export interface HomebrewItem {
   favourite: boolean                // starred: pinned on top of the list (catalogue/favourites.json)
   decomp: string | null             // config.json's decomp: the folder name of what it is built on (its sibling)
   hasProgress?: boolean             // a decomp item only: its folder has tools/progress.py
-  flavour?: 'decomp' | 'disasm' | 'recomp'   // a Disasm / Decomp / Recomp tab item: which of the three it is
+  flavour?: 'decomp' | 'disasm' | 'recomp' | 'port'   // a Disasm / Decomp / Recomp tab item: which it is (port: a decomp's native port)
+  port?: boolean                    // a decomp's native port: Build copies it to Batocera, Play starts it there, Stop ends it
   recomp?: boolean                  // a recomp (a program for this computer): Build makes it, Play runs it, nothing is sent
 }
 

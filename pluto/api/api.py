@@ -2784,7 +2784,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"items": self._homebrew_items()})
         elif parsed.path == "/homebrew/stop":
             item_id = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
-            self._send(200, {"stopped": homebrew.stop(item_id)})
+            stopped = homebrew.stop(item_id)
+            if not stopped and item_id.endswith("/port"):       # no build running: stop the port on Batocera
+                item = homebrew.find(self._repo_root(), item_id)
+                if item and item.get("port"):
+                    stopped = self._stop_port(item)
+            self._send(200, {"stopped": stopped})
         elif parsed.path == "/homebrew/forget":
             # the terminal tab was closed: drop the finished job's kept console (a running one stays)
             item_id = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
@@ -4417,6 +4422,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(404, {"error": "no such homebrew item"}); return
         if item.get("recomp"):
             self._send(*self._launch_recomp(item)); return
+        if item.get("port"):
+            self._send(*self._launch_port(item)); return
         out = homebrew.last_output(item["id"])
         if not out:
             self._send(400, {"error": "nothing built yet: run Build first"}); return
@@ -4440,6 +4447,71 @@ class Handler(http.server.BaseHTTPRequestHandler):
             subprocess.Popen(["bash", "run.sh"], cwd=folder, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
                              start_new_session=True)
         return 200, {"started": item["id"], "log": log}
+
+    # A decomp's native port plays on the Batocera box: Build copies the program and the disc's files
+    # into PORT_BOX_DIR/<game>/ there (the files only once), Play starts it on the box's screen, Stop
+    # ends it. The program is found by its full path, so Stop ends this port and nothing else.
+    PORT_NODE = "batocera"
+    PORT_BOX_DIR = "/userdata/cpc-ports"
+
+    def _port_box(self, item):
+        return "%s/%s" % (self.PORT_BOX_DIR, item["group"])
+
+    def _port_exe(self, item):
+        out = homebrew.last_output(item["id"])
+        return os.path.basename(out["path"]) if out else None
+
+    def _port_ship(self, item, emit):
+        """Copy the port's last build to Batocera: the program every time, the disc's files when
+        the box has none yet."""
+        out = homebrew.last_output(item["id"])
+        if not out:
+            raise catalogue_send.NotAvailable("the build announced no program (##OUTPUT:)")
+        prefix = self._node_ssh_prefix(self.PORT_NODE)
+        if not prefix:
+            raise catalogue_send.NotAvailable("Batocera has no SSH settings in its .env")
+        native, exe = os.path.split(out["path"])
+        box = self._port_box(item)
+        emit("step", "copy")
+        rc, _ = self._node_ssh(self.PORT_NODE, ["test", "-f", box + "/data/1ST_READ.BIN"], timeout=30, connect_timeout=10)
+        members = [exe] if rc == 0 else [exe, "data"]
+        emit("line", "copy to Batocera %s: %s" % (box, "the program" if rc == 0 else "the program and the disc's files"))
+        import shlex
+        env = dict(os.environ, COPYFILE_DISABLE="1")         # no macOS ._ files in the archive
+        tar = subprocess.Popen(["tar", "--no-xattrs", "-C", native, "-cf", "-"] + members, stdout=subprocess.PIPE, env=env)
+        r = subprocess.run(prefix + ["mkdir -p %s && tar -C %s -xf -" % (shlex.quote(box), shlex.quote(box))],
+                           stdin=tar.stdout, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=3600)
+        tar.stdout.close()
+        tar.wait()
+        if r.returncode or tar.returncode:
+            raise catalogue_send.NotAvailable("copy to Batocera failed: %s" % (r.stdout or "").strip()[-300:])
+        emit("line", "on Batocera: %s/%s" % (box, exe))
+
+    def _launch_port(self, item):
+        """Play a port on Batocera: quit the game that runs there, then start the program on the box's
+        screen, detached. (status, body)."""
+        exe = self._port_exe(item)
+        if not exe:
+            return 400, {"error": "nothing built yet: run Build first"}
+        box = self._port_box(item)
+        script = (self._BATOCERA_QUIT +
+                  'pkill -f "$1/[%s]%s"; sleep 0.5; '
+                  '[ -x "$1/%s" ] || { echo "the port is not on Batocera yet: run Build first"; exit 1; }; '
+                  'cd "$1" && DISPLAY=:0 nohup "$1/%s" --data "$1/data" >"$1/port.log" 2>&1 </dev/null & '
+                  'echo started') % (exe[0], exe[1:], exe, exe)
+        rc, out = self._node_ssh(self.PORT_NODE, ["sh", "-c", script, "_", box], timeout=60, connect_timeout=10)
+        if rc != 0:
+            return 502, {"error": (out or "could not reach Batocera").strip().splitlines()[-1]}
+        return 200, {"started": item["id"], "log": box + "/port.log"}
+
+    def _stop_port(self, item):
+        """End the port on Batocera. True when it was running."""
+        exe = self._port_exe(item)
+        if not exe:
+            return False                                # never built here: nothing of it runs on the box
+        rc, _ = self._node_ssh(self.PORT_NODE, ["pkill", "-f", "%s/[%s]%s" % (self._port_box(item), exe[0], exe[1:])],
+                               timeout=30, connect_timeout=10)
+        return rc == 0
 
     def _homebrew_script(self, item, action, emit):
         """Run build.sh / deploy.sh, streaming output. ##STEP: -> step, ##OUTPUT: -> recorded.
@@ -4594,6 +4666,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 emit("line", "using the last build (%s)" % last["at"].replace("T", " "))
             elif not self._homebrew_script(item, "build", emit):
                 emit("done", "failed:build"); return
+            if item.get("port"):                    # a native port: to Batocera, nothing to publish
+                self._port_ship(item, emit)
+                emit("done", "ok"); return
             game = item.get("game")
             system = item.get("system")
             name = None
@@ -6152,6 +6227,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception:
             return None
 
+    def _node_ssh_prefix(self, node_id):
+        """The ssh command line for a node (its .env: CUSTOM_SSH_ALIAS wins, else SSH_USER@HOST_IP + key), or None."""
+        cfg   = self.__class__.node_roster.get(node_id) or {}
+        alias = (cfg.get("CUSTOM_SSH_ALIAS") or "").strip()
+        host  = (cfg.get("HOST_IP") or "").strip()
+        if alias:
+            return ["ssh", alias]
+        if host and host not in ("localhost", "127.0.0.1"):
+            user = (cfg.get("SSH_USER") or "").strip()
+            key  = os.path.expanduser((cfg.get("SSH_KEY_PATH") or "~/.ssh/id_rsa").strip())
+            return ["ssh", "-i", key, "-o", "StrictHostKeyChecking=no", "%s@%s" % (user, host)]
+        return None
+
     def _node_ssh(self, node_id, argv, timeout=300, connect_timeout=None, stdin=None):
         """Run argv on a node over SSH, using its .env -- the same local/remote
         rule as deploy.sh: CUSTOM_SSH_ALIAS wins, else SSH_USER@HOST_IP + key.
@@ -6161,16 +6249,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         dropbear drops any command line over ~9000 chars.
         Returns (returncode, combined_output)."""
         import shlex
-        cfg   = self.__class__.node_roster.get(node_id) or {}
-        alias = (cfg.get("CUSTOM_SSH_ALIAS") or "").strip()
-        host  = (cfg.get("HOST_IP") or "").strip()
-        if alias:
-            prefix = ["ssh", alias]
-        elif host and host not in ("localhost", "127.0.0.1"):
-            user = (cfg.get("SSH_USER") or "").strip()
-            key  = os.path.expanduser((cfg.get("SSH_KEY_PATH") or "~/.ssh/id_rsa").strip())
-            prefix = ["ssh", "-i", key, "-o", "StrictHostKeyChecking=no", "%s@%s" % (user, host)]
-        else:
+        prefix = self._node_ssh_prefix(node_id)
+        if not prefix:
             return (1, "node '%s' has no ssh config" % node_id)
         if connect_timeout:
             prefix[1:1] = ["-o", "ConnectTimeout=%d" % connect_timeout]

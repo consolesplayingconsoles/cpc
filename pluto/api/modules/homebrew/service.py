@@ -633,6 +633,44 @@ echo "##OUTPUT:$PWD/build/disc-cbuild/$(basename "$GDI")"
 """
 
 
+# A decomp's native port (the Virtua Tennis way: port/runtime/ and the step-10 tools): the game's C
+# built into a Linux program in the decomp's build container (PORT_IMAGE in its .env), then every
+# file of the player's own disc (GDI) into the folder the program reads. Pluto then copies both to
+# the Batocera box (the API's _port_ship), where Play starts it.
+_PORT_BUILD = """set -eu
+[ -f .env ] && . ./.env
+: "${GDI:?GDI is not set: put GDI=\\"/path/to/your original .gdi\\" in the .env of this decomp (%(env)s)}"
+: "${PORT_IMAGE:?PORT_IMAGE is not set: put PORT_IMAGE=\\"<the port build container>\\" in the .env of this decomp (%(env)s)}"
+echo "##STEP:build"
+set -o pipefail
+# the program is named after the game (native_build.py's last line: link: build/native/<game>)
+docker run --rm -v "$PWD":/work -w /work "$PORT_IMAGE" python3 tools/10-port/native_build.py 2>&1 | while IFS= read -r l; do
+    echo "$l"
+    case "$l" in "link: "*) echo "##OUTPUT:$PWD/${l#link: }" ;; esac
+done
+echo "##STEP:data"
+python3 tools/10-port/extract_disc.py "$GDI"
+"""
+
+
+def _port_buildable(folder):
+    """Whether a decomp has a native port: its port/runtime/ and the step-10 build tool."""
+    return (os.path.isdir(os.path.join(folder, "port", "runtime"))
+            and os.path.isfile(os.path.join(folder, "tools", "10-port", "native_build.py")))
+
+
+def _port_item(repo_root, node, game, name, folder):
+    """A decomp's native port as an item of its own, next to its decomp: Build (build it, copy it to
+    Batocera), Play (start it there), Stop. Its id is the decomp's plus /port."""
+    it = _decomp_item(repo_root, node, game, name, folder)
+    it.update(id=it["id"] + "/port", name="port", title="port", named=False, flavour="port", port=True,
+              actions=["build"], hasProgress=False, system=None, game=it.get("game"))
+    it["running"] = is_running(it["id"]) or job(it["id"]) is not None
+    it["runningSend"] = (job(it["id"]) or Job(None, None)).node
+    it["output"] = last_output(it["id"])
+    return it
+
+
 def _decomp_buildable(folder):
     """Whether a decomp can make a disc: its Makefile has the template's `disc` target."""
     try:
@@ -660,6 +698,8 @@ def discover(repo_root):
                 if _is_decomp(mod):
                     if _kickoff(folder) or _mine(repo_root, folder):   # a kick-off decomp, or our own; others' disassemblies are not tracked
                         items.append(_decomp_item(repo_root, node, game, mod, folder))
+                        if _port_buildable(folder):
+                            items.append(_port_item(repo_root, node, game, mod, folder))
                     continue
                 if mod == "vanilla":
                     continue
@@ -733,7 +773,9 @@ def start(repo_root, item, action):
     env["PYTHONUNBUFFERED"] = "1"
     if is_running(item["id"]):
         raise RuntimeError("%s is already running" % item["id"])
-    if item["kind"] == "decomps" and not item.get("recomp"):   # no build.sh of its own: the disc build above
+    if item.get("port"):                                       # the native port's build above
+        cmd = ["bash", "-c", _PORT_BUILD % {"env": os.path.join(item["path"], ".env")}]
+    elif item["kind"] == "decomps" and not item.get("recomp"):   # no build.sh of its own: the disc build above
         cmd = ["bash", "-c", _DECOMP_BUILD % {"env": os.path.join(item["path"], ".env")}]
     else:
         pid = _orphan(folder, action)

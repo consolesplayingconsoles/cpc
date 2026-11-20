@@ -174,6 +174,19 @@ function toggleFold(node: string) {
   try { localStorage.setItem(FOLDED_KEY, JSON.stringify(folded.value)) } catch { /* ignore */ }
 }
 const shown = (sec: { node: string }) => !folded.value.includes(sec.node)
+
+// Folded games, the same way inside a console: a game with many mods folds to its heading,
+// which then says how many it holds and whether one of them is building.
+const FOLDED_GROUPS_KEY = 'cpc.homebrew.foldedGroups'
+const foldedGroups = ref<string[]>([])
+try { foldedGroups.value = JSON.parse(localStorage.getItem(FOLDED_GROUPS_KEY) || '[]') } catch { /* ignore */ }
+const groupKey = (node: string, group: string) => node + '/' + group
+function toggleGroup(node: string, group: string) {
+  const k = groupKey(node, group)
+  foldedGroups.value = foldedGroups.value.includes(k) ? foldedGroups.value.filter(g => g !== k) : [...foldedGroups.value, k]
+  try { localStorage.setItem(FOLDED_GROUPS_KEY, JSON.stringify(foldedGroups.value)) } catch { /* ignore */ }
+}
+const groupShown = (node: string, group: string) => !group || !foldedGroups.value.includes(groupKey(node, group))
 const countOf = (sec: { groups: [string, HomebrewItem[]][] }) =>
   sec.groups.reduce((n, [, list]) => n + list.length, 0)
 
@@ -192,7 +205,10 @@ const selectedId = computed(() => {
 const selected = computed(() => items.value.find(i => i.id === selectedId.value) ?? null)
 
 function open(it: HomebrewItem, replace = false) {
-  const rest = it.group ? [it.node, it.group, it.name] : [it.node, it.name]
+  // the URL is the item's id without its kind (node/kind/group/name, a port's /port included),
+  // so selectedId above rebuilds exactly that id
+  const [node, , ...tail] = it.id.split('/')
+  const rest = [node, ...tail]
   const to = { name: 'homebrew', params: { kind: it.kind, rest } }
   if (replace) router.replace(to)
   else router.push(to)
@@ -254,6 +270,7 @@ const FLAVOUR_TITLE: Record<string, string> = {
   decomp: 'Decomp: C that rebuilds the game',
   disasm: 'Disassembly: assembly that rebuilds the game',
   recomp: 'Recomp: the game translated into a program for this computer',
+  port: 'Port: the decomp built into a program that plays on Batocera',
 }
 
 const { openRun } = useRuns()
@@ -359,7 +376,8 @@ function follow(it: HomebrewItem, node: string | undefined, attach: boolean) {
 
 async function stop() {
   const it = selected.value
-  if (it && isRunning(it.id)) {
+  // a port stops on Batocera too when no build of it runs here
+  if (it && (isRunning(it.id) || it.port)) {
     try { await stopItem(it.id) } catch { /* the stream reports the outcome */ }
   }
 }
@@ -472,7 +490,10 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
           </UiSectionHead>
           <template v-if="shown(sec)">
           <template v-for="[group, list] in sec.groups" :key="group">
-            <h4 v-if="group" class="hb__group">
+            <h4 v-if="group" class="hb__group hb__group--fold" role="button" tabindex="0"
+                :aria-expanded="groupShown(sec.node, group)" :title="groupShown(sec.node, group) ? 'Fold' : 'Unfold'"
+                @click="toggleGroup(sec.node, group)" @keydown.enter="toggleGroup(sec.node, group)">
+              <span class="hb__chev" :class="{ 'is-open': groupShown(sec.node, group) }" aria-hidden="true">▸</span>
               <!-- a port's heading IS the conversion: the two consoles' own marks, in order.
                    Names only where a system has no mark to show (hover names either). -->
               <span v-if="list[0].kind === 'ports'" class="hb__group-title hb__pair">
@@ -483,8 +504,13 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
                 <span v-else>{{ list[0].nodeName }}</span>
               </span>
               <span v-else class="hb__group-title">{{ list[0].game?.title ?? group }}</span>
+              <template v-if="!groupShown(sec.node, group)">
+                <UiStatusDot v-if="list.some(i => isRunning(i.id))" state="ok" title="A build is running in here" />
+                <span class="hb__group-count">{{ list.length }}</span>
+              </template>
               <span class="hb__group-dir">{{ group }}</span>
             </h4>
+            <template v-if="groupShown(sec.node, group)">
             <div
               v-for="it in list" :key="it.id" role="button" tabindex="0"
               class="hb__row" :class="{ 'is-open': it.id === selectedId }"
@@ -497,9 +523,9 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
               <template v-if="it.kind === 'decomps'">
                 <!-- which of the three it is: a decomp (C that rebuilds the game), a disassembly (assembly that does) or a
                      recomp (the game's code translated into a program for this computer) -->
-                <UiPill :tone="it.flavour === 'recomp' ? 'accent' : 'idle'" :title="FLAVOUR_TITLE[it.flavour ?? 'decomp']">{{ it.flavour ?? 'decomp' }}</UiPill>
+                <UiPill :tone="it.flavour === 'recomp' || it.flavour === 'port' ? 'accent' : 'idle'" :title="FLAVOUR_TITLE[it.flavour ?? 'decomp']">{{ it.flavour ?? 'decomp' }}</UiPill>
                 <UiPill v-if="metrics[it.id]" :style="progressStyle(metrics[it.id].pct)" :title="'Main metric: ' + metrics[it.id].label">{{ metrics[it.id].pct }}</UiPill>
-                <UiPill v-else-if="!it.hasProgress" tone="idle" title="No tools/progress.py">No report</UiPill>
+                <UiPill v-else-if="!it.hasProgress && !it.port" tone="idle" title="No tools/progress.py">No report</UiPill>
               </template>
               <UiPill v-else-if="it.release" :tone="it.release.stable ? 'ok' : 'idle'">v{{ it.release.version }}</UiPill>
               <!-- never publishable (someone else's IP) reads differently from not yet released -->
@@ -508,6 +534,7 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
               <span class="hb__row-name">{{ it.name }}</span>
               <UiStatusDot v-if="isRunning(it.id)" state="ok" title="Running" />
             </div>
+            </template>
           </template>
           </template>
         </section>
@@ -564,7 +591,6 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
             <label v-for="p in selected.params" :key="p.key" class="hb__param">
               <span class="hb__key">{{ p.key }}<UiPill v-if="p.scope === 'game'" tone="idle" class="hb__shared" title="Shared by every mod of this game">shared</UiPill></span>
               <input v-model="draft[p.key]" class="hb__input" :placeholder="p.default" spellcheck="false" />
-              <span v-if="p.help" class="hb__help">{{ p.help }}</span>
             </label>
             <div class="hb__save">
               <span v-if="saveError" class="hb__state--bad">{{ saveError }}</span>
@@ -601,6 +627,11 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
 .hb__pair { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .hb__pair-ic { width: 20px; height: 20px; object-fit: contain; }
 .hb__pair-arrow { font-size: 11px; line-height: 1; }
+.hb__group--fold { cursor: pointer; user-select: none; }
+.hb__group--fold:hover .hb__group-title { color: var(--accent); }
+.hb__chev { flex: none; display: inline-block; width: 10px; font-size: 10px; color: var(--text-faint); transition: transform 0.12s; }
+.hb__chev.is-open { transform: rotate(90deg); }
+.hb__group-count { font-family: var(--font-mono); font-size: 10.5px; font-weight: 400; color: var(--text-muted); }
 .hb__group-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .hb__group-dir { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; font-weight: 400; color: var(--text-faint); white-space: nowrap; }
 .hb__row { display: flex; align-items: baseline; gap: var(--sp-2); width: 100%; padding: 7px var(--sp-4) 7px var(--sp-5); font: inherit; text-align: left; color: var(--text); background: none; border: 0; cursor: pointer; }
@@ -625,7 +656,6 @@ function openStudio() { window.open('http://127.0.0.1:8765/', '_blank', 'noopene
 .hb__key { font-family: var(--font-mono); font-size: 12px; color: var(--text); word-break: break-all; }
 .hb__input { font-family: var(--font-mono); font-size: 12.5px; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--text); min-width: 0; }
 .hb__input:focus { outline: none; border-color: var(--accent); }
-.hb__help { grid-column: 2; font-size: 12px; color: var(--text-faint); }
 .hb__save { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-3); margin-top: var(--sp-3); }
 .hb__hint { font-size: 12px; color: var(--text-faint); }
 .hb__state { padding: var(--sp-4) var(--sp-5); font-size: 13px; color: var(--text-muted); }

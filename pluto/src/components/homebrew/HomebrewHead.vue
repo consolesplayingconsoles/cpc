@@ -109,11 +109,11 @@ const checked = computed(() => downloads.value?.checked.replace('T', ' ').slice(
            to match. RomCard draws the buttons (the same ones the Media drawer uses for
            a copy); `flat` keeps it frameless inside this header. -->
         <RomCard
-          flat group="Build" build play open stop :stop-active="running"
+          flat group="Build" build play open stop :stop-active="running || !!item.port"
           :send-targets="sendTargets" :send-busy="sendBusy ?? null"
           :busy="busy" :send-locked="sendLocked" :building="building"
           :build-title="buildTitle"
-          play-title="Start the last build from its dev tree in the desktop emulator (no rebuild)"
+          :play-title="item.port ? 'Play it on Batocera (the last build; the game running there quits first)' : 'Start the last build from its dev tree in the desktop emulator (no rebuild)'"
           open-title="Open the project folder"
           :error="error ?? null"
           class="hbh__actions"
